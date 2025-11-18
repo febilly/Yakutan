@@ -5,14 +5,31 @@ OSC (Open Sound Control) 管理模块
 import asyncio
 import logging
 import time
+import threading
+from typing import Optional
+from dataclasses import dataclass
 from pythonosc import udp_client
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import AsyncIOOSCUDPServer
 
+__all__ = ["OSCManager", "osc_manager"]
+
 logger = logging.getLogger(__name__)
 
 # 定义发送到VRChat聊天框的最大文本长度
-MAX_LENGTH=144
+MAX_LENGTH = 144
+
+# 消息优先级
+PRIORITY_HIGH = 1  # 最终确认的消息
+PRIORITY_LOW = 2   # ongoing 消息
+
+@dataclass
+class QueuedMessage:
+    """待发送的消息实体"""
+    text: str
+    ongoing: bool
+    priority: int
+    timestamp: float
 
 class OSCManager:
     """OSC管理器单例类，负责OSC服务器和客户端的管理"""
@@ -21,12 +38,12 @@ class OSCManager:
     _server = None
     _client = None
     
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super(OSCManager, cls).__new__(cls)
         return cls._instance
     
-    def __init__(self):
+    def __init__(self, truncate_messages: Optional[bool] = None):
         if not hasattr(self, '_initialized'):
             self._initialized = True
             self._server = None
@@ -42,13 +59,17 @@ class OSCManager:
             self._osc_server_host = "127.0.0.1"
             self._osc_server_port = 9001
             
-            # 速率限制配置（令牌桶算法）
-            self._rate_limit_interval = 2  # 每条消息间隔
-            self._rate_limit_burst = 2  # 爆发容量
-            self._tokens = self._rate_limit_burst  # 当前令牌数
-            self._last_refill_time = time.time()  # 上次补充令牌的时间
+            # 发送节流配置（仅保留一个待发消息）
+            self._cooldown_seconds = 1.5  # 发送冷却时间（秒）
+            self._last_send_time = 0.0  # 上次发送时间
+            self._pending_message: Optional[QueuedMessage] = None
+            self._pending_timer: Optional[threading.Timer] = None
+            self._state_lock = threading.Lock()
+            self._truncate_enabled = True
             
             logger.info("[OSC] OSC管理器已初始化")
+        if truncate_messages is not None:
+            self._truncate_enabled = bool(truncate_messages)
     
     def set_mute_callback(self, callback):
         """
@@ -117,6 +138,13 @@ class OSCManager:
     
     async def stop_server(self):
         """停止OSC服务器"""
+        # 取消待处理消息
+        with self._state_lock:
+            if self._pending_timer is not None:
+                self._pending_timer.cancel()
+                self._pending_timer = None
+            self._pending_message = None
+        
         if self._transport is not None:
             self._transport.close()
             logger.info("[OSC] OSC服务器transport已关闭")
@@ -137,6 +165,9 @@ class OSCManager:
         Returns:
             截断后的文本
         """
+        if not getattr(self, "_truncate_enabled", True):
+            return text
+
         if len(text) <= max_length:
             return text
         
@@ -169,41 +200,73 @@ class OSCManager:
         
         return text
     
-    def _refill_tokens(self):
-        """
-        补充令牌（令牌桶算法）
-        根据经过的时间补充令牌，但不超过爆发容量
-        """
-        current_time = time.time()
-        elapsed_time = current_time - self._last_refill_time
-        
-        # 计算应该补充的令牌数
-        tokens_to_add = int(elapsed_time / self._rate_limit_interval)
-        tokens_to_add = min(tokens_to_add, self._rate_limit_burst - self._tokens)
-        
-        if tokens_to_add >= 1:
-            self._tokens = self._tokens + tokens_to_add
-            self._last_refill_time += tokens_to_add * self._rate_limit_interval
-        
-        # 保证elapsed_time不会过大
-        self._last_refill_time = max(self._last_refill_time, current_time - self._rate_limit_interval * (self._rate_limit_burst - self._tokens))
+    def _schedule_pending_send_locked(self):
+        """在锁内调用，安排发送待处理消息"""
+        if self._pending_message is None:
+            self._pending_timer = None
+            return
+
+        if self._pending_timer is not None:
+            self._pending_timer.cancel()
+
+        wait = self._cooldown_seconds - (time.time() - self._last_send_time)
+        if wait <= 0:
+            wait = 0.01  # 避免忙等待，稍作延迟
+
+        timer = threading.Timer(wait, self._flush_pending_message)
+        timer.daemon = True
+        self._pending_timer = timer
+        timer.start()
+
+    def _flush_pending_message(self):
+        """发送当前待处理的消息（如果冷却结束）"""
+        with self._state_lock:
+            message = self._pending_message
+            if not message:
+                self._pending_timer = None
+                return
+
+            elapsed = time.time() - self._last_send_time
+            if elapsed < self._cooldown_seconds:
+                # 冷却尚未结束，重新安排
+                logger.debug("[OSC] 冷却未结束，延后发送待处理消息")
+                self._schedule_pending_send_locked()
+                return
+
+            # 可以发送
+            self._pending_message = None
+            self._pending_timer = None
+            self._last_send_time = time.time()
+            text = message.text
+            ongoing = message.ongoing
+
+        self._send_message_immediately(text, ongoing)
     
-    def _can_send(self, force_send: bool) -> bool:
+    def _send_message_immediately(self, text: str, ongoing: bool):
         """
-        检查是否可以发送 ongoing 消息（速率限制）
+        立即发送消息到VRChat聊天框（内部方法）
         
-        Returns:
-            如果有可用令牌返回 True，否则返回 False
+        Args:
+            text: 要发送的文本
+            ongoing: 是否正在输入中
         """
-        self._refill_tokens()
-        
-        if not force_send and self._tokens <= 0:
-            return False
-        
-        self._tokens -= 1
-        return True
+        try:
+            client = self.get_udp_client()
+            client.send_message("/chatbox/typing", ongoing)
+            client.send_message("/chatbox/input", [text, True, not ongoing])
+            logger.info(f"[OSC] 发送聊天框消息: '{text}' (ongoing={ongoing})")
+        except Exception as e:
+            logger.error(f"[OSC] 发送OSC消息失败: {e}")
     
     async def set_typing(self, typing: bool):
+        """兼容旧调用方式的异步接口"""
+        if hasattr(asyncio, "to_thread"):
+            await asyncio.to_thread(self.set_typing_sync, typing)
+        else:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self.set_typing_sync, typing)
+
+    def set_typing_sync(self, typing: bool):
         """
         设置 VRChat 聊天框的 typing 状态
         
@@ -218,32 +281,56 @@ class OSCManager:
             logger.error(f"[OSC] 设置 typing 状态失败: {e}")
     
     async def send_text(self, text: str, ongoing: bool):
-        """
-        发送文本到VRChat聊天框
-        
-        Args:
-            text: 要发送的文本
-            ongoing: 是否正在输入中（ongoing 消息会受到速率限制）
-        """
-        # 对 ongoing 消息实施速率限制
-        if ongoing:
-            if not self._can_send(not ongoing):
-                logger.debug(f"[OSC] ongoing 消息被速率限制阻止")
-                return
-            else:
-                logger.debug(f"[OSC] 发送ongoing消息，当前令牌数: {self._tokens}")
-        
+        """兼容旧调用方式的异步接口"""
+        if hasattr(asyncio, "to_thread"):
+            await asyncio.to_thread(self.send_text_sync, text, ongoing)
+        else:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self.send_text_sync, text, ongoing)
+
+    def send_text_sync(self, text: str, ongoing: bool):
+        """发送文本到 VRChat（带冷却，最多保留一个待发消息）"""
         # 截断过长的文本
         text = self._truncate_text(text, max_length=MAX_LENGTH)
         
-        try:
-            client = self.get_udp_client()
-            client.send_message("/chatbox/typing", ongoing)
-            client.send_message("/chatbox/input", [text, True, not ongoing])
-        except Exception as e:
-            logger.error(f"[OSC] 发送OSC消息失败: {e}")
-        finally:
-            logger.info(f"[OSC] 发送聊天框消息: '{text}' (ongoing={ongoing})")
+        # 确定优先级
+        priority = PRIORITY_LOW if ongoing else PRIORITY_HIGH
+
+        message = QueuedMessage(
+            text=text,
+            ongoing=ongoing,
+            priority=priority,
+            timestamp=time.time(),
+        )
+
+        send_now = None
+
+        with self._state_lock:
+            now = time.time()
+            elapsed = now - self._last_send_time
+            can_send_now = elapsed >= self._cooldown_seconds and self._pending_message is None
+
+            if can_send_now:
+                self._last_send_time = now
+                send_now = message
+            else:
+                if self._pending_message is not None:
+                    if priority == PRIORITY_LOW and self._pending_message.priority == PRIORITY_HIGH:
+                        logger.debug("[OSC] 丢弃低优先级消息，已有高优先级待发送")
+                        return
+                    logger.debug(
+                        "[OSC] 替换待发送消息 priority %s -> %s",
+                        self._pending_message.priority,
+                        priority,
+                    )
+                else:
+                    logger.debug("[OSC] 新增待发送消息 (priority=%s)", priority)
+
+                self._pending_message = message
+                self._schedule_pending_send_locked()
+
+        if send_now is not None:
+            self._send_message_immediately(send_now.text, send_now.ongoing)
 
 
 # 创建全局单例实例

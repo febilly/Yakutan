@@ -7,6 +7,9 @@ let autoSaveTimer = null;
 // 配置键名
 const CONFIG_STORAGE_KEY = 'vrchat_translator_config';
 
+// 待显示的警告消息（用于自动切换翻译API）
+let pendingWarningMessage = null;
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
     loadConfigFromLocalStorage();
@@ -461,6 +464,7 @@ async function startService() {
     const startBtn = document.getElementById('start-btn');
     startBtn.disabled = true;
     startBtn.textContent = '启动中...';
+    pendingWarningMessage = null;
     
     try {
         // 先检查 DashScope API Key
@@ -505,50 +509,24 @@ async function startService() {
             return;
         }
         
-        // 检查是否启用翻译且使用 DeepL API
+        // 检查翻译API所需的 Key 是否齐全
         const enableTranslation = document.getElementById('enable-translation').checked;
-        const translationApiType = document.getElementById('translation-api-type').value;
-        
-        if (enableTranslation && translationApiType === 'deepl') {
-            const deeplKey = document.getElementById('deepl-api-key').value.trim();
-            
-            if (!deeplKey) {
-                showMessage('❌ 错误：选择了 DeepL 翻译，必须配置 DeepL API Key！', 'error');
-                startBtn.disabled = false;
-                startBtn.textContent = '启动服务';
-                
-                // 展开API Keys配置区域
-                const apiKeysSection = document.getElementById('api-keys');
-                if (apiKeysSection.classList.contains('collapsed')) {
-                    toggleCollapsible('api-keys');
-                }
-                
-                // 高亮并震动 DeepL API Key 输入框
-                highlightAPIKeyInput('deepl-api-key');
-                
-                return;
-            }
-        }
-        
-        // 检查是否启用翻译且使用 OpenRouter API
-        if (enableTranslation && translationApiType === 'openrouter') {
-            const openrouterKey = document.getElementById('openrouter-api-key').value.trim();
-            
-            if (!openrouterKey) {
-                showMessage('❌ 错误：选择了 OpenRouter 翻译，必须配置 OpenRouter API Key！', 'error');
-                startBtn.disabled = false;
-                startBtn.textContent = '启动服务';
-                
-                // 展开API Keys配置区域
-                const apiKeysSection = document.getElementById('api-keys');
-                if (apiKeysSection.classList.contains('collapsed')) {
-                    toggleCollapsible('api-keys');
-                }
-                
-                // 高亮并震动 OpenRouter API Key 输入框
-                highlightAPIKeyInput('openrouter-api-key');
-                
-                return;
+        const translationApiSelect = document.getElementById('translation-api-type');
+        let translationApiType = translationApiSelect.value;
+        const deeplKey = document.getElementById('deepl-api-key').value.trim();
+        const openrouterKey = document.getElementById('openrouter-api-key').value.trim();
+
+        if (enableTranslation) {
+            const requiresDeeplKey = translationApiType === 'deepl' && !deeplKey;
+            const requiresOpenrouterKey = translationApiType === 'openrouter' && !openrouterKey;
+
+            if (requiresDeeplKey || requiresOpenrouterKey) {
+                translationApiType = 'google_dictionary';
+                translationApiSelect.value = translationApiType;
+                translationApiSelect.dispatchEvent(new Event('change'));
+                saveConfigToLocalStorage();
+                pendingWarningMessage = '未检测到所选翻译接口的 API Key，已自动切换为 Google Dictionary。';
+                showMessage(`⚠️ ${pendingWarningMessage}`, 'warning');
             }
         }
         
@@ -567,8 +545,8 @@ async function startService() {
         // 准备 API Keys
         const apiKeys = {
             dashscope: dashscopeKey,
-            deepl: document.getElementById('deepl-api-key').value.trim(),
-            openrouter: document.getElementById('openrouter-api-key').value.trim()
+            deepl: deeplKey,
+            openrouter: openrouterKey
         };
         
         // 启动服务
@@ -583,7 +561,12 @@ async function startService() {
         const result = await response.json();
         
         if (result.success) {
-            showMessage('✅ 服务启动成功', 'success');
+            if (pendingWarningMessage) {
+                showMessage(`⚠️ ${pendingWarningMessage}服务已启动成功。`, 'warning');
+                pendingWarningMessage = null;
+            } else {
+                showMessage('✅ 服务启动成功', 'success');
+            }
             setTimeout(updateStatus, 500);
         } else {
             showMessage('❌ 服务启动失败: ' + result.message, 'error');
@@ -594,6 +577,7 @@ async function startService() {
         showMessage('❌ 启动服务失败', 'error');
         startBtn.disabled = false;
     } finally {
+        pendingWarningMessage = null;
         startBtn.textContent = '启动服务';
     }
 }
@@ -697,10 +681,10 @@ function showMessage(text, type) {
     messageEl.textContent = text;
     messageEl.className = 'message ' + type;
     
-    // 3秒后自动隐藏
+    // 5秒后自动隐藏
     setTimeout(() => {
         messageEl.className = 'message';
-    }, 3000);
+    }, 5000);
 }
 
 // 折叠/展开面板

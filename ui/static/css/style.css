@@ -406,6 +406,16 @@ input:checked + .slider:before {
     margin-bottom: 15px;
 }
 
+.message.warning {
+    background-color: #fff8db;
+    color: #8a6d3b;
+    border: 1px solid #ffe58f;
+    max-height: 200px;
+    opacity: 1;
+    padding: 10px 15px;
+    margin-bottom: 15px;
+}
+
 .message.error {
     background-color: #f8d7da;
     color: #721c24;
