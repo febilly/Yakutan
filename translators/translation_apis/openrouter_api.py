@@ -15,7 +15,7 @@ class OpenRouterAPI(BaseTranslationAPI):
 
     def __init__(
         self,
-        model: str = "google/gemini-2.0-flash-exp:free",
+        model: str = "google/gemini-2.5-flash-lite",
         temperature: float = 0.2,
         timeout: int = 30,
         max_retries: int = 3,
