@@ -16,6 +16,7 @@ python-dotenv>=1.0.0
 # 翻译库
 googletrans>=4.0.0
 deepl
+openai>=1.0.0  # 用于 Qwen-MT API（OpenAI 兼容）
 
 # 语言检测库（用于自动检测源语言）
 fast-langdetect>=0.2.0

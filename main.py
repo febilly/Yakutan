@@ -51,6 +51,8 @@ elif config.TRANSLATION_API_TYPE == 'google_dictionary':
     from translators.translation_apis.google_dictionary_api import GoogleDictionaryAPI as TranslationAPI
 elif config.TRANSLATION_API_TYPE == 'openrouter':
     from translators.translation_apis.openrouter_api import OpenRouterAPI as TranslationAPI
+elif config.TRANSLATION_API_TYPE == 'qwen_mt':
+    from translators.translation_apis.qwen_mt_api import QwenMTAPI as TranslationAPI
 else:  # 默认使用 deepl
     from translators.translation_apis.deepl_api import DeepLAPI as TranslationAPI
 
@@ -67,7 +69,25 @@ CURRENT_ASR_BACKEND = config.PREFERRED_ASR_BACKEND
 vocabulary_id = None  # 热词表 ID
 
 # ============ 初始化服务实例 ============
-translation_api = TranslationAPI()
+# 根据 API 类型初始化翻译 API
+if config.TRANSLATION_API_TYPE == 'qwen_mt':
+    translation_api = TranslationAPI(
+        model=config.QWEN_MT_MODEL,
+        base_url=config.QWEN_MT_BASE_URL,
+        stream=config.QWEN_MT_STREAM,
+        terms=config.QWEN_MT_TERMS,
+        domains=config.QWEN_MT_DOMAINS,
+    )
+elif config.TRANSLATION_API_TYPE == 'openrouter':
+    translation_api = TranslationAPI(
+        model=config.OPENROUTER_TRANSLATION_MODEL,
+        temperature=config.OPENROUTER_TRANSLATION_TEMPERATURE,
+        timeout=config.OPENROUTER_TRANSLATION_TIMEOUT,
+        max_retries=config.OPENROUTER_TRANSLATION_MAX_RETRIES,
+    )
+else:
+    translation_api = TranslationAPI()
+
 translator = ContextAwareTranslator(
     translation_api=translation_api, 
     max_context_size=6,

@@ -51,7 +51,7 @@ FALLBACK_LANGUAGE = 'en'  # 备用翻译语言（当源语言和目标语言相�
 # ============================================================================
 
 # 翻译 API 类型
-# 可选: 'google_web', 'google_dictionary', 'deepl', 'openrouter'
+# 可选: 'google_web', 'google_dictionary', 'deepl', 'openrouter', 'qwen_mt'
 TRANSLATION_API_TYPE = 'deepl'
 
 # OpenRouter 翻译模型配置
@@ -59,6 +59,14 @@ OPENROUTER_TRANSLATION_MODEL = 'google/gemini-2.5-flash:nitro'
 OPENROUTER_TRANSLATION_TEMPERATURE = 0.2
 OPENROUTER_TRANSLATION_TIMEOUT = 30
 OPENROUTER_TRANSLATION_MAX_RETRIES = 3
+
+# Qwen-MT 翻译模型配置
+QWEN_MT_MODEL = 'qwen-mt-flash'  # 可选: 'qwen-mt-flash', 'qwen-mt-plus', 'qwen-mt-turbo'
+QWEN_MT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'  # 北京地域
+# 新加坡地域使用: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
+QWEN_MT_STREAM = False  # 是否启用流式输出（仅 qwen-mt-flash 支持增量流式）
+QWEN_MT_TERMS = []  # 术语表，格式：[{"source": "术语", "target": "翻译"}]
+QWEN_MT_DOMAINS = None  # 领域提示（英文），例如：'IT domain translation'
 
 # ============================================================================
 # 翻译功能配置

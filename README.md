@@ -7,8 +7,11 @@
 </div>
 
 - 使用阿里的 [Qwen3实时语音识别（默认）](https://bailian.console.aliyun.com/?tab=model#/model-market/detail/qwen3-asr-flash) 或 [Fun-ASR](https://bailian.console.aliyun.com/?tab=model#/model-market/detail/fun-asr-realtime) 进行语音转文本
-- 使用 DeepL 进行翻译
-    - 可以切换为开箱即用的谷歌翻译（当然你的网得行）
+- 支持多种翻译引擎：
+    - DeepL（默认）- 原生支持上下文
+    - **Qwen-MT** - 阿里云机器翻译模型，支持92个语种互译
+    - Google 翻译 - 开箱即用
+    - OpenRouter（大模型）- 支持多种 LLM
 - 将结果通过 OSC 发送至游戏
 - 有一些 [独特的功能](#特点)
 - ~~其实就是把一堆 API 粘在了一起~~
@@ -66,6 +69,12 @@ _可以说我就是为了这点醋包的这顿饺子_
     - 可以指定翻译的正式程度（比如对于日语来说）
     - 原生支持上下文
     - 可以自定义词库（本项目还没实现）
+- 可以切换为使用 **Qwen-MT 机器翻译模型**
+    - 阿里云出品，支持 92 个语种互译
+    - 支持术语干预（自定义术语表）
+    - 支持翻译记忆（参考历史翻译风格）
+    - 支持领域提示（如法律、IT等专业领域）
+    - 使用与语音识别相同的 API Key，无需额外配置
 - 可以切换为开箱即用的谷歌翻译（但有网络连通性问题，及速率限制）
 - 可以切换为使用大模型进行翻译，但由于延迟问题，默认不使用
 
@@ -141,6 +150,8 @@ python main.py
 ## API Key 获取
 
 - **阿里云百炼（必需）**：https://bailian.console.aliyun.com/?tab=model#/model-market/detail/fun-asr-realtime
+  - 用于语音识别（必需）
+  - **同时支持 Qwen-MT 翻译**（可选，使用相同的 API Key）
   - 注册后可获得免费额度
   - 大学生可申请每年的免费额度
   
@@ -151,6 +162,75 @@ python main.py
 - **OpenRouter（可选）**：https://openrouter.ai/
   - 提供多种 LLM 模型
   - 部分模型有免费额度（如 Gemini）
+
+## 翻译引擎配置
+
+本项目支持多种翻译引擎，可在 WebUI 或 `config.py` 中切换。
+
+### Qwen-MT 翻译配置（推荐）
+
+Qwen-MT 是阿里云的机器翻译模型，**使用与语音识别相同的 API Key**，无需额外配置。
+
+**优势：**
+- 支持 92 个语种互译（中、英、日、韩、法、西、德、泰、印尼、越、阿等）
+- 支持术语干预、翻译记忆、领域提示等高级功能
+- 与语音识别共享免费额度，无需额外付费
+- 翻译质量高，速度快
+
+**在 `config.py` 中配置：**
+
+```python
+# 设置翻译 API 类型为 qwen_mt
+TRANSLATION_API_TYPE = 'qwen_mt'
+
+# Qwen-MT 配置（可选，使用默认值即可）
+QWEN_MT_MODEL = 'qwen-mt-flash'  # 可选: qwen-mt-flash, qwen-mt-plus, qwen-mt-turbo
+QWEN_MT_STREAM = False  # 是否启用流式输出（仅 qwen-mt-flash 支持）
+
+# 高级功能（可选）
+QWEN_MT_TERMS = []  # 术语表，如: [{"source": "专有名词", "target": "Proper Noun"}]
+QWEN_MT_DOMAINS = None  # 领域提示，如: "IT domain translation"
+```
+
+**模型选择：**
+- `qwen-mt-flash`：推荐，高性价比，支持流式输出
+- `qwen-mt-plus`：旗舰模型，多语言效果更好
+- `qwen-mt-turbo`：轻量级，速度快
+
+**示例代码：** 参见 `examples/qwen_mt_usage.py`
+
+### 其他翻译引擎
+
+<details>
+<summary>DeepL（默认）</summary>
+
+```python
+TRANSLATION_API_TYPE = 'deepl'
+```
+
+需要单独申请 DeepL API Key。
+</details>
+
+<details>
+<summary>Google 翻译</summary>
+
+```python
+TRANSLATION_API_TYPE = 'google_web'  # 或 'google_dictionary'
+```
+
+开箱即用，但可能有网络连通性问题。
+</details>
+
+<details>
+<summary>OpenRouter（大模型）</summary>
+
+```python
+TRANSLATION_API_TYPE = 'openrouter'
+OPENROUTER_TRANSLATION_MODEL = 'google/gemini-2.5-flash:nitro'
+```
+
+需要单独申请 OpenRouter API Key，延迟较高。
+</details>
 
 ## 热词配置
 
