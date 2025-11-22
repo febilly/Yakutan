@@ -55,7 +55,7 @@ FALLBACK_LANGUAGE = 'en'  # 备用翻译语言（当源语言和目标语言相�
 TRANSLATION_API_TYPE = 'deepl'
 
 # OpenRouter 翻译模型配置
-OPENROUTER_TRANSLATION_MODEL = 'google/gemini-2.5-flash:nitro'
+OPENROUTER_TRANSLATION_MODEL = 'google/gemini-2.5-flash-lite'
 OPENROUTER_TRANSLATION_TEMPERATURE = 0.2
 OPENROUTER_TRANSLATION_TIMEOUT = 30
 OPENROUTER_TRANSLATION_MAX_RETRIES = 3

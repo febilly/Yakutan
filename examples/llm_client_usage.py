@@ -17,7 +17,7 @@ def example_translation():
     
     result = client.chat_completion(
         messages=messages,
-        model="google/gemini-2.0-flash-exp:free",  # 使用免费的 Gemini
+        model="google/google/gemini-2.5-flash-lite",
         temperature=0.2
     )
     
@@ -87,7 +87,7 @@ def example_multi_turn_conversation():
     
     result = client.chat_completion(
         messages=messages,
-        model="google/gemini-2.0-flash-exp:free",
+        model="google/google/gemini-2.5-flash-lite",
         temperature=0.7
     )
     
@@ -104,7 +104,7 @@ def example_with_timeout_retry():
     
     result = client.chat_completion(
         messages=messages,
-        model="google/gemini-2.0-flash-exp:free",
+        model="google/google/gemini-2.5-flash-lite",
         temperature=0.9,
         timeout=10,  # 10秒超时
         max_retries=5,  # 最多重试5次

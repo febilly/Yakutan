@@ -80,7 +80,7 @@ class OpenRouterClient:
     async def chat_completion_async(
         self,
         messages: List[Dict[str, str]],
-        model: str = "google/gemini-2.0-flash-exp:free",
+        model: str = "google/gemini-2.5-flash-lite",
         temperature: float = 0.2,
         max_tokens: Optional[int] = None,
         timeout: int = 30,
@@ -201,7 +201,7 @@ class OpenRouterClient:
     def chat_completion(
         self,
         messages: List[Dict[str, str]],
-        model: str = "google/gemini-2.0-flash-exp:free",
+        model: str = "google/gemini-2.5-flash-lite",
         temperature: float = 0.2,
         max_tokens: Optional[int] = None,
         timeout: int = 30,
