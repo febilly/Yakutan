@@ -215,7 +215,7 @@
                     <div class="collapsible-content" id="asr-settings">
                         <div class="form-group">
                             <label for="asr-backend">识别后端</label>
-                            <select id="asr-backend" class="form-control" onchange="onSettingChange()">
+                            <select id="asr-backend" class="form-control" onchange="onSettingChange()" data-restart-required="true">
                                 <option value="qwen">Qwen3 ASR（推荐）</option>
                                 <option value="dashscope">Fun-ASR</option>
                             </select>
@@ -237,7 +237,7 @@
                                 <label class="switch-label">
                                     <span>启用热词</span>
                                     <label class="switch">
-                                        <input type="checkbox" id="enable-hot-words" onchange="onSettingChange()">
+                                        <input type="checkbox" id="enable-hot-words" onchange="onSettingChange()" data-restart-required="true">
                                         <span class="slider"></span>
                                     </label>
                                 </label>
@@ -268,7 +268,7 @@
                                 <label class="switch-label">
                                     <span>启用VAD</span>
                                     <label class="switch">
-                                        <input type="checkbox" id="enable-vad" onchange="onSettingChange()">
+                                        <input type="checkbox" id="enable-vad" onchange="onSettingChange()" data-restart-required="true">
                                         <span class="slider"></span>
                                     </label>
                                 </label>
@@ -277,13 +277,13 @@
 
                             <div class="form-group">
                                 <label for="vad-threshold">VAD阈值（0.0-1.0）</label>
-                                <input type="number" id="vad-threshold" class="form-control" min="0" max="1" step="0.05" value="0.2" onchange="onSettingChange()">
+                                <input type="number" id="vad-threshold" class="form-control" min="0" max="1" step="0.05" value="0.2" onchange="onSettingChange()" data-restart-required="true">
                                 <small class="form-text">值越小越敏感，越容易触发断句</small>
                             </div>
 
                             <div class="form-group">
                                 <label for="vad-silence-duration">VAD静音持续时间（毫秒）</label>
-                                <input type="number" id="vad-silence-duration" class="form-control" min="100" max="3000" step="100" value="800" onchange="onSettingChange()">
+                                <input type="number" id="vad-silence-duration" class="form-control" min="100" max="3000" step="100" value="800" onchange="onSettingChange()" data-restart-required="true">
                                 <small class="form-text">检测到此时长的静音后触发断句</small>
                             </div>
                         </div>
@@ -294,7 +294,7 @@
                             
                             <div class="form-group">
                                 <label for="keepalive-interval">心跳间隔（秒）</label>
-                                <input type="number" id="keepalive-interval" class="form-control" min="0" max="120" step="5" value="30" onchange="onSettingChange()">
+                                <input type="number" id="keepalive-interval" class="form-control" min="0" max="120" step="5" value="30" onchange="onSettingChange()" data-restart-required="true">
                                 <small class="form-text">防止长时间闲置导致连接超时，设置为0禁用</small>
                             </div>
                         </div>

@@ -69,21 +69,46 @@ CURRENT_ASR_BACKEND = config.PREFERRED_ASR_BACKEND
 vocabulary_id = None  # 热词表 ID
 
 # ============ 初始化服务实例 ============
-translation_api = TranslationAPI()
-translator = ContextAwareTranslator(
-    translation_api=translation_api, 
-    max_context_size=6,
-    target_language=config.TARGET_LANGUAGE,
-    context_aware=True
-)
 
-backwards_translation_api = BackwardsTranslationAPI()
-backwards_translator = ContextAwareTranslator(
-    translation_api=backwards_translation_api, 
-    max_context_size=6,
-    target_language="en",
-    context_aware=True
-)
+def reinitialize_translator():
+    """根据当前配置动态（重）初始化翻译器实例。
+    在运行时切换翻译 API 或目标语言后调用此函数以使后端使用新配置。
+    """
+    global translation_api, translator, backwards_translation_api, backwards_translator
+
+    # 根据配置选择翻译 API 类（延迟导入以避免循环导入或不必要的实例化）
+    if config.TRANSLATION_API_TYPE == 'google_web':
+        from translators.translation_apis.google_web_api import GoogleWebAPI as TranslationAPIClass
+    elif config.TRANSLATION_API_TYPE == 'google_dictionary':
+        from translators.translation_apis.google_dictionary_api import GoogleDictionaryAPI as TranslationAPIClass
+    elif config.TRANSLATION_API_TYPE == 'openrouter':
+        from translators.translation_apis.openrouter_api import OpenRouterAPI as TranslationAPIClass
+    elif config.TRANSLATION_API_TYPE == 'openrouter_streaming':
+        from translators.translation_apis.openrouter_streaming_api import OpenRouterStreamingAPI as TranslationAPIClass
+    else:
+        from translators.translation_apis.deepl_api import DeepLAPI as TranslationAPIClass
+
+    # 创建新的翻译 API 实例并注入 ContextAwareTranslator
+    translation_api = TranslationAPIClass()
+    translator = ContextAwareTranslator(
+        translation_api=translation_api,
+        max_context_size=6,
+        target_language=config.TARGET_LANGUAGE,
+        context_aware=True
+    )
+
+    # 反向翻译器保持使用原先的后端（Google Dictionary），重新创建以确保同步配置
+    backwards_translation_api = BackwardsTranslationAPI()
+    backwards_translator = ContextAwareTranslator(
+        translation_api=backwards_translation_api,
+        max_context_size=6,
+        target_language="en",
+        context_aware=True
+    )
+
+
+# 在模块加载时进行一次初始化
+reinitialize_translator()
 
 language_detector = LanguageDetector()
 # ================================

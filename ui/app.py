@@ -184,6 +184,15 @@ def update_config_api():
     try:
         config_data = request.json
         if update_config(config_data):
+            # 如果服务正在运行，通知主服务线程在下一次可行时重载翻译器实例（无需重启识别线程）
+            try:
+                import main as main_module
+                if service_status.get('running') and service_loop is not None:
+                    # 在主服务的事件循环线程安全地调度重初始化操作
+                    service_loop.call_soon_threadsafe(getattr(main_module, 'reinitialize_translator', lambda: None))
+            except Exception as e:
+                print(f'Error notifying service to reload translator: {e}')
+
             return jsonify({'success': True, 'message': '配置已更新'})
         else:
             return jsonify({'success': False, 'message': '配置更新失败'}), 500

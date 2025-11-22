@@ -392,11 +392,27 @@ function onSettingChange() {
         // 再保存到服务器
         await saveConfig(true); // true表示是自动保存，不重启服务
         
-        // 如果服务正在运行，自动重启
+        // 如果服务正在运行，仅在必要时（如 ASR 后端等）重启；否则只保存并通知后端热加载配置
         const statusResponse = await fetch(`${API_BASE}/status`);
         const status = await statusResponse.json();
         if (status.running) {
-            await restartService();
+            try {
+                // 通过当前活动元素判断此次修改属于哪个配置项
+                const el = document.activeElement;
+                
+                // 检查元素是否有 data-restart-required 属性
+                const needRestart = el && el.getAttribute('data-restart-required') === 'true';
+
+                if (needRestart) {
+                    // 仅在确实修改了需要重启的项时重启服务
+                    await restartService();
+                } else {
+                    // 不需要重启：后端（同进程）会收到配置变更并在下一次翻译时热加载
+                    console.log('配置已保存；无需重启服务，已通知后端热加载。');
+                }
+            } catch (e) {
+                console.error('处理自动重启逻辑失败:', e);
+            }
         }
     }, 200);
 }
