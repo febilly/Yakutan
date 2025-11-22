@@ -58,7 +58,7 @@ class DeepLAPI(BaseTranslationAPI):
 
     
     def translate(self, text: str, source_language: str = 'auto', 
-                  target_language: str = 'zh-CN', context: Optional[str] = None) -> str:
+                  target_language: str = 'zh-CN', context: Optional[str] = None, **kwargs) -> str:
         """
         翻译文本
         
@@ -67,6 +67,7 @@ class DeepLAPI(BaseTranslationAPI):
             source_language: 源语言代码（'auto' 表示自动检测）
             target_language: 目标语言代码
             context: 可选的上下文信息（DeepL 原生支持）
+            **kwargs: 其他参数
         
         Returns:
             翻译后的文本

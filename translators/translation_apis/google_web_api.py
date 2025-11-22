@@ -46,7 +46,7 @@ class GoogleWebAPI(BaseTranslationAPI):
         return result.text
     
     def translate(self, text: str, source_language: str = 'auto', 
-                  target_language: str = 'zh-CN', context: Optional[str] = None) -> str:
+                  target_language: str = 'zh-CN', context: Optional[str] = None, **kwargs) -> str:
         """
         同步翻译接口（包装异步调用）
         
@@ -55,6 +55,7 @@ class GoogleWebAPI(BaseTranslationAPI):
             source_language: 源语言代码
             target_language: 目标语言代码
             context: 上下文信息（此 API 不支持，如果提供将抛出异常）
+            **kwargs: 其他参数
         
         Returns:
             翻译后的文本

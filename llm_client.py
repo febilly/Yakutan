@@ -43,39 +43,7 @@ class OpenRouterClient:
         self.app_url = os.getenv("OPENROUTER_APP_URL", "")
         self.app_title = os.getenv("OPENROUTER_APP_TITLE", "")
         
-        # 长连接会话
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        
         self._initialized = True
-    
-    async def _get_session(self, timeout: int) -> aiohttp.ClientSession:
-        """获取或创建 HTTP 长连接会话"""
-        if self._session is None or self._session.closed:
-            session_timeout = aiohttp.ClientTimeout(total=timeout)
-            
-            # 检测系统代理并配置
-            proxies = detect_system_proxy()
-            proxy_url = None
-            if proxies:
-                # aiohttp 只需要一个代理 URL，优先使用 https 代理
-                proxy_url = proxies.get('https') or proxies.get('http')
-            
-            self._session = aiohttp.ClientSession(timeout=session_timeout)
-        return self._session
-    
-    async def _reset_session(self, timeout: int) -> aiohttp.ClientSession:
-        """重置长连接会话"""
-        if self._session and not self._session.closed:
-            await self._session.close()
-        self._session = None
-        return await self._get_session(timeout)
-    
-    async def close(self):
-        """关闭所有连接"""
-        if self._session and not self._session.closed:
-            await self._session.close()
-        self._session = None
     
     async def chat_completion_async(
         self,
@@ -90,40 +58,24 @@ class OpenRouterClient:
     ) -> str:
         """
         异步调用 OpenRouter Chat Completion API
-        
-        Args:
-            messages: 消息列表，格式: [{"role": "system/user/assistant", "content": "..."}]
-            model: 模型名称，默认使用免费的 Gemini 2.0 Flash
-            temperature: 温度参数 (0.0-2.0)
-            max_tokens: 最大生成 token 数
-            timeout: 请求超时时间（秒）
-            max_retries: 最大重试次数
-            sort_by_latency: 是否按延迟排序提供商（优先选择最快的）
-            **extra_params: 其他 OpenRouter API 参数
-        
-        Returns:
-            模型生成的文本内容
         """
         if not messages:
             return "[ERROR] No messages provided"
-        
-        # 构建请求 payload
+
         payload: Dict[str, Any] = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
         }
-        
+
         if max_tokens:
             payload["max_tokens"] = max_tokens
-        
+
         if sort_by_latency:
             payload["provider"] = {"sort": "latency"}
-        
-        # 合并额外参数
+
         payload.update(extra_params)
-        
-        # 构建请求头
+
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -132,72 +84,61 @@ class OpenRouterClient:
             headers["HTTP-Referer"] = self.app_url
         if self.app_title:
             headers["X-Title"] = self.app_title
-        
-        # 重试逻辑
-        for attempt in range(max_retries + 1):
+
+        proxies = detect_system_proxy()
+        proxy_url = None
+        if proxies:
+            proxy_url = proxies.get("https") or proxies.get("http")
+
+        timeout_config = aiohttp.ClientTimeout(total=timeout)
+        attempt_count = max_retries + 1
+
+        for attempt in range(attempt_count):
             try:
-                session = await self._get_session(timeout)
-                
-                # 获取代理设置
-                proxies = detect_system_proxy()
-                proxy_url = None
-                if proxies:
-                    proxy_url = proxies.get('https') or proxies.get('http')
-                
-                async with session.post(
-                    self.base_url, 
-                    json=payload, 
-                    headers=headers,
-                    proxy=proxy_url
-                ) as response:
-                    if response.status == 200:
-                        response_body = await response.text()
-                        
-                        try:
-                            data = json.loads(response_body)
-                        except json.JSONDecodeError:
-                            return "[ERROR] Failed to decode OpenRouter response"
-                        
-                        choices = data.get("choices") or []
-                        if not choices:
-                            message = data.get("error", {}).get("message", "No choices returned")
-                            return f"[ERROR] {message}"
-                        
-                        content = choices[0].get("message", {}).get("content")
-                        if not content:
-                            return "[ERROR] Empty response from model"
-                        
-                        return content.strip()
-                    else:
+                async with aiohttp.ClientSession(timeout=timeout_config) as session:
+                    async with session.post(
+                        self.base_url,
+                        json=payload,
+                        headers=headers,
+                        proxy=proxy_url,
+                    ) as response:
+                        if response.status == 200:
+                            response_body = await response.text()
+                            try:
+                                data = json.loads(response_body)
+                            except json.JSONDecodeError:
+                                return "[ERROR] Failed to decode OpenRouter response"
+
+                            choices = data.get("choices") or []
+                            if not choices:
+                                message = data.get("error", {}).get("message", "No choices returned")
+                                return f"[ERROR] {message}"
+
+                            content = choices[0].get("message", {}).get("content")
+                            if not content:
+                                return "[ERROR] Empty response from model"
+
+                            return content.strip()
+
                         error_detail = await response.text()
                         return f"[ERROR] HTTP {response.status}: {error_detail.strip()}"
-            
+
             except (aiohttp.ClientConnectionError, aiohttp.ClientSSLError,
-                    ConnectionError, BrokenPipeError) as e:
+                    ConnectionError, BrokenPipeError) as error:
                 if attempt < max_retries:
-                    try:
-                        await self._reset_session(timeout)
-                    except Exception:
-                        pass
                     continue
-                else:
-                    return f"[ERROR] Connection failed after {max_retries + 1} attempts: {str(e)}"
-            
+                return f"[ERROR] Connection failed after {attempt_count} attempts: {str(error)}"
+
             except asyncio.TimeoutError:
                 if attempt < max_retries:
-                    try:
-                        await self._reset_session(timeout)
-                    except Exception:
-                        pass
                     continue
-                else:
-                    return f"[ERROR] Timeout (>{timeout}s) after {max_retries + 1} attempts"
-            
-            except Exception as e:
-                return f"[ERROR] Request error: {str(e)}"
-        
+                return f"[ERROR] Timeout (>{timeout}s) after {attempt_count} attempts"
+
+            except Exception as error:
+                return f"[ERROR] Request error: {str(error)}"
+
         return "[ERROR] Unknown error after all retry attempts"
-    
+
     def chat_completion(
         self,
         messages: List[Dict[str, str]],
@@ -211,55 +152,51 @@ class OpenRouterClient:
     ) -> str:
         """
         同步调用 OpenRouter Chat Completion API（包装异步方法）
-        
-        Args:
-            messages: 消息列表
-            model: 模型名称
-            temperature: 温度参数
-            max_tokens: 最大生成 token 数
-            timeout: 请求超时时间
-            max_retries: 最大重试次数
-            sort_by_latency: 是否按延迟排序
-            **extra_params: 其他参数
-        
-        Returns:
-            模型生成的文本
         """
         try:
+            # 尝试获取当前运行的 loop
             loop = asyncio.get_running_loop()
-        except RuntimeError:
-            if self._loop is None or self._loop.is_closed():
-                self._loop = asyncio.new_event_loop()
-            loop = self._loop
-            asyncio.set_event_loop(loop)
-        
-        return loop.run_until_complete(
-            self.chat_completion_async(
-                messages=messages,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                timeout=timeout,
-                max_retries=max_retries,
-                sort_by_latency=sort_by_latency,
-                **extra_params
+            
+            # 如果有 loop 且正在运行，我们不能使用 run_until_complete
+            if loop.is_running():
+                # 这是一个棘手的情况：我们在一个正在运行的 loop 中调用了同步方法。
+                # 通常这意味着代码设计有问题（应该 await 异步方法）。
+                # 但为了兼容性，我们可能需要抛出错误或尝试其他变通方法（如 nest_asyncio，但不建议）。
+                # 在本项目的上下文中，这通常发生在 run_in_executor 的线程中，此时 get_running_loop 应该抛出 RuntimeError。
+                # 如果它没抛出，说明我们在主线程或其他有 loop 的线程中。
+                raise RuntimeError("Cannot call sync chat_completion from a running event loop. Use chat_completion_async instead.")
+            
+            # 如果 loop 存在但未运行（极少见），可以使用它
+            return loop.run_until_complete(
+                self.chat_completion_async(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                    max_retries=max_retries,
+                    sort_by_latency=sort_by_latency,
+                    **extra_params
+                )
             )
-        )
+
+        except RuntimeError:
+            # 没有运行中的 loop，这是预期的情况（在线程中）
+            # 使用 asyncio.run() 创建一个新的临时 loop 并运行
+            # 这比手动管理 loop 更安全，且能确保资源清理
+            return asyncio.run(
+                self.chat_completion_async(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                    max_retries=max_retries,
+                    sort_by_latency=sort_by_latency,
+                    **extra_params
+                )
+            )
     
-    def __del__(self):
-        """清理资源"""
-        try:
-            if self._loop and not self._loop.is_closed():
-                if self._loop.is_running():
-                    self._loop.create_task(self.close())
-                else:
-                    self._loop.run_until_complete(self.close())
-                self._loop.close()
-                self._loop = None
-        except Exception:
-            pass
-
-
 # 便捷的全局访问函数
 def get_llm_client() -> OpenRouterClient:
     """获取 LLM 客户端单例"""

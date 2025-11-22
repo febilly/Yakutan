@@ -51,7 +51,7 @@ FALLBACK_LANGUAGE = 'en'  # 备用翻译语言（当源语言和目标语言相�
 # ============================================================================
 
 # 翻译 API 类型
-# 可选: 'google_web', 'google_dictionary', 'deepl', 'openrouter'
+# 可选: 'google_web', 'google_dictionary', 'deepl', 'openrouter', 'openrouter_streaming'
 TRANSLATION_API_TYPE = 'deepl'
 
 # OpenRouter 翻译模型配置
@@ -67,6 +67,10 @@ OPENROUTER_TRANSLATION_MAX_RETRIES = 3
 # 是否启用翻译功能
 ENABLE_TRANSLATION = True  # True: 识别后翻译文本
                            # False: 直接发送识别结果，不翻译
+
+# 是否启用流式翻译（翻译部分结果）
+# 仅当 TRANSLATION_API_TYPE 为 'openrouter_streaming' 时有效
+TRANSLATE_PARTIAL_RESULTS = False
 
 # 是否启用反向翻译功能
 ENABLE_REVERSE_TRANSLATION = True  # True: 翻译后再反向翻译回源语言

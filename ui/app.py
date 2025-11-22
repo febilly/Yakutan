@@ -63,6 +63,7 @@ def get_config_dict():
             'api_type': config.TRANSLATION_API_TYPE,
             'show_partial_results': config.SHOW_PARTIAL_RESULTS,
             'enable_reverse_translation': config.ENABLE_REVERSE_TRANSLATION,
+            'translate_partial_results': getattr(config, 'TRANSLATE_PARTIAL_RESULTS', False),
         },
         # 麦克风控制配置
         'mic_control': {
@@ -119,6 +120,8 @@ def update_config(config_data):
                 config.SHOW_PARTIAL_RESULTS = trans['show_partial_results']
             if 'enable_reverse_translation' in trans:
                 config.ENABLE_REVERSE_TRANSLATION = trans['enable_reverse_translation']
+            if 'translate_partial_results' in trans:
+                config.TRANSLATE_PARTIAL_RESULTS = trans['translate_partial_results']
         
         # 更新麦克风控制配置
         if 'mic_control' in config_data:

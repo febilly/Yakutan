@@ -135,8 +135,20 @@
                                 <option value="google_dictionary">Google Dictionary（免费，更快，请注意网络连通性）</option>
                                 <option value="google_web">Google Web（免费，备用，请注意网络连通性）</option>
                                 <option value="openrouter">OpenRouter（LLM）</option>
+                                <option value="openrouter_streaming">OpenRouter Streaming (流式翻译)</option>
                             </select>
                             <small id="translation-api-warning" class="form-text" style="color: #e74c3c; display: none;"></small>
+                        </div>
+                        
+                        <div class="form-group" id="translate-partial-results-group" style="display: none;">
+                            <label class="switch-label">
+                                <span>流式翻译部分结果</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="translate-partial-results" onchange="onSettingChange()">
+                                    <span class="slider"></span>
+                                </label>
+                            </label>
+                            <small class="form-text">实时翻译未完成的句子（仅 OpenRouter Streaming 支持）</small>
                         </div>
                         
                         <div class="form-group">

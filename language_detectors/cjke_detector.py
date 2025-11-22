@@ -161,7 +161,7 @@ class CJKEDetector(BaseLanguageDetector):
         # 中文判定
         if chinese_ratio >= 0.3:
             return {
-                'language': 'zh-cn',
+                'language': 'zh',
                 'confidence': chinese_ratio
             }
         
@@ -174,7 +174,7 @@ class CJKEDetector(BaseLanguageDetector):
         
         # 混合语言情况：选择占比最大的
         max_ratio, language = max(
-            (chinese_ratio, 'zh-cn'),
+            (chinese_ratio, 'zh'),
             (japanese_ratio, 'ja'),
             (korean_ratio, 'ko'),
             (english_ratio, 'en'),

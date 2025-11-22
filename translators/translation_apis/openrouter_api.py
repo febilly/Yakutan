@@ -40,6 +40,7 @@ class OpenRouterAPI(BaseTranslationAPI):
         source_language: str = "auto",
         target_language: str = "zh-CN",
         context: Optional[str] = None,
+        **kwargs
     ) -> str:
         """
         翻译文本
@@ -49,6 +50,7 @@ class OpenRouterAPI(BaseTranslationAPI):
             source_language: 源语言代码
             target_language: 目标语言代码
             context: 可选的上下文信息
+            **kwargs: 其他参数
         
         Returns:
             翻译后的文本

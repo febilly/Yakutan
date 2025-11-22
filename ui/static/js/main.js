@@ -111,6 +111,7 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('source-language').value = config.translation.source_language || 'auto';
                 document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
                 document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? true;
+                document.getElementById('translate-partial-results').checked = config.translation.translate_partial_results ?? false;
             }
             
             if (config.mic_control) {
@@ -158,6 +159,7 @@ function loadDefaultConfig() {
     document.getElementById('source-language').value = 'auto';
     document.getElementById('show-partial-results').checked = false;
     document.getElementById('enable-reverse-translation').checked = true;
+    document.getElementById('translate-partial-results').checked = false;
     
     // 麦克风控制
     document.getElementById('enable-mic-control').checked = true;
@@ -189,6 +191,7 @@ async function loadConfigFromServer() {
         document.getElementById('fallback-language').value = config.translation.fallback_language || '';
         document.getElementById('translation-api-type').value = config.translation.api_type;
         document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
+        document.getElementById('translate-partial-results').checked = config.translation.translate_partial_results ?? false;
         
         document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control;
         document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds;
@@ -228,6 +231,7 @@ function saveConfigToLocalStorage() {
                 source_language: document.getElementById('source-language').value,
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,
+                translate_partial_results: document.getElementById('translate-partial-results').checked,
             },
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
@@ -277,6 +281,7 @@ let previousTranslationApi = null;
 function handleTranslationApiChange(event) {
     const newApi = event.target.value;
     const warningElement = document.getElementById('translation-api-warning');
+    const partialResultsGroup = document.getElementById('translate-partial-results-group');
     
     // 检查是否需要API Key
     let requiresKey = false;
@@ -284,12 +289,21 @@ function handleTranslationApiChange(event) {
     let keyInputId = '';
     let apiDisplayName = '';
     
+    // 显示/隐藏流式翻译选项
+    if (newApi === 'openrouter_streaming') {
+        partialResultsGroup.style.display = 'block';
+    } else {
+        partialResultsGroup.style.display = 'none';
+        // 如果切换到不支持流式的API，自动关闭流式翻译开关
+        document.getElementById('translate-partial-results').checked = false;
+    }
+
     if (newApi === 'deepl') {
         requiresKey = true;
         keyName = 'deepl_api_key';
         keyInputId = 'deepl-api-key';
         apiDisplayName = 'DeepL';
-    } else if (newApi === 'openrouter') {
+    } else if (newApi === 'openrouter' || newApi === 'openrouter_streaming') {
         requiresKey = true;
         keyName = 'openrouter_api_key';
         keyInputId = 'openrouter-api-key';
@@ -350,7 +364,16 @@ function handleTranslationApiChange(event) {
 // 初始化时记录当前的翻译API
 document.addEventListener('DOMContentLoaded', function() {
     setTimeout(() => {
-        previousTranslationApi = document.getElementById('translation-api-type').value;
+        const apiSelect = document.getElementById('translation-api-type');
+        previousTranslationApi = apiSelect.value;
+        
+        // 初始化流式翻译选项的显示状态
+        const partialResultsGroup = document.getElementById('translate-partial-results-group');
+        if (apiSelect.value === 'openrouter_streaming') {
+            partialResultsGroup.style.display = 'block';
+        } else {
+            partialResultsGroup.style.display = 'none';
+        }
     }, 100);
 });
 
@@ -389,6 +412,7 @@ async function saveConfig(autoSave = false) {
                 api_type: document.getElementById('translation-api-type').value,
                 source_language: document.getElementById('source-language').value,
                 show_partial_results: document.getElementById('show-partial-results').checked,
+                translate_partial_results: document.getElementById('translate-partial-results').checked,
             },
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,

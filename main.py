@@ -51,6 +51,8 @@ elif config.TRANSLATION_API_TYPE == 'google_dictionary':
     from translators.translation_apis.google_dictionary_api import GoogleDictionaryAPI as TranslationAPI
 elif config.TRANSLATION_API_TYPE == 'openrouter':
     from translators.translation_apis.openrouter_api import OpenRouterAPI as TranslationAPI
+elif config.TRANSLATION_API_TYPE == 'openrouter_streaming':
+    from translators.translation_apis.openrouter_streaming_api import OpenRouterStreamingAPI as TranslationAPI
 else:  # 默认使用 deepl
     from translators.translation_apis.deepl_api import DeepLAPI as TranslationAPI
 
@@ -116,6 +118,26 @@ def reverse_translation(translated_text, source_language, target_language):
 class VRChatRecognitionCallback(SpeechRecognitionCallback):
     def __init__(self):
         self.loop = None  # 将在主线程中设置
+        self.last_partial_translation = None # 用于流式翻译
+        self.translating_partial = False # 标记是否正在进行流式翻译
+        self.last_partial_source_segment = None
+        self.pending_partial_segment = None
+
+    @staticmethod
+    def _extract_streaming_segment(text: str) -> Optional[str]:
+        """从识别文本中截取可用于流式翻译的片段"""
+        if not text:
+            return None
+
+        punctuation_chars = ("。", "？", "！", "，", "、", ".", "?", "!", ",")
+        for idx in range(len(text) - 1, -1, -1):
+            if text[idx] in punctuation_chars:
+                remainder = text[idx + 1:]
+                if remainder and remainder.strip():
+                    segment = text[:idx + 1].strip()
+                    if segment:
+                        return segment
+        return None
     
     def on_session_started(self) -> None:
         logger.info('Speech recognizer session opened.')
@@ -126,6 +148,59 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
     def on_error(self, error: Exception) -> None:
         logger.error('Speech recognizer failed: %s', error)
 
+    async def _translate_partial_task(self, segment: str):
+        """异步流式翻译任务"""
+        if self.translating_partial:
+            return
+        
+        self.translating_partial = True
+        success = False
+        try:
+            # 在 executor 中运行同步翻译
+            loop = asyncio.get_running_loop()
+            translated_text = await loop.run_in_executor(
+                executor, 
+                lambda: translator.translate(
+                    segment,
+                    source_language=config.SOURCE_LANGUAGE,
+                    target_language=config.TARGET_LANGUAGE,
+                    context_prefix=config.CONTEXT_PREFIX,
+                    is_partial=True,
+                    previous_translation=self.last_partial_translation
+                )
+            )
+            success = True
+            
+            if translated_text and not translated_text.startswith("[ERROR]"):
+                self.last_partial_translation = translated_text
+            else:
+                translated_text = ""
+
+            segment_display = f"{segment.strip()}……"
+            translation_display = translated_text.strip()
+            if translation_display and not translation_display.endswith("……"):
+                translation_display = f"{translation_display}……"
+            elif not translation_display:
+                translation_display = "……"
+
+            display_text = f"{translation_display} ({segment_display})"
+            
+            # 如果消息过长，尝试去掉原文部分
+            if len(display_text) > 144:
+                display_text = translation_display
+            
+            # 发送 OSC
+            await osc_manager.send_text(display_text, ongoing=True)
+            
+        except Exception as e:
+            # logger.error(f"流式翻译错误: {e}")
+            pass
+        finally:
+            self.translating_partial = False
+            self.pending_partial_segment = None
+            if success:
+                self.last_partial_source_segment = segment
+
     def on_result(self, event: RecognitionEvent) -> None:
         text = event.text
         if not text:
@@ -135,9 +210,36 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         display_text = None
         is_ongoing = not event.is_final
 
+        # 语言检测辅助函数
+        def normalize_lang(lang):
+            """标准化语言代码"""
+            lang_lower = lang.lower()
+            if lang_lower in ['zh', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant']:
+                return 'zh'
+            if lang_lower in ['en', 'en-us', 'en-gb']:
+                return 'en'
+            return lang_lower
+
         if is_ongoing:
             print(f'部分：{text}', end='\r')
             display_text = text
+            
+            # 如果启用了流式翻译且当前 API 支持
+            if config.ENABLE_TRANSLATION and getattr(config, 'TRANSLATE_PARTIAL_RESULTS', False):
+                segment = self._extract_streaming_segment(text)
+                if (
+                    segment and
+                    segment != self.last_partial_source_segment and
+                    segment != self.pending_partial_segment and
+                    self.loop and
+                    not self.translating_partial
+                ):
+                    self.pending_partial_segment = segment
+                    asyncio.run_coroutine_threadsafe(
+                        self._translate_partial_task(segment),
+                        self.loop
+                    )
+
         else:
             # 如果禁用翻译，直接显示识别结果
             if not config.ENABLE_TRANSLATION:
@@ -147,15 +249,6 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 # 启用翻译，执行翻译逻辑
                 source_lang_info = language_detector.detect(text)
                 source_lang = source_lang_info['language']
-
-                def normalize_lang(lang):
-                    """标准化语言代码"""
-                    lang_lower = lang.lower()
-                    if lang_lower in ['zh', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant']:
-                        return 'zh'
-                    if lang_lower in ['en', 'en-us', 'en-gb']:
-                        return 'en'
-                    return lang_lower
 
                 normalized_source = normalize_lang(source_lang)
                 normalized_target = normalize_lang(config.TARGET_LANGUAGE)
@@ -173,7 +266,15 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     source_language=config.SOURCE_LANGUAGE,
                     target_language=actual_target,
                     context_prefix=config.CONTEXT_PREFIX,
+                    is_partial=False,
+                    previous_translation=self.last_partial_translation
                 )
+                
+                # 重置流式翻译状态
+                self.last_partial_translation = None
+                self.last_partial_source_segment = None
+                self.pending_partial_segment = None
+                
                 is_translated = True
                 print(f'译文：{translated_text}')
 
@@ -610,7 +711,7 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         print('\nProgram terminated by user.')
-    except Exception as e:
-        print(f'Error: {e}')
+    # except Exception as e:
+    #     print(f'Error: {e}')
     finally:
         print('Cleanup completed.')

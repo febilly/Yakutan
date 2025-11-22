@@ -114,7 +114,8 @@ class ContextAwareTranslator:
             self, text: str,
             source_language: str = 'auto',
             target_language: Optional[str] = None,
-            context_prefix: str = ""
+            context_prefix: str = "",
+            **kwargs
         ) -> str:
         """
         翻译句子，支持上下文感知
@@ -123,6 +124,8 @@ class ContextAwareTranslator:
             text: 要翻译的文本
             source_language: 源语言代码（默认自动检测）
             target_language: 目标语言代码（如果不指定则使用初始化时的默认值）
+            context_prefix: 上下文前缀
+            **kwargs: 其他参数，如 previous_translation, is_partial
         
         Returns:
             翻译后的文本
@@ -145,14 +148,16 @@ class ContextAwareTranslator:
                         text,
                         source_language=source_language,
                         target_language=actual_target_language,
-                        context=context
+                        context=context,
+                        **kwargs
                     )
                 else:
                     # 没有上下文或未启用上下文感知
                     translated_text = self.translation_api.translate(
                         text,
                         source_language=source_language,
-                        target_language=actual_target_language
+                        target_language=actual_target_language,
+                        **kwargs
                     )
             else:
                 # API 不支持原生上下文，使用标记法模拟
@@ -167,7 +172,8 @@ class ContextAwareTranslator:
                 translated_text = self.translation_api.translate(
                     input_text,
                     source_language=source_language,
-                    target_language=actual_target_language
+                    target_language=actual_target_language,
+                    **kwargs
                 )
                 
                 # 提取当前句子的翻译（如果有标记）

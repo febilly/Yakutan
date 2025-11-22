@@ -17,7 +17,7 @@ class BaseTranslationAPI(ABC):
     
     @abstractmethod
     def translate(self, text: str, source_language: str = 'auto', 
-                  target_language: str = 'zh-CN', context: Optional[str] = None) -> str:
+                  target_language: str = 'zh-CN', context: Optional[str] = None, **kwargs) -> str:
         """
         翻译文本
         
@@ -27,6 +27,7 @@ class BaseTranslationAPI(ABC):
             target_language: 目标语言代码
             context: 可选的上下文信息。只有支持上下文的 API 才应该接受此参数。
                      不支持上下文的 API 如果收到此参数应该抛出异常。
+            **kwargs: 其他可选参数，如 previous_translation, is_partial 等
         
         Returns:
             翻译后的文本
