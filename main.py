@@ -149,6 +149,18 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self.pending_partial_segment = None
 
     @staticmethod
+    def _normalize_lang(lang):
+        """标准化语言代码"""
+        if not lang:
+            return 'auto'
+        lang_lower = lang.lower()
+        if lang_lower in ['zh', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant']:
+            return 'zh'
+        if lang_lower in ['en', 'en-us', 'en-gb']:
+            return 'en'
+        return lang_lower
+
+    @staticmethod
     def _extract_streaming_segment(text: str) -> Optional[str]:
         """从识别文本中截取可用于流式翻译的片段"""
         if not text:
@@ -208,11 +220,15 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             elif not translation_display:
                 translation_display = "……"
 
-            display_text = f"{translation_display} ({segment_display})"
+            # 构建显示文本：[{源语言}→{目标语言}] {翻译后文本} (原始文本)
+            source_lang = self._normalize_lang(config.SOURCE_LANGUAGE)
+            target_lang = self._normalize_lang(config.TARGET_LANGUAGE)
+            
+            display_text = f"[{source_lang}→{target_lang}] {translation_display} ({segment_display})"
             
             # 如果消息过长，尝试去掉原文部分
             if len(display_text) > 144:
-                display_text = translation_display
+                display_text = f"[{source_lang}→{target_lang}] {translation_display}"
             
             # 发送 OSC
             await osc_manager.send_text(display_text, ongoing=True)
@@ -234,16 +250,6 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         is_translated = False
         display_text = None
         is_ongoing = not event.is_final
-
-        # 语言检测辅助函数
-        def normalize_lang(lang):
-            """标准化语言代码"""
-            lang_lower = lang.lower()
-            if lang_lower in ['zh', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant']:
-                return 'zh'
-            if lang_lower in ['en', 'en-us', 'en-gb']:
-                return 'en'
-            return lang_lower
 
         if is_ongoing:
             print(f'部分：{text}', end='\r')
@@ -275,8 +281,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 source_lang_info = language_detector.detect(text)
                 source_lang = source_lang_info['language']
 
-                normalized_source = normalize_lang(source_lang)
-                normalized_target = normalize_lang(config.TARGET_LANGUAGE)
+                normalized_source = self._normalize_lang(source_lang)
+                normalized_target = self._normalize_lang(config.TARGET_LANGUAGE)
 
                 if config.FALLBACK_LANGUAGE and normalized_source == normalized_target:
                     actual_target = config.FALLBACK_LANGUAGE
@@ -303,7 +309,11 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 is_translated = True
                 print(f'译文：{translated_text}')
 
-                display_text = f"[{normalized_source}→{actual_target}] {translated_text}"
+                display_text = f"[{normalized_source}→{actual_target}] {translated_text} ({text})"
+                
+                # 如果消息过长，尝试去掉原文部分
+                if len(display_text) > 144:
+                    display_text = f"[{normalized_source}→{actual_target}] {translated_text}"
 
         if display_text is None:
             return
