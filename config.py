@@ -18,7 +18,7 @@ VALID_ASR_BACKENDS = {'dashscope', 'qwen'}
 # ============================================================================
 
 # DashScope 后端使用的模型
-DASHSCOPE_ASR_MODEL = 'fun-asr-realtime-2025-09-15'
+DASHSCOPE_ASR_MODEL = 'fun-asr-realtime'
 
 # Qwen 后端使用的模型
 QWEN_ASR_MODEL = 'qwen3-asr-flash-realtime'
