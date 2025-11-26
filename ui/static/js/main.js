@@ -166,7 +166,7 @@ function loadDefaultConfig() {
     document.getElementById('mute-delay').value = 0.2;
     
     // ASR 配置
-    document.getElementById('asr-backend').value = 'qwen';
+    document.getElementById('asr-backend').value = 'qwen';  // 可选: 'qwen', 'qwen_international', 'dashscope'
     document.getElementById('enable-hot-words').checked = true;
     document.getElementById('enable-vad').checked = true;
     document.getElementById('vad-threshold').value = 0.2;

@@ -45,7 +45,7 @@ def create_recognizer(
     创建语音识别器实例
     
     Args:
-        backend: 识别后端，'dashscope' 或 'qwen'
+        backend: 识别后端，'dashscope', 'qwen' 或 'qwen_international'
         callback: 识别回调实例
         sample_rate: 音频采样率
         audio_format: 音频格式
@@ -65,13 +65,19 @@ def create_recognizer(
         ValueError: 当后端不支持时
         RuntimeError: 当依赖缺失时
     """
-    if backend == 'qwen':
+    if backend in ('qwen', 'qwen_international'):
         if QwenSpeechRecognizer is None:
             raise RuntimeError('QwenSpeechRecognizer 不可用，请安装相关依赖')
         
+        # 根据后端类型选择 URL
+        if backend == 'qwen_international':
+            asr_url = config.QWEN_ASR_URL_INTERNATIONAL
+        else:
+            asr_url = config.QWEN_ASR_URL
+        
         recognition_kwargs: Dict[str, Any] = {
             'model': config.QWEN_ASR_MODEL,
-            'url': config.QWEN_ASR_URL,
+            'url': asr_url,
             'sample_rate': sample_rate,
             'input_audio_format': audio_format,
             'enable_turn_detection': enable_vad,
@@ -120,12 +126,12 @@ def is_backend_available(backend: str) -> bool:
     检查指定后端是否可用
     
     Args:
-        backend: 后端名称，'dashscope' 或 'qwen'
+        backend: 后端名称，'dashscope', 'qwen' 或 'qwen_international'
     
     Returns:
         bool: True 表示可用，False 表示不可用
     """
-    if backend == 'qwen':
+    if backend in ('qwen', 'qwen_international'):
         return QwenSpeechRecognizer is not None
     elif backend == 'dashscope':
         return True
@@ -151,7 +157,7 @@ def select_backend(preferred_backend: str, valid_backends: set) -> str:
     # 检查首选后端是否可用
     if not is_backend_available(preferred_backend):
         # 回退到 dashscope
-        if preferred_backend == 'qwen':
+        if preferred_backend in ('qwen', 'qwen_international'):
             print('[ASR] Qwen 后端不可用，缺少依赖，已回退到 DashScope.')
         return 'dashscope'
     

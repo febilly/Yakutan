@@ -8,10 +8,10 @@ import os
 # ============================================================================
 
 # 首选的语音识别后端
-PREFERRED_ASR_BACKEND = 'qwen'  # 可选: 'dashscope' 或 'qwen'
+PREFERRED_ASR_BACKEND = 'qwen'  # 可选: 'dashscope', 'qwen', 'qwen_international'
 
 # 有效的后端列表
-VALID_ASR_BACKENDS = {'dashscope', 'qwen'}
+VALID_ASR_BACKENDS = {'dashscope', 'qwen', 'qwen_international'}
 
 # ============================================================================
 # 语音识别模型配置
@@ -25,6 +25,7 @@ QWEN_ASR_MODEL = 'qwen3-asr-flash-realtime'
 
 # Qwen WebSocket URL
 QWEN_ASR_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime'
+QWEN_ASR_URL_INTERNATIONAL = 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime'
 
 # ============================================================================
 # 音频参数配置

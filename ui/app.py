@@ -308,7 +308,7 @@ def get_defaults():
     """获取默认配置"""
     return jsonify({
         'asr': {
-            'preferred_backend': 'qwen',
+            'preferred_backend': 'qwen',  # 可选: 'qwen', 'qwen_international', 'dashscope'
             'enable_vad': True,
             'vad_threshold': 0.2,
             'vad_silence_duration_ms': 800,

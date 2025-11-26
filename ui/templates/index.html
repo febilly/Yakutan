@@ -183,8 +183,9 @@
                             </label>
                             <input type="password" id="dashscope-api-key" class="form-control" placeholder="sk-..." required>
                             <small class="form-text">
-                                Qwen 和 DashScope 语音识别均需要此 Key。
-                                <a href="https://bailian.console.aliyun.com/?tab=model#/model-market/detail/fun-asr-realtime" target="_blank">获取API Key →</a>
+                                Qwen 和 FunASR 语音识别均需要此 Key。
+                                <a href="https://bailian.console.aliyun.com/?tab=api#/api" target="_blank">获取中国大陆版API Key →</a>
+                                <a href="https://modelstudio.console.alibabacloud.com/?tab=api#/api" target="_blank">获取国际版API Key →</a>
                             </small>
                         </div>
                         
@@ -216,8 +217,9 @@
                         <div class="form-group">
                             <label for="asr-backend">识别后端</label>
                             <select id="asr-backend" class="form-control" onchange="onSettingChange()" data-restart-required="true">
-                                <option value="qwen">Qwen3 ASR（推荐）</option>
-                                <option value="dashscope">Fun-ASR</option>
+                                <option value="qwen">中国大陆 - Qwen3 ASR（推荐）</option>
+                                <option value="dashscope">中国大陆 - Fun-ASR</option>
+                                <option value="qwen_international">国际 - Qwen3 ASR</option>
                             </select>
                         </div>
 
