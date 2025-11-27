@@ -2,7 +2,7 @@
 aiohttp>=3.13.0
 
 # 阿里云 DashScope SDK（用于语音识别）
-dashscope<1.25.0
+dashscope>=1.24.0,<1.25.0
 
 # 音频处理库
 pyaudio>=0.2.13
