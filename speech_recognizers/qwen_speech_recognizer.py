@@ -103,7 +103,13 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
         self._items[item_id] = {"fixed": fixed, "stash": stash}
         if not combined:
             return
-        event = RecognitionEvent(text=combined, is_final=False, raw=message)
+        
+        if combined.startswith("<asr_text>"):
+            result = combined[len("<asr_text>") :]
+        else:
+            result = combined
+
+        event = RecognitionEvent(text=result, is_final=False, raw=message)
         self._user_callback.on_result(event)
 
     def _handle_transcription_completed(self, message: Dict[str, Any]) -> None:
@@ -113,7 +119,12 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
             cache = self._items[item_id]
             transcript = f"{cache.get('fixed', '')}{cache.get('stash', '')}"
         if transcript:
-            event = RecognitionEvent(text=transcript, is_final=True, raw=message)
+            if transcript.startswith("<asr_text>"):
+                result = transcript[len("<asr_text>") :]
+            else:
+                result = transcript
+
+            event = RecognitionEvent(text=result, is_final=True, raw=message)
             self._user_callback.on_result(event)
         if item_id:
             self._items.pop(item_id, None)

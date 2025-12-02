@@ -53,6 +53,7 @@ def get_config_dict():
             'vad_silence_duration_ms': config.VAD_SILENCE_DURATION_MS,
             'keepalive_interval': config.KEEPALIVE_INTERVAL,
             'enable_hot_words': config.ENABLE_HOT_WORDS,
+            'use_international_endpoint': config.USE_INTERNATIONAL_ENDPOINT,
         },
         # 翻译配置
         'translation': {
@@ -63,7 +64,6 @@ def get_config_dict():
             'api_type': config.TRANSLATION_API_TYPE,
             'show_partial_results': config.SHOW_PARTIAL_RESULTS,
             'enable_reverse_translation': config.ENABLE_REVERSE_TRANSLATION,
-            'translate_partial_results': getattr(config, 'TRANSLATE_PARTIAL_RESULTS', False),
         },
         # 麦克风控制配置
         'mic_control': {
@@ -102,6 +102,8 @@ def update_config(config_data):
                 config.KEEPALIVE_INTERVAL = int(asr['keepalive_interval'])
             if 'enable_hot_words' in asr:
                 config.ENABLE_HOT_WORDS = asr['enable_hot_words']
+            if 'use_international_endpoint' in asr:
+                config.USE_INTERNATIONAL_ENDPOINT = asr['use_international_endpoint']
         
         # 更新翻译配置
         if 'translation' in config_data:
@@ -116,12 +118,13 @@ def update_config(config_data):
                 config.FALLBACK_LANGUAGE = trans['fallback_language'] if trans['fallback_language'] else None
             if 'api_type' in trans:
                 config.TRANSLATION_API_TYPE = trans['api_type']
+                # 前端的"流式翻译模式"开关会将 api_type 设为 'openrouter_streaming'
+                # 此时启用部分结果翻译（实时翻译未完成的句子）
+                config.TRANSLATE_PARTIAL_RESULTS = (trans['api_type'] == 'openrouter_streaming')
             if 'show_partial_results' in trans:
                 config.SHOW_PARTIAL_RESULTS = trans['show_partial_results']
             if 'enable_reverse_translation' in trans:
                 config.ENABLE_REVERSE_TRANSLATION = trans['enable_reverse_translation']
-            if 'translate_partial_results' in trans:
-                config.TRANSLATE_PARTIAL_RESULTS = trans['translate_partial_results']
         
         # 更新麦克风控制配置
         if 'mic_control' in config_data:

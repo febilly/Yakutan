@@ -4,7 +4,7 @@ DeepL API 翻译实现
 需要在环境变量中设置 DEEPL_API_KEY
 """
 import os
-from typing import Optional
+from typing import Optional, List, Dict
 from .base_translation_api import BaseTranslationAPI
 from proxy_detector import detect_system_proxy
 
@@ -58,7 +58,8 @@ class DeepLAPI(BaseTranslationAPI):
 
     
     def translate(self, text: str, source_language: str = 'auto', 
-                  target_language: str = 'zh-CN', context: Optional[str] = None, **kwargs) -> str:
+                  target_language: str = 'zh-CN', context: Optional[str] = None,
+                  context_pairs: Optional[List[Dict[str, str]]] = None, **kwargs) -> str:
         """
         翻译文本
         
@@ -67,6 +68,7 @@ class DeepLAPI(BaseTranslationAPI):
             source_language: 源语言代码（'auto' 表示自动检测）
             target_language: 目标语言代码
             context: 可选的上下文信息（DeepL 原生支持）
+            context_pairs: 可选的上下文对列表（DeepL 会将其格式化为 context 字符串）
             **kwargs: 其他参数
         
         Returns:
@@ -90,14 +92,25 @@ class DeepLAPI(BaseTranslationAPI):
             # 处理源语言
             source_lang = None if source_language.lower() == 'auto' else source_language.upper()
             
+            # 构建上下文字符串
+            # 如果有 context_pairs，优先从中构建上下文（仅使用原文）
+            # DeepL 的 context 参数是用于描述上下文的文本，不是翻译记忆
+            final_context = None
+            if context_pairs:
+                # DeepL 的 context 只接受原文作为上下文
+                context_texts = [pair['source'] for pair in context_pairs]
+                final_context = " ".join(context_texts)
+            elif context:
+                final_context = context
+            
             # 调用 DeepL API
             # 如果提供了上下文，使用 context 参数
-            if context:
+            if final_context:
                 result = self.client.translate_text(
                     text,
                     source_lang=source_lang,
                     target_lang=target_lang,
-                    context=context,
+                    context=final_context,
                     formality=FORMALITY,
                     model_type='prefer_quality_optimized',
                 )

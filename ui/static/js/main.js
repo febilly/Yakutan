@@ -37,10 +37,15 @@ function loadAPIKeys() {
     const dashscopeKey = localStorage.getItem('dashscope_api_key');
     const deeplKey = localStorage.getItem('deepl_api_key');
     const openrouterKey = localStorage.getItem('openrouter_api_key');
+    const useInternational = localStorage.getItem('use_international_endpoint') === 'true';
     
     if (dashscopeKey) document.getElementById('dashscope-api-key').value = dashscopeKey;
     if (deeplKey) document.getElementById('deepl-api-key').value = deeplKey;
     if (openrouterKey) document.getElementById('openrouter-api-key').value = openrouterKey;
+    document.getElementById('use-international-endpoint').checked = useInternational;
+    
+    // 应用国际版设置对 ASR 选项的影响
+    updateAsrOptionsForInternational(useInternational);
     
     // 如果已有DashScope API Key，自动折叠API Keys区域
     if (dashscopeKey) {
@@ -57,6 +62,46 @@ function loadAPIKeys() {
     document.getElementById('dashscope-api-key').addEventListener('input', saveAPIKey);
     document.getElementById('deepl-api-key').addEventListener('input', saveAPIKey);
     document.getElementById('openrouter-api-key').addEventListener('input', saveAPIKey);
+}
+
+// 处理国际版端点开关变化
+function handleInternationalEndpointChange(event) {
+    const useInternational = event.target.checked;
+    
+    // 保存到 localStorage
+    localStorage.setItem('use_international_endpoint', useInternational.toString());
+    
+    // 更新 ASR 选项
+    updateAsrOptionsForInternational(useInternational);
+    
+    // 触发配置保存
+    onSettingChange();
+}
+
+// 根据国际版设置更新 ASR 选项
+function updateAsrOptionsForInternational(useInternational) {
+    const asrBackendSelect = document.getElementById('asr-backend');
+    const dashscopeOption = asrBackendSelect.querySelector('option[value="dashscope"]');
+    
+    if (useInternational) {
+        // 国际版：禁用 Fun-ASR 选项
+        if (dashscopeOption) {
+            dashscopeOption.disabled = true;
+            dashscopeOption.textContent = 'Fun-ASR（国际版不可用）';
+        }
+        
+        // 如果当前选中的是 dashscope，自动切换到 qwen
+        if (asrBackendSelect.value === 'dashscope') {
+            asrBackendSelect.value = 'qwen';
+            onSettingChange();
+        }
+    } else {
+        // 中国大陆版：启用 Fun-ASR 选项
+        if (dashscopeOption) {
+            dashscopeOption.disabled = false;
+            dashscopeOption.textContent = 'Fun-ASR（仅中国大陆版可用）';
+        }
+    }
 }
 
 // 保存API Key到localStorage
@@ -107,11 +152,18 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('enable-translation').checked = config.translation.enable_translation ?? true;
                 document.getElementById('target-language').value = config.translation.target_language || 'ja';
                 document.getElementById('fallback-language').value = config.translation.fallback_language || 'en';
-                document.getElementById('translation-api-type').value = config.translation.api_type || 'deepl';
+                // 处理 openrouter_streaming 的特殊情况
+                const apiType = config.translation.api_type || 'qwen_mt';
+                if (apiType === 'openrouter_streaming') {
+                    document.getElementById('translation-api-type').value = 'openrouter';
+                    document.getElementById('openrouter-streaming-mode').checked = true;
+                } else {
+                    document.getElementById('translation-api-type').value = apiType;
+                    document.getElementById('openrouter-streaming-mode').checked = false;
+                }
                 document.getElementById('source-language').value = config.translation.source_language || 'auto';
                 document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
                 document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? true;
-                document.getElementById('translate-partial-results').checked = config.translation.translate_partial_results ?? false;
             }
             
             if (config.mic_control) {
@@ -126,6 +178,12 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('vad-threshold').value = config.asr.vad_threshold || 0.2;
                 document.getElementById('vad-silence-duration').value = config.asr.vad_silence_duration_ms || 800;
                 document.getElementById('keepalive-interval').value = config.asr.keepalive_interval || 30;
+                
+                // 加载国际版设置
+                const useInternational = config.asr.use_international_endpoint ?? false;
+                document.getElementById('use-international-endpoint').checked = useInternational;
+                localStorage.setItem('use_international_endpoint', useInternational.toString());
+                updateAsrOptionsForInternational(useInternational);
             }
             
             if (config.language_detector) {
@@ -155,23 +213,24 @@ function loadDefaultConfig() {
     document.getElementById('enable-translation').checked = true;
     document.getElementById('target-language').value = 'ja';
     document.getElementById('fallback-language').value = 'en';
-    document.getElementById('translation-api-type').value = 'deepl';
+    document.getElementById('translation-api-type').value = 'qwen_mt';
     document.getElementById('source-language').value = 'auto';
     document.getElementById('show-partial-results').checked = false;
     document.getElementById('enable-reverse-translation').checked = true;
-    document.getElementById('translate-partial-results').checked = false;
+    document.getElementById('openrouter-streaming-mode').checked = false;
     
     // 麦克风控制
     document.getElementById('enable-mic-control').checked = true;
     document.getElementById('mute-delay').value = 0.2;
     
     // ASR 配置
-    document.getElementById('asr-backend').value = 'qwen';  // 可选: 'qwen', 'qwen_international', 'dashscope'
+    document.getElementById('asr-backend').value = 'qwen';  // 可选: 'qwen', 'dashscope'
     document.getElementById('enable-hot-words').checked = true;
     document.getElementById('enable-vad').checked = true;
     document.getElementById('vad-threshold').value = 0.2;
     document.getElementById('vad-silence-duration').value = 800;
     document.getElementById('keepalive-interval').value = 30;
+    document.getElementById('use-international-endpoint').checked = false;
     
     // 语言检测器
     document.getElementById('language-detector').value = 'cjke';
@@ -189,9 +248,16 @@ async function loadConfigFromServer() {
         document.getElementById('enable-translation').checked = config.translation.enable_translation;
         document.getElementById('target-language').value = config.translation.target_language;
         document.getElementById('fallback-language').value = config.translation.fallback_language || '';
-        document.getElementById('translation-api-type').value = config.translation.api_type;
+        // 处理 openrouter_streaming 的特殊情况
+        const serverApiType = config.translation.api_type;
+        if (serverApiType === 'openrouter_streaming') {
+            document.getElementById('translation-api-type').value = 'openrouter';
+            document.getElementById('openrouter-streaming-mode').checked = true;
+        } else {
+            document.getElementById('translation-api-type').value = serverApiType;
+            document.getElementById('openrouter-streaming-mode').checked = false;
+        }
         document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
-        document.getElementById('translate-partial-results').checked = config.translation.translate_partial_results ?? false;
         
         document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control;
         document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds;
@@ -222,16 +288,21 @@ async function loadConfigFromServer() {
 // 保存配置到 localStorage
 function saveConfigToLocalStorage() {
     try {
+        // 确定实际的 API 类型（如果是 OpenRouter 且启用了流式模式，使用 openrouter_streaming）
+        let actualApiType = document.getElementById('translation-api-type').value;
+        if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
+            actualApiType = 'openrouter_streaming';
+        }
+        
         const config = {
             translation: {
                 enable_translation: document.getElementById('enable-translation').checked,
                 target_language: document.getElementById('target-language').value,
                 fallback_language: document.getElementById('fallback-language').value || null,
-                api_type: document.getElementById('translation-api-type').value,
+                api_type: actualApiType,
                 source_language: document.getElementById('source-language').value,
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,
-                translate_partial_results: document.getElementById('translate-partial-results').checked,
             },
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
@@ -244,6 +315,7 @@ function saveConfigToLocalStorage() {
                 vad_threshold: parseFloat(document.getElementById('vad-threshold').value),
                 vad_silence_duration_ms: parseInt(document.getElementById('vad-silence-duration').value),
                 keepalive_interval: parseInt(document.getElementById('keepalive-interval').value),
+                use_international_endpoint: document.getElementById('use-international-endpoint').checked,
             },
             language_detector: {
                 type: document.getElementById('language-detector').value,
@@ -281,7 +353,7 @@ let previousTranslationApi = null;
 function handleTranslationApiChange(event) {
     const newApi = event.target.value;
     const warningElement = document.getElementById('translation-api-warning');
-    const partialResultsGroup = document.getElementById('translate-partial-results-group');
+    const streamingModeGroup = document.getElementById('openrouter-streaming-mode-group');
     
     // 检查是否需要API Key
     let requiresKey = false;
@@ -289,13 +361,13 @@ function handleTranslationApiChange(event) {
     let keyInputId = '';
     let apiDisplayName = '';
     
-    // 显示/隐藏流式翻译选项
-    if (newApi === 'openrouter_streaming') {
-        partialResultsGroup.style.display = 'block';
+    // 显示/隐藏 OpenRouter 流式翻译模式选项
+    if (newApi === 'openrouter') {
+        streamingModeGroup.style.display = 'block';
     } else {
-        partialResultsGroup.style.display = 'none';
+        streamingModeGroup.style.display = 'none';
         // 如果切换到不支持流式的API，自动关闭流式翻译开关
-        document.getElementById('translate-partial-results').checked = false;
+        document.getElementById('openrouter-streaming-mode').checked = false;
     }
 
     if (newApi === 'deepl') {
@@ -303,7 +375,7 @@ function handleTranslationApiChange(event) {
         keyName = 'deepl_api_key';
         keyInputId = 'deepl-api-key';
         apiDisplayName = 'DeepL';
-    } else if (newApi === 'openrouter' || newApi === 'openrouter_streaming') {
+    } else if (newApi === 'openrouter') {
         requiresKey = true;
         keyName = 'openrouter_api_key';
         keyInputId = 'openrouter-api-key';
@@ -367,12 +439,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const apiSelect = document.getElementById('translation-api-type');
         previousTranslationApi = apiSelect.value;
         
-        // 初始化流式翻译选项的显示状态
-        const partialResultsGroup = document.getElementById('translate-partial-results-group');
-        if (apiSelect.value === 'openrouter_streaming') {
-            partialResultsGroup.style.display = 'block';
+        // 初始化 OpenRouter 流式模式选项的显示状态
+        const streamingModeGroup = document.getElementById('openrouter-streaming-mode-group');
+        if (apiSelect.value === 'openrouter') {
+            streamingModeGroup.style.display = 'block';
         } else {
-            partialResultsGroup.style.display = 'none';
+            streamingModeGroup.style.display = 'none';
         }
     }, 100);
 });
@@ -420,15 +492,21 @@ function onSettingChange() {
 // 保存配置
 async function saveConfig(autoSave = false) {
     try {
+        // 确定实际的 API 类型（如果是 OpenRouter 且启用了流式模式，使用 openrouter_streaming）
+        let actualApiType = document.getElementById('translation-api-type').value;
+        if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
+            actualApiType = 'openrouter_streaming';
+        }
+        
         const config = {
             translation: {
                 enable_translation: document.getElementById('enable-translation').checked,
                 target_language: document.getElementById('target-language').value,
                 fallback_language: document.getElementById('fallback-language').value || null,
-                api_type: document.getElementById('translation-api-type').value,
+                api_type: actualApiType,
                 source_language: document.getElementById('source-language').value,
                 show_partial_results: document.getElementById('show-partial-results').checked,
-                translate_partial_results: document.getElementById('translate-partial-results').checked,
+                enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,
             },
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,

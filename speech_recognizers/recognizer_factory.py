@@ -45,7 +45,7 @@ def create_recognizer(
     创建语音识别器实例
     
     Args:
-        backend: 识别后端，'dashscope', 'qwen' 或 'qwen_international'
+        backend: 识别后端，'dashscope' 或 'qwen'
         callback: 识别回调实例
         sample_rate: 音频采样率
         audio_format: 音频格式
@@ -65,12 +65,13 @@ def create_recognizer(
         ValueError: 当后端不支持时
         RuntimeError: 当依赖缺失时
     """
-    if backend in ('qwen', 'qwen_international'):
+    if backend == 'qwen':
         if QwenSpeechRecognizer is None:
             raise RuntimeError('QwenSpeechRecognizer 不可用，请安装相关依赖')
         
-        # 根据后端类型选择 URL
-        if backend == 'qwen_international':
+        # 根据全局配置选择 URL（国际版或中国大陆版）
+        use_international = getattr(config, 'USE_INTERNATIONAL_ENDPOINT', False)
+        if use_international:
             asr_url = config.QWEN_ASR_URL_INTERNATIONAL
         else:
             asr_url = config.QWEN_ASR_URL
@@ -93,7 +94,7 @@ def create_recognizer(
         
         # 热词语料
         if corpus_text:
-            recognition_kwargs['corpus_text'] = f"这是一段发生在在线多人社交游戏VRChat内的对话。以下是可能出现的关键词:\n{corpus_text}"
+            recognition_kwargs['corpus_text'] = f"这是一段发生在在线多人社交游戏VRChat内的对话。以下是可能出现的词汇:\n{corpus_text}"
         
         # 合并额外参数
         recognition_kwargs.update(extra_kwargs)
@@ -126,15 +127,17 @@ def is_backend_available(backend: str) -> bool:
     检查指定后端是否可用
     
     Args:
-        backend: 后端名称，'dashscope', 'qwen' 或 'qwen_international'
+        backend: 后端名称，'dashscope' 或 'qwen'
     
     Returns:
         bool: True 表示可用，False 表示不可用
     """
-    if backend in ('qwen', 'qwen_international'):
+    if backend == 'qwen':
         return QwenSpeechRecognizer is not None
     elif backend == 'dashscope':
-        return True
+        # dashscope (Fun-ASR) 仅在中国大陆版可用
+        use_international = getattr(config, 'USE_INTERNATIONAL_ENDPOINT', False)
+        return not use_international
     else:
         return False
 
@@ -152,13 +155,17 @@ def select_backend(preferred_backend: str, valid_backends: set) -> str:
     """
     # 验证首选后端是否有效
     if preferred_backend not in valid_backends:
-        preferred_backend = 'dashscope'
+        preferred_backend = 'qwen'
     
     # 检查首选后端是否可用
     if not is_backend_available(preferred_backend):
-        # 回退到 dashscope
-        if preferred_backend in ('qwen', 'qwen_international'):
+        # 国际版不支持 Fun-ASR，回退到 qwen
+        if preferred_backend == 'dashscope':
+            print('[ASR] Fun-ASR 在国际版不可用，已自动切换到 Qwen')
+            return 'qwen'
+        # qwen 后端不可用，回退到 dashscope
+        if preferred_backend == 'qwen':
             print('[ASR] Qwen 后端不可用，缺少依赖，已回退到 DashScope.')
-        return 'dashscope'
+            return 'dashscope'
     
     return preferred_backend

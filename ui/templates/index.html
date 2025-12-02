@@ -72,12 +72,10 @@
                                 <input type="text" id="target-language" class="form-control language-code-input" placeholder="ja" onblur="onSettingChange()">
                                 <select id="target-language-select" class="form-control language-select" onchange="applyLanguageSelection('target-language')">
                                     <option value="">-- 快速选择 --</option>
-                                    <option value="zh">中文 (zh)</option>
                                     <option value="zh-CN">简体中文 (zh-CN)</option>
                                     <option value="zh-TW">繁体中文 (zh-TW)</option>
                                     <option value="en">英语 (en)</option>
-                                    <option value="en-US">美式英语 (en-US)</option>
-                                    <option value="en-GB">英式英语 (en-GB)</option>
+                                    <option value="en-GB">英语（英式） (en-GB)</option>
                                     <option value="ja">日语 (ja)</option>
                                     <option value="ko">韩语 (ko)</option>
                                     <option value="es">西班牙语 (es)</option>
@@ -99,12 +97,10 @@
                                 <select id="fallback-language-select" class="form-control language-select" onchange="applyLanguageSelection('fallback-language')">
                                     <option value="">-- 快速选择 --</option>
                                     <option value="">禁用</option>
-                                    <option value="zh">中文 (zh)</option>
                                     <option value="zh-CN">简体中文 (zh-CN)</option>
                                     <option value="zh-TW">繁体中文 (zh-TW)</option>
                                     <option value="en">英语 (en)</option>
-                                    <option value="en-US">美式英语 (en-US)</option>
-                                    <option value="en-GB">英式英语 (en-GB)</option>
+                                    <option value="en-GB">英语（英式） (en-GB)</option>
                                     <option value="ja">日语 (ja)</option>
                                     <option value="ko">韩语 (ko)</option>
                                     <option value="es">西班牙语 (es)</option>
@@ -131,24 +127,24 @@
                         <div class="form-group">
                             <label for="translation-api-type">翻译API</label>
                             <select id="translation-api-type" class="form-control" onchange="handleTranslationApiChange(event)">
+                                <option value="qwen_mt">Qwen-MT（阿里云，使用 DashScope Key）</option>
                                 <option value="deepl">DeepL（高质量）</option>
                                 <option value="google_dictionary">Google Dictionary（免费，更快，请注意网络连通性）</option>
                                 <option value="google_web">Google Web（免费，备用，请注意网络连通性）</option>
                                 <option value="openrouter">OpenRouter（LLM）</option>
-                                <option value="openrouter_streaming">OpenRouter Streaming (流式翻译)</option>
                             </select>
                             <small id="translation-api-warning" class="form-text" style="color: #e74c3c; display: none;"></small>
                         </div>
                         
-                        <div class="form-group" id="translate-partial-results-group" style="display: none;">
+                        <div class="form-group" id="openrouter-streaming-mode-group" style="display: none;">
                             <label class="switch-label">
-                                <span>流式翻译部分结果</span>
+                                <span>流式翻译模式</span>
                                 <label class="switch">
-                                    <input type="checkbox" id="translate-partial-results" onchange="onSettingChange()">
+                                    <input type="checkbox" id="openrouter-streaming-mode" onchange="onSettingChange()">
                                     <span class="slider"></span>
                                 </label>
                             </label>
-                            <small class="form-text">实时翻译未完成的句子（仅 OpenRouter Streaming 支持）</small>
+                            <small class="form-text">启用后支持翻译部分结果（实时翻译未完成的句子）</small>
                         </div>
                         
                         <div class="form-group">
@@ -181,7 +177,16 @@
                                 阿里云 DashScope API Key 
                                 <span style="color: #e74c3c; font-weight: bold;">*必需</span>
                             </label>
-                            <input type="password" id="dashscope-api-key" class="form-control" placeholder="sk-..." required>
+                            <div style="display: flex; align-items: center; gap: 16px;">
+                                <input type="password" id="dashscope-api-key" class="form-control" placeholder="sk-..." required style="flex: 1;">
+                                <div style="display:flex; align-items:center; gap:8px; white-space:nowrap;">
+                                    <span>国际版</span>
+                                    <label class="switch" style="margin:0;">
+                                        <input type="checkbox" id="use-international-endpoint" onchange="handleInternationalEndpointChange(event)" data-restart-required="true">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
                             <small class="form-text">
                                 Qwen 和 FunASR 语音识别均需要此 Key。
                                 <a href="https://bailian.console.aliyun.com/?tab=api#/api" target="_blank">获取中国大陆版API Key</a>
@@ -218,9 +223,8 @@
                         <div class="form-group">
                             <label for="asr-backend">识别后端</label>
                             <select id="asr-backend" class="form-control" onchange="onSettingChange()" data-restart-required="true">
-                                <option value="qwen">中国大陆 - Qwen3 ASR（推荐）</option>
-                                <option value="dashscope">中国大陆 - Fun-ASR</option>
-                                <option value="qwen_international">国际 - Qwen3 ASR</option>
+                                <option value="qwen">Qwen3 ASR（推荐）</option>
+                                <option value="dashscope">Fun-ASR（仅中国大陆版可用）</option>
                             </select>
                         </div>
 
@@ -229,7 +233,7 @@
                                 <label class="switch-label">
                                     <span>游戏静音时暂停转录</span>
                                     <label class="switch">
-                                        <input type="checkbox" id="enable-mic-control" onchange="onSettingChange()">
+                                        <input type="checkbox" id="enable-mic-control" onchange="onSettingChange()" data-restart-required="true">
                                         <span class="slider"></span>
                                     </label>
                                 </label>

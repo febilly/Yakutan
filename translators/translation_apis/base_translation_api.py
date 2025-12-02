@@ -3,7 +3,7 @@
 定义所有翻译 API 的统一接口
 """
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, List, Dict
 
 
 class BaseTranslationAPI(ABC):
@@ -17,7 +17,8 @@ class BaseTranslationAPI(ABC):
     
     @abstractmethod
     def translate(self, text: str, source_language: str = 'auto', 
-                  target_language: str = 'zh-CN', context: Optional[str] = None, **kwargs) -> str:
+                  target_language: str = 'zh-CN', context: Optional[str] = None,
+                  context_pairs: Optional[List[Dict[str, str]]] = None, **kwargs) -> str:
         """
         翻译文本
         
@@ -25,8 +26,9 @@ class BaseTranslationAPI(ABC):
             text: 要翻译的文本
             source_language: 源语言代码（'auto' 表示自动检测）
             target_language: 目标语言代码
-            context: 可选的上下文信息。只有支持上下文的 API 才应该接受此参数。
-                     不支持上下文的 API 如果收到此参数应该抛出异常。
+            context: 可选的上下文信息（仅原文）。只有支持上下文的 API 才应该接受此参数。
+            context_pairs: 可选的上下文对列表，每个元素包含 'source' 和 'target' 键。
+                           支持上下文的 API 应该优先使用此参数。
             **kwargs: 其他可选参数，如 previous_translation, is_partial 等
         
         Returns:

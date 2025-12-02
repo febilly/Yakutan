@@ -7,11 +7,16 @@ import os
 # 语音识别后端配置
 # ============================================================================
 
+# 是否使用国际版端点（阿里云 DashScope）
+# 国际版用户需要设置为 True
+USE_INTERNATIONAL_ENDPOINT = False
+
 # 首选的语音识别后端
-PREFERRED_ASR_BACKEND = 'qwen'  # 可选: 'dashscope', 'qwen', 'qwen_international'
+PREFERRED_ASR_BACKEND = 'qwen'  # 可选: 'dashscope', 'qwen'
+                                # 注意: 'dashscope' (Fun-ASR) 仅支持中国大陆版
 
 # 有效的后端列表
-VALID_ASR_BACKENDS = {'dashscope', 'qwen', 'qwen_international'}
+VALID_ASR_BACKENDS = {'dashscope', 'qwen'}
 
 # ============================================================================
 # 语音识别模型配置
@@ -52,8 +57,9 @@ FALLBACK_LANGUAGE = 'en'  # 备用翻译语言（当源语言和目标语言相�
 # ============================================================================
 
 # 翻译 API 类型
-# 可选: 'google_web', 'google_dictionary', 'deepl', 'openrouter', 'openrouter_streaming'
-TRANSLATION_API_TYPE = 'deepl'
+# 可选: 'google_web', 'google_dictionary', 'deepl', 'openrouter', 'openrouter_streaming', 'qwen_mt'
+# 注意: openrouter_streaming 是 openrouter 的流式翻译模式，支持翻译部分结果
+TRANSLATION_API_TYPE = 'qwen_mt'
 
 # OpenRouter 翻译模型配置
 OPENROUTER_TRANSLATION_MODEL = 'google/gemini-2.5-flash-lite'
@@ -70,7 +76,7 @@ ENABLE_TRANSLATION = True  # True: 识别后翻译文本
                            # False: 直接发送识别结果，不翻译
 
 # 是否启用流式翻译（翻译部分结果）
-# 仅当 TRANSLATION_API_TYPE 为 'openrouter_streaming' 时有效
+# 当 TRANSLATION_API_TYPE 为 'openrouter_streaming' 时自动启用
 TRANSLATE_PARTIAL_RESULTS = False
 
 # 是否启用反向翻译功能

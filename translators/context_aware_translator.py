@@ -67,7 +67,7 @@ class ContextAwareTranslator:
     
     def _get_previous_caption(self, count: Optional[int] = None) -> str:
         """
-        获取之前的字幕文本作为上下文前缀
+        获取之前的字幕文本作为上下文前缀（仅原文）
         
         Args:
             count: 要包含的历史记录条数，如果为 None 则使用所有可用记录
@@ -110,6 +110,39 @@ class ContextAwareTranslator:
             
             return prefix
     
+    def _get_previous_context_pairs(self, count: Optional[int] = None) -> list:
+        """
+        获取之前的翻译记录作为上下文（包含原文和译文）
+        
+        Args:
+            count: 要包含的历史记录条数，如果为 None 则使用所有可用记录
+        
+        Returns:
+            包含 source 和 target 的字典列表
+        """
+        if count is None:
+            count = len(self.contexts)
+        
+        if count <= 0:
+            return []
+        
+        with self._lock:
+            # 从最新的记录开始反向获取
+            contexts_to_use = self.display_contexts[:count]
+            
+            if not contexts_to_use:
+                return []
+            
+            # 构建原文-译文对列表
+            pairs = []
+            for entry in contexts_to_use:
+                pairs.append({
+                    'source': entry.source_text,
+                    'target': entry.translated_text
+                })
+            
+            return pairs
+    
     def translate(
             self, text: str,
             source_language: str = 'auto',
@@ -139,16 +172,19 @@ class ContextAwareTranslator:
         try:
             # 根据 API 是否原生支持上下文选择不同的处理方式
             if self.native_context_support:
-                # API 原生支持上下文（如 DeepL）
+                # API 原生支持上下文（如 DeepL、OpenRouter、Qwen-MT）
                 if self.context_aware and (len(self.contexts) > 0 or context_prefix):
-                    # 构建上下文字符串
+                    # 构建上下文字符串（仅原文，用于简单的 context 参数）
                     context = f"{context_prefix}\n{self._get_previous_caption()}"
-                    # 直接调用 API 的 translate 方法，传入 context 参数
+                    # 获取完整的原文-译文对列表
+                    context_pairs = self._get_previous_context_pairs()
+                    # 直接调用 API 的 translate 方法，传入 context 和 context_pairs 参数
                     translated_text = self.translation_api.translate(
                         text,
                         source_language=source_language,
                         target_language=actual_target_language,
                         context=context,
+                        context_pairs=context_pairs,
                         **kwargs
                     )
                 else:

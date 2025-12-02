@@ -52,9 +52,11 @@ elif config.TRANSLATION_API_TYPE == 'google_dictionary':
 elif config.TRANSLATION_API_TYPE == 'openrouter':
     from translators.translation_apis.openrouter_api import OpenRouterAPI as TranslationAPI
 elif config.TRANSLATION_API_TYPE == 'openrouter_streaming':
-    from translators.translation_apis.openrouter_streaming_api import OpenRouterStreamingAPI as TranslationAPI
-else:  # 默认使用 deepl
+    from translators.translation_apis.openrouter_api import OpenRouterStreamingAPI as TranslationAPI
+elif config.TRANSLATION_API_TYPE == 'deepl':
     from translators.translation_apis.deepl_api import DeepLAPI as TranslationAPI
+else:  # 默认使用 qwen_mt
+    from translators.translation_apis.qwen_mt_api import QwenMTAPI as TranslationAPI
 
 # ============ 全局变量 ============
 mic = None
@@ -84,9 +86,11 @@ def reinitialize_translator():
     elif config.TRANSLATION_API_TYPE == 'openrouter':
         from translators.translation_apis.openrouter_api import OpenRouterAPI as TranslationAPIClass
     elif config.TRANSLATION_API_TYPE == 'openrouter_streaming':
-        from translators.translation_apis.openrouter_streaming_api import OpenRouterStreamingAPI as TranslationAPIClass
-    else:
+        from translators.translation_apis.openrouter_api import OpenRouterStreamingAPI as TranslationAPIClass
+    elif config.TRANSLATION_API_TYPE == 'deepl':
         from translators.translation_apis.deepl_api import DeepLAPI as TranslationAPIClass
+    else:  # 默认使用 qwen_mt
+        from translators.translation_apis.qwen_mt_api import QwenMTAPI as TranslationAPIClass
 
     # 创建新的翻译 API 实例并注入 ContextAwareTranslator
     translation_api = TranslationAPIClass()
@@ -461,7 +465,7 @@ async def stop_recognition_async(recognizer: SpeechRecognizer):
             pass
         recognition_started = False
     else:
-        # qwen 和 qwen_international 都使用 pause
+        # qwen 使用 pause
         try:
             await loop.run_in_executor(executor, recognizer.pause)
         except Exception:
@@ -478,7 +482,7 @@ async def start_recognition_async(recognizer: SpeechRecognizer):
     loop = asyncio.get_event_loop()
 
     try:
-        if CURRENT_ASR_BACKEND in ('qwen', 'qwen_international') and recognition_started:
+        if CURRENT_ASR_BACKEND == 'qwen' and recognition_started:
             await loop.run_in_executor(executor, recognizer.resume)
         else:
             await loop.run_in_executor(executor, recognizer.start)
@@ -506,8 +510,8 @@ async def handle_mute_change(is_muted):
         print('[ASR] 识别实例未初始化')
         return
     
-    stop_word = '暂停' if CURRENT_ASR_BACKEND in ('qwen', 'qwen_international') else '停止'
-    start_word = '恢复' if CURRENT_ASR_BACKEND in ('qwen', 'qwen_international') and recognition_started else '开始'
+    stop_word = '暂停' if CURRENT_ASR_BACKEND == 'qwen' else '停止'
+    start_word = '恢复' if CURRENT_ASR_BACKEND == 'qwen' and recognition_started else '开始'
 
     if is_muted:
         # 静音状态 - 延迟停止识别
@@ -588,7 +592,7 @@ async def main():
         try:
             hot_words_manager = HotWordsManager()
             hot_words_manager.load_all_hot_words()
-            if backend in ('qwen', 'qwen_international'):
+            if backend == 'qwen':
                 words = [entry.get('text') for entry in hot_words_manager.get_hot_words() if entry.get('text')]
                 if words:
                     corpus_text = "\n".join(words)
@@ -634,7 +638,7 @@ async def main():
     if vocabulary_id and backend == 'dashscope':
         print(f'[ASR] 使用热词表: {vocabulary_id}')
     
-    if backend in ('qwen', 'qwen_international'):
+    if backend == 'qwen':
         vad_status = '启用' if config.ENABLE_VAD else '禁用'
         print(f'[ASR] VAD状态: {vad_status}')
         if config.ENABLE_VAD:
@@ -660,8 +664,8 @@ async def main():
     
     # 根据配置决定是否立即启动识别
     if config.ENABLE_MIC_CONTROL:
-        stop_hint = '暂停' if backend in ('qwen', 'qwen_international') else '停止'
-        resume_hint = '恢复' if backend in ('qwen', 'qwen_international') else '开始'
+        stop_hint = '暂停' if backend == 'qwen' else '停止'
+        resume_hint = '恢复' if backend == 'qwen' else '开始'
         print("=" * 60)
         print("[模式] 麦克风控制模式已启用")
         print("等待VRChat静音状态变化...")
@@ -700,7 +704,7 @@ async def main():
         # 如果识别正在运行,停止它
         if recognition_active:
             await stop_recognition_async(recognition_instance)
-            halt_word = 'paused' if CURRENT_ASR_BACKEND in ('qwen', 'qwen_international') else 'stopped'
+            halt_word = 'paused' if CURRENT_ASR_BACKEND == 'qwen' else 'stopped'
             print(f'Recognition {halt_word}.')
         
         # 获取统计信息(使用异步方式)
