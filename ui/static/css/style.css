@@ -45,6 +45,37 @@ header h1 {
     font-weight: 600;
 }
 
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.language-selector-wrapper {
+    display: flex;
+    align-items: center;
+}
+
+.language-selector {
+    padding: 6px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 14px;
+    background-color: var(--card-bg);
+    color: var(--text-color);
+    cursor: pointer;
+    transition: border-color 0.3s;
+}
+
+.language-selector:hover {
+    border-color: var(--primary-color);
+}
+
+.language-selector:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
 .status-indicator {
     display: flex;
     align-items: center;
