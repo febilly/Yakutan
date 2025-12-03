@@ -405,7 +405,7 @@ input:checked + .slider:before {
 }
 
 .collapsible-content {
-    max-height: 800px;
+    max-height: 1500px;
     overflow: hidden;
     transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
