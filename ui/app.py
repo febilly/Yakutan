@@ -196,12 +196,12 @@ def update_config_api():
             except Exception as e:
                 print(f'Error notifying service to reload translator: {e}')
 
-            return jsonify({'success': True, 'message': '配置已更新'})
+            return jsonify({'success': True, 'message_id': 'msg.configUpdated', 'message': '配置已更新'})
         else:
-            return jsonify({'success': False, 'message': '配置更新失败'}), 500
+            return jsonify({'success': False, 'message_id': 'msg.configUpdateFailed', 'message': '配置更新失败'}), 500
     except Exception as e:
         print(f'Error updating config: {e}')
-        return jsonify({'success': False, 'message': '配置更新失败'}), 500
+        return jsonify({'success': False, 'message_id': 'msg.configUpdateFailed', 'message': '配置更新失败'}), 500
 
 
 @app.route('/api/status', methods=['GET'])
@@ -216,7 +216,7 @@ def start_service():
     global service_thread, service_status
     
     if service_status['running']:
-        return jsonify({'success': False, 'message': '服务已在运行中'})
+        return jsonify({'success': False, 'message_id': 'msg.serviceAlreadyRunning', 'message': '服务已在运行中'})
     
     try:
         # 从请求中获取 API Keys
@@ -236,10 +236,10 @@ def start_service():
         service_thread = threading.Thread(target=run_service_async, daemon=True)
         service_thread.start()
         service_status['running'] = True
-        return jsonify({'success': True, 'message': '服务已启动'})
+        return jsonify({'success': True, 'message_id': 'msg.serviceStarted', 'message': '服务已启动'})
     except Exception as e:
         print(f'Error starting service: {e}')
-        return jsonify({'success': False, 'message': '启动失败'}), 500
+        return jsonify({'success': False, 'message_id': 'msg.startFailed', 'message': '启动失败'}), 500
 
 
 @app.route('/api/service/stop', methods=['POST'])
@@ -248,7 +248,7 @@ def stop_service():
     global service_thread, service_status, service_loop, stop_event
     
     if not service_status['running']:
-        return jsonify({'success': False, 'message': '服务未运行'})
+        return jsonify({'success': False, 'message_id': 'msg.serviceNotRunning', 'message': '服务未运行'})
     
     try:
         # 从 main 模块获取最新的 stop_event
@@ -265,10 +265,10 @@ def stop_service():
         service_status['running'] = False
         service_status['recognition_active'] = False
         stop_event = None
-        return jsonify({'success': True, 'message': '服务已停止'})
+        return jsonify({'success': True, 'message_id': 'msg.serviceStopped', 'message': '服务已停止'})
     except Exception as e:
         print(f'Error stopping service: {e}')
-        return jsonify({'success': False, 'message': '停止失败'}), 500
+        return jsonify({'success': False, 'message_id': 'msg.stopFailed', 'message': '停止失败'}), 500
 
 
 @app.route('/api/service/restart', methods=['POST'])
@@ -277,7 +277,7 @@ def restart_service():
     global service_thread, service_status, service_loop, stop_event
     
     if not service_status['running']:
-        return jsonify({'success': False, 'message': '服务未运行，无需重启'})
+        return jsonify({'success': False, 'message_id': 'msg.noRestartNeeded', 'message': '服务未运行，无需重启'})
     
     try:
         # 从 main 模块获取最新的 stop_event
@@ -300,10 +300,10 @@ def restart_service():
         service_thread.start()
         service_status['running'] = True
         
-        return jsonify({'success': True, 'message': '服务已重启'})
+        return jsonify({'success': True, 'message_id': 'msg.serviceRestarted', 'message': '服务已重启'})
     except Exception as e:
         print(f'Error restarting service: {e}')
-        return jsonify({'success': False, 'message': '重启失败'}), 500
+        return jsonify({'success': False, 'message_id': 'msg.restartFailed', 'message': '重启失败'}), 500
 
 
 @app.route('/api/config/defaults', methods=['GET'])
@@ -345,23 +345,23 @@ def check_api_key():
         api_key = data.get('api_key', '').strip()
         
         if not api_key:
-            return jsonify({'valid': False, 'message': '请输入 DashScope API Key'})
+            return jsonify({'valid': False, 'message_id': 'msg.enterDashscopeKey', 'message': '请输入 DashScope API Key'})
         
         # 检查API Key格式
         if not api_key.startswith('sk-'):
-            return jsonify({'valid': False, 'message': 'API Key 格式无效（应以 sk- 开头）'})
+            return jsonify({'valid': False, 'message_id': 'msg.invalidKeyFormat', 'message': 'API Key 格式无效（应以 sk- 开头）'})
         
         # 检查API Key是否是占位符
         if api_key == '<your-dashscope-api-key>':
-            return jsonify({'valid': False, 'message': '请替换占位符为真实的 API Key'})
+            return jsonify({'valid': False, 'message_id': 'msg.replacePlaceholder', 'message': '请替换占位符为真实的 API Key'})
         
         # 临时设置API Key到环境变量
         os.environ['DASHSCOPE_API_KEY'] = api_key
         
-        return jsonify({'valid': True, 'message': 'API Key 格式有效'})
+        return jsonify({'valid': True, 'message_id': 'msg.keyFormatValid', 'message': 'API Key 格式有效'})
     except Exception as e:
         print(f'Error checking API key: {e}')
-        return jsonify({'valid': False, 'message': '检查失败'}), 500
+        return jsonify({'valid': False, 'message_id': 'msg.checkFailed', 'message': '检查失败'}), 500
 
 
 if __name__ == '__main__':

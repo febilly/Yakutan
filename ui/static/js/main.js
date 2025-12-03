@@ -12,6 +12,11 @@ let pendingWarningMessage = null;
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
+    // 先初始化 i18n 系统
+    if (window.i18n) {
+        window.i18n.initI18n();
+    }
+    
     loadConfigFromLocalStorage();
     loadAPIKeys();
     updateStatus();
@@ -82,12 +87,13 @@ function handleInternationalEndpointChange(event) {
 function updateAsrOptionsForInternational(useInternational) {
     const asrBackendSelect = document.getElementById('asr-backend');
     const dashscopeOption = asrBackendSelect.querySelector('option[value="dashscope"]');
+    const t = window.i18n ? window.i18n.t : (key) => key;
     
     if (useInternational) {
         // 国际版：禁用 Fun-ASR 选项
         if (dashscopeOption) {
             dashscopeOption.disabled = true;
-            dashscopeOption.textContent = 'Fun-ASR（国际版不可用）';
+            dashscopeOption.textContent = t('asr.dashscopeDisabled');
         }
         
         // 如果当前选中的是 dashscope，自动切换到 qwen
@@ -99,7 +105,7 @@ function updateAsrOptionsForInternational(useInternational) {
         // 中国大陆版：启用 Fun-ASR 选项
         if (dashscopeOption) {
             dashscopeOption.disabled = false;
-            dashscopeOption.textContent = 'Fun-ASR（仅中国大陆版可用）';
+            dashscopeOption.textContent = t('asr.dashscope');
         }
     }
 }
@@ -354,6 +360,7 @@ function handleTranslationApiChange(event) {
     const newApi = event.target.value;
     const warningElement = document.getElementById('translation-api-warning');
     const streamingModeGroup = document.getElementById('openrouter-streaming-mode-group');
+    const t = window.i18n ? window.i18n.t : (key) => key;
     
     // 检查是否需要API Key
     let requiresKey = false;
@@ -396,7 +403,7 @@ function handleTranslationApiChange(event) {
             }
             
             // 显示警告消息
-            warningElement.textContent = `⚠️ 使用 ${apiDisplayName} 需要配置 API Key，请先在"API Keys 配置"中填写`;
+            warningElement.textContent = '⚠️ ' + t('msg.apiKeyRequired', { api: apiDisplayName });
             warningElement.style.display = 'block';
             
             // 5秒后自动隐藏
@@ -491,6 +498,8 @@ function onSettingChange() {
 
 // 保存配置
 async function saveConfig(autoSave = false) {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    
     try {
         // 确定实际的 API 类型（如果是 OpenRouter 且启用了流式模式，使用 openrouter_streaming）
         let actualApiType = document.getElementById('translation-api-type').value;
@@ -537,15 +546,16 @@ async function saveConfig(autoSave = false) {
         
         if (result.success) {
             if (!autoSave) {
-                showMessage('配置保存成功！', 'success');
+                showMessage(t('msg.configSaved'), 'success');
             }
         } else {
-            showMessage('配置保存失败: ' + result.message, 'error');
+            const localizedMsg = localizeBackendMessage(result.message_id, result.message);
+            showMessage(t('msg.saveConfigFailed') + ': ' + localizedMsg, 'error');
         }
     } catch (error) {
         console.error('保存配置失败:', error);
         if (!autoSave) {
-            showMessage('保存配置失败', 'error');
+            showMessage(t('msg.saveConfigFailed'), 'error');
         }
     }
 }
@@ -561,13 +571,15 @@ async function updateStatus() {
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
         
+        const t = window.i18n ? window.i18n.t : (key) => key;
+        
         if (status.running) {
-            statusText.textContent = '服务运行中';
+            statusText.textContent = t('status.running');
             statusDot.classList.add('running');
             startBtn.disabled = true;
             stopBtn.disabled = false;
         } else {
-            statusText.textContent = '服务未运行';
+            statusText.textContent = t('status.notRunning');
             statusDot.classList.remove('running');
             startBtn.disabled = false;
             stopBtn.disabled = true;
@@ -580,8 +592,10 @@ async function updateStatus() {
 // 启动服务
 async function startService() {
     const startBtn = document.getElementById('start-btn');
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    
     startBtn.disabled = true;
-    startBtn.textContent = '启动中...';
+    startBtn.textContent = t('btn.starting');
     pendingWarningMessage = null;
     
     try {
@@ -589,9 +603,9 @@ async function startService() {
         const dashscopeKey = document.getElementById('dashscope-api-key').value.trim();
         
         if (!dashscopeKey) {
-            showMessage('❌ 错误：必须配置阿里云 DashScope API Key 才能启动服务！', 'error');
+            showMessage('❌ ' + t('msg.dashscopeRequired'), 'error');
             startBtn.disabled = false;
-            startBtn.textContent = '启动服务';
+            startBtn.textContent = t('btn.startService');
             
             // 展开API Keys配置区域，提示用户输入
             const apiKeysSection = document.getElementById('api-keys');
@@ -617,9 +631,11 @@ async function startService() {
         const checkDashscopeResult = await checkDashscopeResponse.json();
         
         if (!checkDashscopeResult.valid) {
-            showMessage('❌ DashScope API Key 验证失败: ' + checkDashscopeResult.message, 'error');
+            // 后端返回消息ID，需要本地化
+            const localizedMsg = localizeBackendMessage(checkDashscopeResult.message_id, checkDashscopeResult.message);
+            showMessage('❌ ' + t('msg.dashscopeValidationFailed') + localizedMsg, 'error');
             startBtn.disabled = false;
-            startBtn.textContent = '启动服务';
+            startBtn.textContent = t('btn.startService');
             
             // 高亮并震动 API Key 输入框
             highlightAPIKeyInput('dashscope-api-key');
@@ -643,8 +659,8 @@ async function startService() {
                 translationApiSelect.value = translationApiType;
                 translationApiSelect.dispatchEvent(new Event('change'));
                 saveConfigToLocalStorage();
-                pendingWarningMessage = '未检测到所选翻译接口的 API Key，已自动切换为 Google Dictionary。';
-                showMessage(`⚠️ ${pendingWarningMessage}`, 'warning');
+                pendingWarningMessage = t('msg.autoSwitchToGoogle');
+                showMessage('⚠️ ' + pendingWarningMessage, 'warning');
             }
         }
         
@@ -654,9 +670,9 @@ async function startService() {
             console.log('✓ 配置已同步到服务器');
         } catch (error) {
             console.error('同步配置失败:', error);
-            showMessage('❌ 同步配置失败，无法启动服务', 'error');
+            showMessage('❌ ' + t('msg.syncConfigFailed'), 'error');
             startBtn.disabled = false;
-            startBtn.textContent = '启动服务';
+            startBtn.textContent = t('btn.startService');
             return;
         }
         
@@ -680,23 +696,24 @@ async function startService() {
         
         if (result.success) {
             if (pendingWarningMessage) {
-                showMessage(`⚠️ ${pendingWarningMessage}服务已启动成功。`, 'warning');
+                showMessage('⚠️ ' + pendingWarningMessage + ' ' + t('msg.serviceStartSuccess'), 'warning');
                 pendingWarningMessage = null;
             } else {
-                showMessage('✅ 服务启动成功', 'success');
+                showMessage('✅ ' + t('msg.serviceStartSuccess'), 'success');
             }
             setTimeout(updateStatus, 500);
         } else {
-            showMessage('❌ 服务启动失败: ' + result.message, 'error');
+            const localizedMsg = localizeBackendMessage(result.message_id, result.message);
+            showMessage('❌ ' + t('msg.serviceStartFailed') + localizedMsg, 'error');
             startBtn.disabled = false;
         }
     } catch (error) {
         console.error('启动服务失败:', error);
-        showMessage('❌ 启动服务失败', 'error');
+        showMessage('❌ ' + t('msg.startServiceFailed'), 'error');
         startBtn.disabled = false;
     } finally {
         pendingWarningMessage = null;
-        startBtn.textContent = '启动服务';
+        startBtn.textContent = t('btn.startService');
     }
 }
 
@@ -717,8 +734,10 @@ function highlightAPIKeyInput(inputId) {
 // 停止服务
 async function stopService() {
     const stopBtn = document.getElementById('stop-btn');
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    
     stopBtn.disabled = true;
-    stopBtn.textContent = '停止中...';
+    stopBtn.textContent = t('btn.stopping');
     
     try {
         const response = await fetch(`${API_BASE}/service/stop`, {
@@ -728,18 +747,19 @@ async function stopService() {
         const result = await response.json();
         
         if (result.success) {
-            showMessage('服务停止成功', 'success');
+            showMessage(t('msg.serviceStopSuccess'), 'success');
             setTimeout(updateStatus, 500);
         } else {
-            showMessage('服务停止失败: ' + result.message, 'error');
+            const localizedMsg = localizeBackendMessage(result.message_id, result.message);
+            showMessage(t('msg.serviceStopFailed') + localizedMsg, 'error');
             stopBtn.disabled = false;
         }
     } catch (error) {
         console.error('停止服务失败:', error);
-        showMessage('停止服务失败', 'error');
+        showMessage(t('msg.stopServiceFailed'), 'error');
         stopBtn.disabled = false;
     } finally {
-        stopBtn.textContent = '停止服务';
+        stopBtn.textContent = t('btn.stopService');
     }
 }
 
@@ -763,7 +783,9 @@ async function restartService() {
 
 // 恢复默认设置
 async function resetToDefaults() {
-    if (!confirm('确定要恢复默认设置吗？（API Keys将被保留）')) {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    
+    if (!confirm(t('msg.confirmReset'))) {
         return;
     }
     
@@ -779,7 +801,7 @@ async function resetToDefaults() {
         
         // 再保存到服务器
         await saveConfig();
-        showMessage('✅ 已恢复默认设置', 'success');
+        showMessage('✅ ' + t('msg.defaultsRestored'), 'success');
         
         // 如果服务正在运行，重启
         const statusResponse = await fetch(`${API_BASE}/status`);
@@ -789,7 +811,7 @@ async function resetToDefaults() {
         }
     } catch (error) {
         console.error('恢复默认设置失败:', error);
-        showMessage('恢复默认设置失败', 'error');
+        showMessage(t('msg.restoreDefaultsFailed'), 'error');
     }
 }
 
@@ -803,6 +825,25 @@ function showMessage(text, type) {
     setTimeout(() => {
         messageEl.className = 'message';
     }, 5000);
+}
+
+// 显示本地化消息（使用消息ID）
+function showLocalizedMessage(messageId, type, params = {}) {
+    const text = window.i18n ? window.i18n.t(messageId, params) : messageId;
+    showMessage(text, type);
+}
+
+// 本地化后端消息
+// 后端返回 message_id（消息ID）和 message（默认消息）
+// 前端根据 message_id 获取本地化文本，如果没有则使用默认消息
+function localizeBackendMessage(messageId, defaultMessage) {
+    if (!messageId) {
+        return defaultMessage || '';
+    }
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const localized = t(messageId);
+    // 如果翻译结果和 key 相同，说明没有找到翻译，使用默认消息
+    return localized !== messageId ? localized : (defaultMessage || messageId);
 }
 
 // 折叠/展开面板
