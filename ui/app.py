@@ -63,6 +63,7 @@ def get_config_dict():
             'fallback_language': config.FALLBACK_LANGUAGE,
             'api_type': config.TRANSLATION_API_TYPE,
             'show_partial_results': config.SHOW_PARTIAL_RESULTS,
+            'enable_furigana': getattr(config, 'ENABLE_JA_FURIGANA', False),
             'enable_reverse_translation': config.ENABLE_REVERSE_TRANSLATION,
         },
         # 麦克风控制配置
@@ -123,6 +124,8 @@ def update_config(config_data):
                 config.TRANSLATE_PARTIAL_RESULTS = (trans['api_type'] == 'openrouter_streaming')
             if 'show_partial_results' in trans:
                 config.SHOW_PARTIAL_RESULTS = trans['show_partial_results']
+            if 'enable_furigana' in trans:
+                config.ENABLE_JA_FURIGANA = trans['enable_furigana']
             if 'enable_reverse_translation' in trans:
                 config.ENABLE_REVERSE_TRANSLATION = trans['enable_reverse_translation']
         
@@ -325,6 +328,7 @@ def get_defaults():
             'fallback_language': 'en',
             'api_type': 'deepl',
             'show_partial_results': False,
+            'enable_furigana': False,
             'enable_reverse_translation': True,
         },
         'mic_control': {

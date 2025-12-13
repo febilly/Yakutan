@@ -16,6 +16,31 @@ except ImportError:  # pragma: no cover
     QwenSpeechRecognizer = None  # type: ignore[assignment]
 
 
+def _normalize_qwen_language(lang: Optional[str]) -> Optional[str]:
+    """Normalize language code to Qwen ASR 2-letter hint.
+    Returns None when no valid hint (auto or empty)."""
+    if not lang:
+        return None
+    lang_lower = lang.strip().lower()
+    if lang_lower in ('auto', 'auto-detect'):
+        return None
+
+    # Map common variants to two-letter codes
+    if lang_lower in ('zh', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant'):
+        return 'zh'
+    if lang_lower in ('en', 'en-us', 'en-gb'):
+        return 'en'
+    if lang_lower.startswith('ja'):
+        return 'ja'
+    if lang_lower.startswith('ko'):
+        return 'ko'
+
+    # Fallback: take the first two characters when plausible
+    if len(lang_lower) >= 2:
+        return lang_lower[:2]
+    return None
+
+
 def init_dashscope_api_key() -> None:
     """
     初始化 DashScope API Key
@@ -87,10 +112,10 @@ def create_recognizer(
             'keepalive_interval': keepalive_interval,
         }
         
-        # 语言提示
-        # language_hint = None if source_language == 'auto' else source_language
-        # if language_hint:
-        #     recognition_kwargs['language'] = language_hint
+        # 语言提示：仅 qwen 支持，且 source_language 不是 auto 时才传递
+        language_hint = _normalize_qwen_language(source_language)
+        if language_hint:
+            recognition_kwargs['language'] = language_hint
         
         # 热词语料
         if corpus_text:

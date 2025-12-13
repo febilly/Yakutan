@@ -16,6 +16,11 @@ document.addEventListener('DOMContentLoaded', function() {
     if (window.i18n) {
         window.i18n.initI18n();
     }
+
+    const targetLangInput = document.getElementById('target-language');
+    if (targetLangInput) {
+        targetLangInput.addEventListener('input', updateFuriganaVisibility);
+    }
     
     loadConfigFromLocalStorage();
     loadAPIKeys();
@@ -141,6 +146,7 @@ function applyLanguageSelection(inputId) {
         // 重置下拉列表到提示状态
         selectElement.value = '';
         // 触发配置更新
+        updateFuriganaVisibility();
         onSettingChange();
     }
 }
@@ -169,6 +175,7 @@ function loadConfigFromLocalStorage() {
                 }
                 document.getElementById('source-language').value = config.translation.source_language || 'auto';
                 document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
+                document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
                 document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? true;
             }
             
@@ -204,12 +211,14 @@ function loadConfigFromLocalStorage() {
         
         // 根据翻译开关显示/隐藏翻译选项
         toggleTranslationOptions();
+        updateFuriganaVisibility();
         
     } catch (error) {
         console.error('加载本地配置失败:', error);
         // 出错时使用前端默认值
         loadDefaultConfig();
         toggleTranslationOptions();
+        updateFuriganaVisibility();
     }
 }
 
@@ -222,6 +231,7 @@ function loadDefaultConfig() {
     document.getElementById('translation-api-type').value = 'qwen_mt';
     document.getElementById('source-language').value = 'auto';
     document.getElementById('show-partial-results').checked = false;
+    document.getElementById('enable-furigana').checked = false;
     document.getElementById('enable-reverse-translation').checked = true;
     document.getElementById('openrouter-streaming-mode').checked = false;
     
@@ -242,6 +252,7 @@ function loadDefaultConfig() {
     document.getElementById('language-detector').value = 'cjke';
     
     console.log('✓ 已加载前端默认配置');
+    updateFuriganaVisibility();
 }
 
 // 从服务器加载配置（仅在本地无配置时使用）
@@ -264,6 +275,7 @@ async function loadConfigFromServer() {
             document.getElementById('openrouter-streaming-mode').checked = false;
         }
         document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
+        document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
         
         document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control;
         document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds;
@@ -283,6 +295,7 @@ async function loadConfigFromServer() {
         
         // 根据翻译开关显示/隐藏翻译选项
         toggleTranslationOptions();
+        updateFuriganaVisibility();
         
         console.log('已从服务器加载配置');
         
@@ -308,6 +321,7 @@ function saveConfigToLocalStorage() {
                 api_type: actualApiType,
                 source_language: document.getElementById('source-language').value,
                 show_partial_results: document.getElementById('show-partial-results').checked,
+                enable_furigana: document.getElementById('enable-furigana').checked,
                 enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,
             },
             mic_control: {
@@ -350,6 +364,20 @@ function toggleTranslationOptions() {
         translationOptions.classList.remove('hidden');
     } else {
         translationOptions.classList.add('hidden');
+    }
+}
+
+// 根据目标语言显示/隐藏日语假名选项
+function updateFuriganaVisibility() {
+    const targetLang = document.getElementById('target-language').value.trim().toLowerCase();
+    const furiganaGroup = document.getElementById('furigana-option');
+    if (!furiganaGroup) return;
+
+    if (targetLang === 'ja' || targetLang === 'ja-jp') {
+        furiganaGroup.style.display = 'block';
+    } else {
+        furiganaGroup.style.display = 'none';
+        document.getElementById('enable-furigana').checked = false;
     }
 }
 
@@ -515,6 +543,7 @@ async function saveConfig(autoSave = false) {
                 api_type: actualApiType,
                 source_language: document.getElementById('source-language').value,
                 show_partial_results: document.getElementById('show-partial-results').checked,
+                enable_furigana: document.getElementById('enable-furigana').checked,
                 enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,
             },
             mic_control: {

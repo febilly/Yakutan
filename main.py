@@ -58,6 +58,54 @@ elif config.TRANSLATION_API_TYPE == 'deepl':
 else:  # 默认使用 qwen_mt
     from translators.translation_apis.qwen_mt_api import QwenMTAPI as TranslationAPI
 
+# ============ 可选的日语假名标注支持 ============
+try:
+    from pykakasi import kakasi as _kakasi_factory
+
+    _kakasi = _kakasi_factory()
+    _kakasi.setMode("J", "H")  # Kanji -> Hiragana
+    _kakasi.setMode("K", "H")  # Katakana -> Hiragana
+    _kakasi.setMode("H", "H")  # Hiragana stays Hiragana
+except Exception:
+    _kakasi = None
+
+
+def _contains_kanji(text: str) -> bool:
+    """Check if the text contains any CJK ideographs."""
+    return any('\u4e00' <= ch <= '\u9fff' for ch in text)
+
+
+def add_furigana_if_needed(text: str, target_language: str) -> str:
+    """Append Hiragana readings to Japanese translations when enabled."""
+    if not text or not getattr(config, 'ENABLE_JA_FURIGANA', False):
+        print("未启用日语假名标注")
+        return text
+
+    lang = (target_language or '').lower()
+    if not lang.startswith('ja'):
+        print("未启用日语假名标注")
+        return text
+
+    if _kakasi is None:
+        print("pykakasi 库未正确加载，无法添加假名标注")
+        return text
+
+    try:
+        tokens = _kakasi.convert(text)
+        parts = []
+        for token in tokens:
+            orig = token.get('orig', '')
+            hira = token.get('hira') or token.get('kana')
+
+            if orig and _contains_kanji(orig) and hira and hira != orig:
+                parts.append(f"{orig}({hira})")
+            else:
+                parts.append(orig)
+
+        return "".join(parts)
+    except Exception:
+        return text
+
 # ============ 全局变量 ============
 mic = None
 stream = None
@@ -217,8 +265,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             else:
                 translated_text = ""
 
+            display_translation = add_furigana_if_needed(translated_text, config.TARGET_LANGUAGE)
+
             segment_display = f"{segment.strip()}……"
-            translation_display = translated_text.strip()
+            translation_display = display_translation.strip()
             if translation_display and not translation_display.endswith("……"):
                 translation_display = f"{translation_display}……"
             elif not translation_display:
@@ -311,13 +361,15 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 self.pending_partial_segment = None
                 
                 is_translated = True
-                print(f'译文：{translated_text}')
+                print(f'目标语言：{actual_target}')
+                display_translated_text = add_furigana_if_needed(translated_text, actual_target)
+                print(f'译文：{display_translated_text}')
 
-                display_text = f"[{normalized_source}→{actual_target}] {translated_text} ({text})"
+                display_text = f"[{normalized_source}→{actual_target}] {display_translated_text} ({text})"
                 
                 # 如果消息过长，尝试去掉原文部分
                 if len(display_text) > 144:
-                    display_text = f"[{normalized_source}→{actual_target}] {translated_text}"
+                    display_text = f"[{normalized_source}→{actual_target}] {display_translated_text}"
 
         if display_text is None:
             return

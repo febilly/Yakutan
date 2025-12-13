@@ -79,6 +79,9 @@ ENABLE_TRANSLATION = True  # True: 识别后翻译文本
 # 当 TRANSLATION_API_TYPE 为 'openrouter_streaming' 时自动启用
 TRANSLATE_PARTIAL_RESULTS = False
 
+# 是否为日语译文添加假名标注（仅目标语言为日语时生效）
+ENABLE_JA_FURIGANA = False
+
 # 是否启用反向翻译功能
 ENABLE_REVERSE_TRANSLATION = True  # True: 翻译后再反向翻译回源语言
                                     # False: 不进行反向翻译

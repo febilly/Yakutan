@@ -119,6 +119,17 @@
                             </div>
                             <small class="form-text" data-i18n="hint.fallbackLanguage">可直接输入语言代码，留空则禁用备用语言</small>
                         </div>
+
+                        <div class="form-group" id="furigana-option" style="display: none;">
+                            <label class="switch-label">
+                                <span data-i18n="label.enableFurigana">日语译文添加假名</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="enable-furigana" onchange="onSettingChange()">
+                                    <span class="slider"></span>
+                                </label>
+                            </label>
+                            <small class="form-text" data-i18n="hint.enableFurigana">仅在目标语言为日语时可用</small>
+                        </div>
                     </div>
                 </section>
 

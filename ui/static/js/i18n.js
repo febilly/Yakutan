@@ -45,6 +45,8 @@ const translations = {
         'hint.targetLanguage': '可直接输入语言代码，或从下拉列表快速选择',
         'label.fallbackLanguage': '备用语言（当源语言与目标语言相同时使用）',
         'hint.fallbackLanguage': '可直接输入语言代码，留空则禁用备用语言',
+        'label.enableFurigana': '日语译文添加假名',
+        'hint.enableFurigana': '仅在目标语言为日语时可用',
         'select.quickSelect': '-- 快速选择 --',
         'select.disabled': '禁用',
 
@@ -195,6 +197,8 @@ const translations = {
         'hint.targetLanguage': 'Enter language code directly or select from the dropdown',
         'label.fallbackLanguage': 'Fallback Language (used when source equals target)',
         'hint.fallbackLanguage': 'Enter language code directly, leave empty to disable',
+        'label.enableFurigana': 'Add furigana to Japanese output',
+        'hint.enableFurigana': 'Available only when target language is Japanese',
         'select.quickSelect': '-- Quick Select --',
         'select.disabled': 'Disabled',
 
