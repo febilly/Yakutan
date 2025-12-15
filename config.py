@@ -16,7 +16,7 @@ PREFERRED_ASR_BACKEND = 'qwen'  # 可选: 'dashscope', 'qwen'
                                 # 注意: 'dashscope' (Fun-ASR) 仅支持中国大陆版
 
 # 有效的后端列表
-VALID_ASR_BACKENDS = {'dashscope', 'qwen'}
+VALID_ASR_BACKENDS = {'dashscope', 'qwen', 'soniox'}
 
 # ============================================================================
 # 语音识别模型配置
@@ -31,6 +31,22 @@ QWEN_ASR_MODEL = 'qwen3-asr-flash-realtime'
 # Qwen WebSocket URL
 QWEN_ASR_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime'
 QWEN_ASR_URL_INTERNATIONAL = 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime'
+
+# ============================================================================
+# Soniox 配置
+# ============================================================================
+
+# Soniox WebSocket URL
+SONIOX_WEBSOCKET_URL = 'wss://stt-rt.soniox.com/transcribe-websocket'
+
+# Soniox 模型
+SONIOX_MODEL = 'stt-rt-v3'
+
+# Soniox 语言提示（用于提高识别准确度）
+SONIOX_LANGUAGE_HINTS = ['en', 'zh', 'ja', 'ko']
+
+# 是否启用端点检测（自动断句）
+SONIOX_ENABLE_ENDPOINT_DETECTION = True
 
 # ============================================================================
 # 音频参数配置
@@ -81,6 +97,9 @@ TRANSLATE_PARTIAL_RESULTS = False
 
 # 是否为日语译文添加假名标注（仅目标语言为日语时生效）
 ENABLE_JA_FURIGANA = False
+
+# 是否为中文添加拼音标注（带声调）
+ENABLE_ZH_PINYIN = False
 
 # 是否启用反向翻译功能
 ENABLE_REVERSE_TRANSLATION = True  # True: 翻译后再反向翻译回源语言

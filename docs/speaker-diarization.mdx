@@ -1,0 +1,114 @@
+# Speaker diarization
+URL: /stt/concepts/speaker-diarization
+
+Learn how to separate speakers in both real-time and asynchronous processing.
+
+***
+
+title: Speaker diarization
+description: Learn how to separate speakers in both real-time and asynchronous processing.
+keywords: "speaker recognition, speaker diarization, speaker identification, separate speakers, identify speakers, speaker separation"
+--------------------------------------------------------------------------------------------------------------------------------------
+
+## Overview
+
+Soniox Speech-to-Text AI supports **speaker diarization** — the ability to
+automatically detect and separate speakers in an audio stream. This allows you
+to generate **speaker-labeled transcripts** for conversations, meetings, interviews,
+podcasts, and other multi-speaker scenarios — without any manual labeling or
+extra metadata.
+
+***
+
+## What is speaker diarization?
+
+Speaker diarization answers the question: **Who spoke when?**
+
+When enabled, Soniox automatically detects speaker changes and assigns each
+spoken segment to a speaker label (e.g., `Speaker 1`, `Speaker 2`). This lets you
+structure transcripts into clear, speaker-attributed sections.
+
+### Example
+
+Input audio:
+
+```text
+How are you? I am fantastic. What about you? Feeling great today. Hey everyone!
+```
+
+Output with diarization enabled:
+
+```text
+Speaker 1: How are you?
+Speaker 2: I am fantastic. What about you?
+Speaker 1: Feeling great today.
+Speaker 3: Hey everyone!
+```
+
+***
+
+## How to enable speaker diarization
+
+Enable diarization by setting this parameter in your API request:
+
+```json
+{
+  "enable_speaker_diarization": true
+}
+```
+
+***
+
+## Output format
+
+When speaker diarization is enabled, each token includes a `speaker` field:
+
+```json
+{"text": "How",    "speaker": "1"}
+{"text": " are",   "speaker": "1"}
+{"text": " you",   "speaker": "1"}
+{"text": "?",      "speaker": "1"}
+{"text": "I",      "speaker": "2"}
+{"text": " am",    "speaker": "2"}
+{"text": " fan",   "speaker": "2"}
+{"text": "tastic", "speaker": "2"}
+{"text": ".",      "speaker": "2"}
+```
+
+You can group tokens by speaker in your application to create readable segments, or display speaker labels directly in your UI.
+
+***
+
+## Real-time considerations
+
+Real-time speaker diarization is more challenging due to low-latency constraints. You may observe:
+
+* Higher speaker attribution errors compared to async mode.
+* Temporary speaker switches that stabilize as more context is available.
+
+Even with these limitations, real-time diarization is valuable for
+**live meetings, conferences, customer support calls, and conversational AI
+interfaces.**
+
+***
+
+## Number of supported speakers
+
+* Up to **15 different speakers** are supported per transcription session.
+* Accuracy may decrease when many speakers have **similar voice characteristics.**
+
+***
+
+## Best practice
+
+For the most accurate and reliable speaker separation, use **asynchronous
+transcription** — it provides significantly higher diarization accuracy because
+the model has access to the full audio context. Real-time diarization is best
+when you need immediate speaker attribution, but expect lower accuracy due to
+low-latency constraints.
+
+***
+
+## Supported languages
+
+Speaker diarization is available for all [supported languages](/stt/concepts/supported-languages).

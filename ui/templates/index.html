@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Yakutan 控制面板</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -32,32 +34,37 @@
                     <h2 data-i18n="section.serviceControl">服务控制</h2>
                     <div class="control-buttons">
                         <div class="control-buttons-left">
-                            <button id="start-btn" class="btn btn-success" onclick="startService()" data-i18n="btn.startService">启动服务</button>
-                            <button id="stop-btn" class="btn btn-danger" onclick="stopService()" disabled data-i18n="btn.stopService">停止服务</button>
+                            <button id="start-btn" class="btn btn-success" onclick="startService()"
+                                data-i18n="btn.startService">启动服务</button>
+                            <button id="stop-btn" class="btn btn-danger" onclick="stopService()" disabled
+                                data-i18n="btn.stopService">停止服务</button>
                         </div>
                         <div class="control-buttons-right">
-                            <button id="reset-btn" class="btn btn-warning" onclick="resetToDefaults()" data-i18n="btn.resetDefaults">恢复默认设置</button>
+                            <button id="reset-btn" class="btn btn-warning" onclick="resetToDefaults()"
+                                data-i18n="btn.resetDefaults">恢复默认设置</button>
                         </div>
                     </div>
-                    <small class="form-text" style="margin-top: 10px; display: block;" data-i18n="hint.autoSave">所有配置将自动保存在浏览器本地</small>
+                    <small class="form-text" style="margin-top: 10px; display: block;"
+                        data-i18n="hint.autoSave">所有配置将自动保存在浏览器本地</small>
                 </section>
 
                 <!-- 基本设置 -->
                 <section class="card">
                     <h2 data-i18n="section.basicSettings">基本设置</h2>
-                    
+
                     <!-- 一行两个开关：启用翻译和输出中间结果 -->
                     <div class="switch-row">
                         <div class="form-group">
                             <label class="switch-label">
                                 <span data-i18n="label.enableTranslation">启用翻译</span>
                                 <label class="switch">
-                                    <input type="checkbox" id="enable-translation" onchange="onSettingChange(); toggleTranslationOptions()">
+                                    <input type="checkbox" id="enable-translation"
+                                        onchange="onSettingChange(); toggleTranslationOptions()">
                                     <span class="slider"></span>
                                 </label>
                             </label>
                         </div>
-                        
+
                         <div class="form-group">
                             <label class="switch-label">
                                 <span data-i18n="label.showPartialResults">输出中间结果</span>
@@ -74,8 +81,10 @@
                         <div class="form-group">
                             <label for="target-language" data-i18n="label.targetLanguage">目标语言</label>
                             <div class="language-input-group">
-                                <input type="text" id="target-language" class="form-control language-code-input" placeholder="ja" onblur="onSettingChange()">
-                                <select id="target-language-select" class="form-control language-select" onchange="applyLanguageSelection('target-language')">
+                                <input type="text" id="target-language" class="form-control language-code-input"
+                                    placeholder="ja" onblur="onSettingChange()">
+                                <select id="target-language-select" class="form-control language-select"
+                                    onchange="applyLanguageSelection('target-language')">
                                     <option value="" data-i18n="select.quickSelect">-- 快速选择 --</option>
                                     <option value="zh-CN" data-i18n="lang.zhCN">简体中文 (zh-CN)</option>
                                     <option value="zh-TW" data-i18n="lang.zhTW">繁体中文 (zh-TW)</option>
@@ -96,10 +105,13 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="fallback-language" data-i18n="label.fallbackLanguage">备用语言（当源语言与目标语言相同时使用）</label>
+                            <label for="fallback-language"
+                                data-i18n="label.fallbackLanguage">备用语言（当源语言与目标语言相同时使用）</label>
                             <div class="language-input-group">
-                                <input type="text" id="fallback-language" class="form-control language-code-input" placeholder="en" onblur="onSettingChange()">
-                                <select id="fallback-language-select" class="form-control language-select" onchange="applyLanguageSelection('fallback-language')">
+                                <input type="text" id="fallback-language" class="form-control language-code-input"
+                                    placeholder="en" onblur="onSettingChange()">
+                                <select id="fallback-language-select" class="form-control language-select"
+                                    onchange="applyLanguageSelection('fallback-language')">
                                     <option value="" data-i18n="select.quickSelect">-- 快速选择 --</option>
                                     <option value="" data-i18n="select.disabled">禁用</option>
                                     <option value="zh-CN" data-i18n="lang.zhCN">简体中文 (zh-CN)</option>
@@ -119,16 +131,27 @@
                             </div>
                             <small class="form-text" data-i18n="hint.fallbackLanguage">可直接输入语言代码，留空则禁用备用语言</small>
                         </div>
+                    </div>
 
-                        <div class="form-group" id="furigana-option" style="display: none;">
+                    <!-- 假名和拼音选项（并排显示，始终可见） -->
+                    <div class="switch-row">
+                        <div class="form-group" id="furigana-option">
                             <label class="switch-label">
-                                <span data-i18n="label.enableFurigana">日语译文添加假名</span>
+                                <span data-i18n="label.enableFurigana">日语添加假名</span>
                                 <label class="switch">
                                     <input type="checkbox" id="enable-furigana" onchange="onSettingChange()">
                                     <span class="slider"></span>
                                 </label>
                             </label>
-                            <small class="form-text" data-i18n="hint.enableFurigana">仅在目标语言为日语时可用</small>
+                        </div>
+                        <div class="form-group" id="pinyin-option">
+                            <label class="switch-label">
+                                <span data-i18n="label.enablePinyin">中文添加拼音</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="enable-pinyin" onchange="onSettingChange()">
+                                    <span class="slider"></span>
+                                </label>
+                            </label>
                         </div>
                     </div>
                 </section>
@@ -142,16 +165,19 @@
                     <div class="collapsible-content" id="translation-api">
                         <div class="form-group">
                             <label for="translation-api-type" data-i18n="label.translationApi">翻译API</label>
-                            <select id="translation-api-type" class="form-control" onchange="handleTranslationApiChange(event)">
+                            <select id="translation-api-type" class="form-control"
+                                onchange="handleTranslationApiChange(event)">
                                 <option value="qwen_mt" data-i18n="api.qwenMt">Qwen-MT（阿里云，使用 DashScope Key）</option>
                                 <option value="deepl" data-i18n="api.deepl">DeepL（高质量）</option>
-                                <option value="google_dictionary" data-i18n="api.googleDict">Google Dictionary（免费，更快，请注意网络连通性）</option>
+                                <option value="google_dictionary" data-i18n="api.googleDict">Google
+                                    Dictionary（免费，更快，请注意网络连通性）</option>
                                 <option value="google_web" data-i18n="api.googleWeb">Google Web（免费，备用，请注意网络连通性）</option>
                                 <option value="openrouter" data-i18n="api.openrouter">OpenRouter（LLM）</option>
                             </select>
-                            <small id="translation-api-warning" class="form-text" style="color: #e74c3c; display: none;"></small>
+                            <small id="translation-api-warning" class="form-text"
+                                style="color: #e74c3c; display: none;"></small>
                         </div>
-                        
+
                         <div class="form-group" id="openrouter-streaming-mode-group" style="display: none;">
                             <label class="switch-label">
                                 <span data-i18n="label.streamingMode">流式翻译模式</span>
@@ -162,7 +188,7 @@
                             </label>
                             <small class="form-text" data-i18n="hint.streamingMode">启用后支持翻译部分结果（实时翻译未完成的句子）</small>
                         </div>
-                        
+
                         <div class="form-group">
                             <label class="switch-label">
                                 <span data-i18n="label.reverseTranslation">启用反向翻译</span>
@@ -171,7 +197,8 @@
                                     <span class="slider"></span>
                                 </label>
                             </label>
-                            <small class="form-text" data-i18n="hint.reverseTranslation">总是使用 Google Dictionary API，请注意网络连通性</small>
+                            <small class="form-text" data-i18n="hint.reverseTranslation">总是使用 Google Dictionary
+                                API，请注意网络连通性</small>
                         </div>
                     </div>
                 </section>
@@ -194,36 +221,54 @@
                                 <span style="color: #e74c3c; font-weight: bold;" data-i18n="label.required">*必需</span>
                             </label>
                             <div style="display: flex; align-items: center; gap: 16px;">
-                                <input type="password" id="dashscope-api-key" class="form-control" placeholder="sk-..." required style="flex: 1;">
+                                <input type="password" id="dashscope-api-key" class="form-control" placeholder="sk-..."
+                                    required style="flex: 1;">
                                 <div style="display:flex; align-items:center; gap:8px; white-space:nowrap;">
                                     <span data-i18n="label.international">国际版</span>
                                     <label class="switch" style="margin:0;">
-                                        <input type="checkbox" id="use-international-endpoint" onchange="handleInternationalEndpointChange(event)" data-restart-required="true">
+                                        <input type="checkbox" id="use-international-endpoint"
+                                            onchange="handleInternationalEndpointChange(event)"
+                                            data-restart-required="true">
                                         <span class="slider"></span>
                                     </label>
                                 </div>
                             </div>
                             <small class="form-text">
                                 <span data-i18n="hint.dashscopeKey">Qwen 和 FunASR 语音识别均需要此 Key。</span>
-                                <a href="https://bailian.console.aliyun.com/?tab=api#/api" target="_blank" data-i18n="link.getChinaKey">获取中国大陆版API Key</a>
+                                <a href="https://bailian.console.aliyun.com/?tab=api#/api" target="_blank"
+                                    data-i18n="link.getChinaKey">获取中国大陆版API Key</a>
                                 &nbsp;&nbsp;&nbsp;&nbsp;
-                                <a href="https://modelstudio.console.alibabacloud.com/?tab=api#/api" target="_blank" data-i18n="link.getIntlKey">获取国际版API Key</a>
+                                <a href="https://modelstudio.console.alibabacloud.com/?tab=api#/api" target="_blank"
+                                    data-i18n="link.getIntlKey">获取国际版API Key</a>
                             </small>
                         </div>
-                        
+
                         <div class="api-key-group">
                             <label for="deepl-api-key" data-i18n="label.deeplKey">DeepL API Key (可选，用于翻译)</label>
                             <input type="password" id="deepl-api-key" class="form-control" placeholder="...">
                             <small class="form-text">
-                                <a href="https://www.deepl.com/en/pro-api" target="_blank" data-i18n="link.getApiKey">获取API Key →</a>
+                                <a href="https://www.deepl.com/en/pro-api" target="_blank"
+                                    data-i18n="link.getApiKey">获取API Key →</a>
                             </small>
                         </div>
-                        
+
                         <div class="api-key-group">
-                            <label for="openrouter-api-key" data-i18n="label.openrouterKey">OpenRouter API Key (可选，用于LLM翻译)</label>
+                            <label for="openrouter-api-key" data-i18n="label.openrouterKey">OpenRouter API Key
+                                (可选，用于LLM翻译)</label>
                             <input type="password" id="openrouter-api-key" class="form-control" placeholder="sk-or-...">
                             <small class="form-text">
-                                <a href="https://openrouter.ai/" target="_blank" data-i18n="link.getApiKey">获取API Key →</a>
+                                <a href="https://openrouter.ai/" target="_blank" data-i18n="link.getApiKey">获取API Key
+                                    →</a>
+                            </small>
+                        </div>
+
+                        <div class="api-key-group">
+                            <label for="soniox-api-key" data-i18n="label.sonioxKey">Soniox API Key (可选，用于多语言识别)</label>
+                            <input type="password" id="soniox-api-key" class="form-control" placeholder="...">
+                            <small class="form-text">
+                                <span data-i18n="hint.sonioxKey">支持60+语言的语音识别。</span>
+                                <a href="https://console.soniox.com/" target="_blank" data-i18n="link.getApiKey">获取API
+                                    Key →</a>
                             </small>
                         </div>
                     </div>
@@ -238,9 +283,11 @@
                     <div class="collapsible-content" id="asr-settings">
                         <div class="form-group">
                             <label for="asr-backend" data-i18n="label.asrBackend">识别后端</label>
-                            <select id="asr-backend" class="form-control" onchange="onSettingChange()" data-restart-required="true">
+                            <select id="asr-backend" class="form-control" onchange="onSettingChange()"
+                                data-restart-required="true">
                                 <option value="qwen" data-i18n="asr.qwen">Qwen3 ASR（推荐）</option>
                                 <option value="dashscope" data-i18n="asr.dashscope">Fun-ASR（仅中国大陆版可用）</option>
+                                <option value="soniox" data-i18n="asr.soniox">Soniox（多语言，需要API Key）</option>
                             </select>
                         </div>
 
@@ -249,18 +296,20 @@
                                 <label class="switch-label">
                                     <span data-i18n="label.pauseOnMute">游戏静音时暂停转录</span>
                                     <label class="switch">
-                                        <input type="checkbox" id="enable-mic-control" onchange="onSettingChange()" data-restart-required="true">
+                                        <input type="checkbox" id="enable-mic-control" onchange="onSettingChange()"
+                                            data-restart-required="true">
                                         <span class="slider"></span>
                                     </label>
                                 </label>
                                 <small class="form-text" data-i18n="hint.pauseOnMute">第一次解除静音后开始转录</small>
                             </div>
-                            
+
                             <div class="form-group">
                                 <label class="switch-label">
                                     <span data-i18n="label.enableHotWords">启用热词</span>
                                     <label class="switch">
-                                        <input type="checkbox" id="enable-hot-words" onchange="onSettingChange()" data-restart-required="true">
+                                        <input type="checkbox" id="enable-hot-words" onchange="onSettingChange()"
+                                            data-restart-required="true">
                                         <span class="slider"></span>
                                     </label>
                                 </label>
@@ -270,7 +319,8 @@
 
                         <div class="form-group">
                             <label for="mute-delay" data-i18n="label.muteDelay">静音延迟（秒）</label>
-                            <input type="number" id="mute-delay" class="form-control" min="0" max="5" step="0.1" value="0.2" onchange="onSettingChange()">
+                            <input type="number" id="mute-delay" class="form-control" min="0" max="5" step="0.1"
+                                value="0.2" onchange="onSettingChange()">
                             <small class="form-text" data-i18n="hint.muteDelay">静音后延迟停止识别的时间，防止漏掉最后一个字</small>
                         </div>
                     </div>
@@ -286,12 +336,13 @@
                         <!-- VAD设置 -->
                         <div class="subsection">
                             <h3 data-i18n="subsection.vad">VAD（语音活动检测）设置 - 仅Qwen后端</h3>
-                            
+
                             <div class="form-group">
                                 <label class="switch-label">
                                     <span data-i18n="label.enableVad">启用VAD</span>
                                     <label class="switch">
-                                        <input type="checkbox" id="enable-vad" onchange="onSettingChange()" data-restart-required="true">
+                                        <input type="checkbox" id="enable-vad" onchange="onSettingChange()"
+                                            data-restart-required="true">
                                         <span class="slider"></span>
                                     </label>
                                 </label>
@@ -300,13 +351,16 @@
 
                             <div class="form-group">
                                 <label for="vad-threshold" data-i18n="label.vadThreshold">VAD阈值（0.0-1.0）</label>
-                                <input type="number" id="vad-threshold" class="form-control" min="0" max="1" step="0.05" value="0.2" onchange="onSettingChange()" data-restart-required="true">
+                                <input type="number" id="vad-threshold" class="form-control" min="0" max="1" step="0.05"
+                                    value="0.2" onchange="onSettingChange()" data-restart-required="true">
                                 <small class="form-text" data-i18n="hint.vadThreshold">值越小越敏感，越容易触发断句</small>
                             </div>
 
                             <div class="form-group">
-                                <label for="vad-silence-duration" data-i18n="label.vadSilenceDuration">VAD静音持续时间（毫秒）</label>
-                                <input type="number" id="vad-silence-duration" class="form-control" min="100" max="3000" step="100" value="800" onchange="onSettingChange()" data-restart-required="true">
+                                <label for="vad-silence-duration"
+                                    data-i18n="label.vadSilenceDuration">VAD静音持续时间（毫秒）</label>
+                                <input type="number" id="vad-silence-duration" class="form-control" min="100" max="3000"
+                                    step="100" value="800" onchange="onSettingChange()" data-restart-required="true">
                                 <small class="form-text" data-i18n="hint.vadSilenceDuration">检测到此时长的静音后触发断句</small>
                             </div>
                         </div>
@@ -314,10 +368,11 @@
                         <!-- WebSocket保活设置 -->
                         <div class="subsection">
                             <h3 data-i18n="subsection.websocket">WebSocket保活设置 - 仅Qwen后端</h3>
-                            
+
                             <div class="form-group">
                                 <label for="keepalive-interval" data-i18n="label.keepaliveInterval">心跳间隔（秒）</label>
-                                <input type="number" id="keepalive-interval" class="form-control" min="0" max="120" step="5" value="30" onchange="onSettingChange()" data-restart-required="true">
+                                <input type="number" id="keepalive-interval" class="form-control" min="0" max="120"
+                                    step="5" value="30" onchange="onSettingChange()" data-restart-required="true">
                                 <small class="form-text" data-i18n="hint.keepaliveInterval">防止长时间闲置导致连接超时，设置为0禁用</small>
                             </div>
                         </div>
@@ -325,7 +380,7 @@
                         <!-- 语言检测器设置 -->
                         <div class="subsection">
                             <h3 data-i18n="subsection.langDetector">语言检测器设置</h3>
-                            
+
                             <div class="form-group">
                                 <label for="language-detector" data-i18n="label.detectorType">检测器类型</label>
                                 <select id="language-detector" class="form-control" onchange="onSettingChange()">
@@ -339,7 +394,7 @@
                         <!-- 源语言设置 -->
                         <div class="subsection">
                             <h3 data-i18n="subsection.sourceLang">源语言设置</h3>
-                            
+
                             <div class="form-group">
                                 <label for="source-language" data-i18n="label.sourceLanguage">源语言</label>
                                 <select id="source-language" class="form-control" onchange="onSettingChange()">
@@ -358,11 +413,13 @@
         </main>
 
         <footer>
-            <p><span data-i18n="footer.text">Yakutan</span> | <a href="https://github.com/febilly/Yakutan" target="_blank">GitHub</a></p>
+            <p><span data-i18n="footer.text">Yakutan</span> | <a href="https://github.com/febilly/Yakutan"
+                    target="_blank">GitHub</a></p>
         </footer>
     </div>
 
     <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
+
 </html>

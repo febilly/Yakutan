@@ -1,0 +1,122 @@
+# Endpoint detection
+URL: /stt/rt/endpoint-detection
+
+Learn how speech endpoint detection works.
+
+***
+
+title: Endpoint detection
+description: Learn how speech endpoint detection works.
+-------------------------------------------------------
+
+## Overview
+
+{/*
+  Endpoint detection lets you know when a speaker has finished speaking.
+  This is critical for real-time voice AI assistants, command-and-response
+  systems, and conversational apps where you want to respond **immediately** without
+  waiting for long silences.
+
+  When enabled, Soniox automatically detects natural pauses and emits a special `<end>` token at the end of an utterance.
+
+  */}
+
+Endpoint detection lets you know when a speaker has finished speaking. This is
+critical for real-time voice AI assistants, command-and-response systems, and
+conversational apps where you want to respond immediately without waiting for
+long silences.
+
+Unlike traditional endpoint detection based on voice activity detection (VAD),
+Soniox uses its speech model itself to listen to intonations, pauses, and
+conversational context to determine when an utterance has ended. This makes it
+far more advanced — delivering **lower latency, fewer false triggers,** and a
+noticeably **smoother product experience.**
+
+***
+
+## How it works
+
+When `enable_endpoint_detection` is **enabled**:
+
+* Soniox monitors pauses in speech to determine the end of an utterance.
+* As soon as speech ends:
+  * **All preceding tokens** are marked as final.
+  * A special `<end>` **token** is returned.
+* The `<end>` token:
+  * Always appears **once** at the end of the segment.
+  * Is **always final**.
+  * Can be treated as a reliable signal to trigger downstream logic (e.g., calling an LLM or executing a command).
+
+***
+
+## Enabling endpoint detection
+
+Add the flag in your real-time request:
+
+```json
+{
+  "enable_endpoint_detection": true
+}
+```
+
+***
+
+## Example
+
+<h3>User says</h3>
+
+```text
+What's the weather in San Francisco?
+```
+
+<h3>Soniox stream</h3>
+
+<Steps>
+  <Step>
+    **Non-final tokens (still being processed)**
+
+    First response arrives:
+
+    ```json
+    {"text": "What's",    "is_final": false}
+    {"text": "the",       "is_final": false}
+    {"text": "weather",   "is_final": false}
+    ```
+
+    Second response arrives:
+
+    ```json
+    {"text": "What's",    "is_final": false}
+    {"text": "the",       "is_final": false}
+    {"text": "weather",   "is_final": false}
+    {"text": "in",        "is_final": false}
+    {"text": "San",       "is_final": false}
+    {"text": "Francisco", "is_final": false}
+    {"text": "?",         "is_final": false}
+    ```
+  </Step>
+
+  <Step>
+    **Final tokens (endpoint detected, tokens are finalized)**
+
+    ```json
+    {"text": "What's",    "is_final": true}
+    {"text": "the",       "is_final": true}
+    {"text": "weather",   "is_final": true}
+    {"text": "in",        "is_final": true}
+    {"text": "San",       "is_final": true}
+    {"text": "Francisco", "is_final": true}
+    {"text": "?",         "is_final": true}
+    {"text": "<end>",     "is_final": true}
+    ```
+  </Step>
+</Steps>
+
+<h3>Explanation</h3>
+
+1. **Streaming phase:** tokens are delivered in real-time as the user
+   speaks. They are marked `is_final: false`, meaning the transcript is still being
+   processed and may change.
+2. **Endpoint detection:** once the speaker stops, the model recognizes the end of the utterance.
+3. **Finalization phase:** previously non-final tokens are re-emitted with `is_final: true`, followed by the `<end>` token (also final).
+4. **Usage tip:** display non-final tokens immediately for live captions, but switch to final tokens once `<end>` arrives before triggering any downstream actions.

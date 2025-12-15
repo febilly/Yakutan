@@ -11,7 +11,7 @@ const CONFIG_STORAGE_KEY = 'vrchat_translator_config';
 let pendingWarningMessage = null;
 
 // 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // 先初始化 i18n 系统
     if (window.i18n) {
         window.i18n.initI18n();
@@ -21,13 +21,13 @@ document.addEventListener('DOMContentLoaded', function() {
     if (targetLangInput) {
         targetLangInput.addEventListener('input', updateFuriganaVisibility);
     }
-    
+
     loadConfigFromLocalStorage();
     loadAPIKeys();
     updateStatus();
     // 每2秒更新一次状态
     setInterval(updateStatus, 2000);
-    
+
     // 显示配置保存提示
     showConfigStorageInfo();
 });
@@ -35,7 +35,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // 显示配置保存信息
 function showConfigStorageInfo() {
     const lastSaved = localStorage.getItem(CONFIG_STORAGE_KEY + '_timestamp');
-    
+
     if (lastSaved) {
         const date = new Date(parseInt(lastSaved));
         console.log(`配置已加载 (${date.toLocaleString('zh-CN')})`);
@@ -48,15 +48,19 @@ function loadAPIKeys() {
     const deeplKey = localStorage.getItem('deepl_api_key');
     const openrouterKey = localStorage.getItem('openrouter_api_key');
     const useInternational = localStorage.getItem('use_international_endpoint') === 'true';
-    
+
     if (dashscopeKey) document.getElementById('dashscope-api-key').value = dashscopeKey;
     if (deeplKey) document.getElementById('deepl-api-key').value = deeplKey;
     if (openrouterKey) document.getElementById('openrouter-api-key').value = openrouterKey;
+
+    const sonioxKey = localStorage.getItem('soniox_api_key');
+    if (sonioxKey) document.getElementById('soniox-api-key').value = sonioxKey;
+
     document.getElementById('use-international-endpoint').checked = useInternational;
-    
+
     // 应用国际版设置对 ASR 选项的影响
     updateAsrOptionsForInternational(useInternational);
-    
+
     // 如果已有DashScope API Key，自动折叠API Keys区域
     if (dashscopeKey) {
         const apiKeysSection = document.getElementById('api-keys');
@@ -67,23 +71,24 @@ function loadAPIKeys() {
             apiKeysIcon.textContent = '▶';
         }
     }
-    
+
     // 添加API Key change事件监听
     document.getElementById('dashscope-api-key').addEventListener('input', saveAPIKey);
     document.getElementById('deepl-api-key').addEventListener('input', saveAPIKey);
     document.getElementById('openrouter-api-key').addEventListener('input', saveAPIKey);
+    document.getElementById('soniox-api-key').addEventListener('input', saveAPIKey);
 }
 
 // 处理国际版端点开关变化
 function handleInternationalEndpointChange(event) {
     const useInternational = event.target.checked;
-    
+
     // 保存到 localStorage
     localStorage.setItem('use_international_endpoint', useInternational.toString());
-    
+
     // 更新 ASR 选项
     updateAsrOptionsForInternational(useInternational);
-    
+
     // 触发配置保存
     onSettingChange();
 }
@@ -93,14 +98,14 @@ function updateAsrOptionsForInternational(useInternational) {
     const asrBackendSelect = document.getElementById('asr-backend');
     const dashscopeOption = asrBackendSelect.querySelector('option[value="dashscope"]');
     const t = window.i18n ? window.i18n.t : (key) => key;
-    
+
     if (useInternational) {
         // 国际版：禁用 Fun-ASR 选项
         if (dashscopeOption) {
             dashscopeOption.disabled = true;
             dashscopeOption.textContent = t('asr.dashscopeDisabled');
         }
-        
+
         // 如果当前选中的是 dashscope，自动切换到 qwen
         if (asrBackendSelect.value === 'dashscope') {
             asrBackendSelect.value = 'qwen';
@@ -120,13 +125,13 @@ function saveAPIKey(event) {
     const id = event.target.id;
     const value = event.target.value;
     const keyName = id.replace(/-/g, '_'); // 使用正则表达式替换所有 '-' 为 '_'
-    
+
     if (value) {
         localStorage.setItem(keyName, value);
     } else {
         localStorage.removeItem(keyName);
     }
-    
+
     // 触发配置自动保存
     onSettingChange();
 }
@@ -136,10 +141,10 @@ function applyLanguageSelection(inputId) {
     const selectId = inputId + '-select';
     const inputElement = document.getElementById(inputId);
     const selectElement = document.getElementById(selectId);
-    
+
     // 获取选择的值（可能是空字符串）
     const selectedValue = selectElement.value;
-    
+
     // 如果下拉框有选项被选中（包括空值"禁用"）
     if (selectElement.selectedIndex > 0) {  // 跳过 "-- 快速选择 --" 选项
         inputElement.value = selectedValue;
@@ -155,10 +160,10 @@ function applyLanguageSelection(inputId) {
 function loadConfigFromLocalStorage() {
     try {
         const savedConfig = localStorage.getItem(CONFIG_STORAGE_KEY);
-        
+
         if (savedConfig) {
             const config = JSON.parse(savedConfig);
-            
+
             // 填充表单
             if (config.translation) {
                 document.getElementById('enable-translation').checked = config.translation.enable_translation ?? true;
@@ -176,14 +181,15 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('source-language').value = config.translation.source_language || 'auto';
                 document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
                 document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
+                document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
                 document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? true;
             }
-            
+
             if (config.mic_control) {
                 document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control ?? true;
                 document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds || 0.2;
             }
-            
+
             if (config.asr) {
                 document.getElementById('asr-backend').value = config.asr.preferred_backend || 'qwen';
                 document.getElementById('enable-hot-words').checked = config.asr.enable_hot_words ?? true;
@@ -191,28 +197,28 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('vad-threshold').value = config.asr.vad_threshold || 0.2;
                 document.getElementById('vad-silence-duration').value = config.asr.vad_silence_duration_ms || 800;
                 document.getElementById('keepalive-interval').value = config.asr.keepalive_interval || 30;
-                
+
                 // 加载国际版设置
                 const useInternational = config.asr.use_international_endpoint ?? false;
                 document.getElementById('use-international-endpoint').checked = useInternational;
                 localStorage.setItem('use_international_endpoint', useInternational.toString());
                 updateAsrOptionsForInternational(useInternational);
             }
-            
+
             if (config.language_detector) {
                 document.getElementById('language-detector').value = config.language_detector.type || 'cjke';
             }
-            
+
             console.log('✓ 已从浏览器加载配置');
         } else {
             // 如果没有保存的配置，使用前端默认值
             loadDefaultConfig();
         }
-        
+
         // 根据翻译开关显示/隐藏翻译选项
         toggleTranslationOptions();
         updateFuriganaVisibility();
-        
+
     } catch (error) {
         console.error('加载本地配置失败:', error);
         // 出错时使用前端默认值
@@ -232,13 +238,14 @@ function loadDefaultConfig() {
     document.getElementById('source-language').value = 'auto';
     document.getElementById('show-partial-results').checked = false;
     document.getElementById('enable-furigana').checked = false;
+    document.getElementById('enable-pinyin').checked = false;
     document.getElementById('enable-reverse-translation').checked = true;
     document.getElementById('openrouter-streaming-mode').checked = false;
-    
+
     // 麦克风控制
     document.getElementById('enable-mic-control').checked = true;
     document.getElementById('mute-delay').value = 0.2;
-    
+
     // ASR 配置
     document.getElementById('asr-backend').value = 'qwen';  // 可选: 'qwen', 'dashscope'
     document.getElementById('enable-hot-words').checked = true;
@@ -247,10 +254,10 @@ function loadDefaultConfig() {
     document.getElementById('vad-silence-duration').value = 800;
     document.getElementById('keepalive-interval').value = 30;
     document.getElementById('use-international-endpoint').checked = false;
-    
+
     // 语言检测器
     document.getElementById('language-detector').value = 'cjke';
-    
+
     console.log('✓ 已加载前端默认配置');
     updateFuriganaVisibility();
 }
@@ -260,7 +267,7 @@ async function loadConfigFromServer() {
     try {
         const response = await fetch(`${API_BASE}/config`);
         const config = await response.json();
-        
+
         // 填充表单
         document.getElementById('enable-translation').checked = config.translation.enable_translation;
         document.getElementById('target-language').value = config.translation.target_language;
@@ -276,29 +283,30 @@ async function loadConfigFromServer() {
         }
         document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
         document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
-        
+        document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
+
         document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control;
         document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds;
-        
+
         document.getElementById('asr-backend').value = config.asr.preferred_backend;
         document.getElementById('enable-hot-words').checked = config.asr.enable_hot_words;
         document.getElementById('enable-vad').checked = config.asr.enable_vad;
         document.getElementById('vad-threshold').value = config.asr.vad_threshold;
         document.getElementById('vad-silence-duration').value = config.asr.vad_silence_duration_ms;
         document.getElementById('keepalive-interval').value = config.asr.keepalive_interval;
-        
+
         document.getElementById('language-detector').value = config.language_detector.type;
         document.getElementById('source-language').value = config.translation.source_language;
-        
+
         // 保存到本地
         saveConfigToLocalStorage();
-        
+
         // 根据翻译开关显示/隐藏翻译选项
         toggleTranslationOptions();
         updateFuriganaVisibility();
-        
+
         console.log('已从服务器加载配置');
-        
+
     } catch (error) {
         console.error('加载服务器配置失败:', error);
     }
@@ -312,7 +320,7 @@ function saveConfigToLocalStorage() {
         if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
             actualApiType = 'openrouter_streaming';
         }
-        
+
         const config = {
             translation: {
                 enable_translation: document.getElementById('enable-translation').checked,
@@ -322,6 +330,7 @@ function saveConfigToLocalStorage() {
                 source_language: document.getElementById('source-language').value,
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
+                enable_pinyin: document.getElementById('enable-pinyin').checked,
                 enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,
             },
             mic_control: {
@@ -341,10 +350,10 @@ function saveConfigToLocalStorage() {
                 type: document.getElementById('language-detector').value,
             }
         };
-        
+
         localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
         localStorage.setItem(CONFIG_STORAGE_KEY + '_timestamp', Date.now().toString());
-        
+
     } catch (error) {
         console.error('保存配置失败:', error);
     }
@@ -359,7 +368,7 @@ async function loadConfig() {
 function toggleTranslationOptions() {
     const enableTranslation = document.getElementById('enable-translation').checked;
     const translationOptions = document.getElementById('translation-options');
-    
+
     if (enableTranslation) {
         translationOptions.classList.remove('hidden');
     } else {
@@ -367,18 +376,9 @@ function toggleTranslationOptions() {
     }
 }
 
-// 根据目标语言显示/隐藏日语假名选项
+// 假名和拼音选项始终显示，无需根据语言切换
 function updateFuriganaVisibility() {
-    const targetLang = document.getElementById('target-language').value.trim().toLowerCase();
-    const furiganaGroup = document.getElementById('furigana-option');
-    if (!furiganaGroup) return;
-
-    if (targetLang === 'ja' || targetLang === 'ja-jp') {
-        furiganaGroup.style.display = 'block';
-    } else {
-        furiganaGroup.style.display = 'none';
-        document.getElementById('enable-furigana').checked = false;
-    }
+    // 假名和拼音选项始终可见，不再根据目标语言隐藏
 }
 
 // 处理翻译API变更
@@ -389,13 +389,13 @@ function handleTranslationApiChange(event) {
     const warningElement = document.getElementById('translation-api-warning');
     const streamingModeGroup = document.getElementById('openrouter-streaming-mode-group');
     const t = window.i18n ? window.i18n.t : (key) => key;
-    
+
     // 检查是否需要API Key
     let requiresKey = false;
     let keyName = '';
     let keyInputId = '';
     let apiDisplayName = '';
-    
+
     // 显示/隐藏 OpenRouter 流式翻译模式选项
     if (newApi === 'openrouter') {
         streamingModeGroup.style.display = 'block';
@@ -416,11 +416,11 @@ function handleTranslationApiChange(event) {
         keyInputId = 'openrouter-api-key';
         apiDisplayName = 'OpenRouter';
     }
-    
+
     // 如果需要API Key但未提供
     if (requiresKey) {
         const apiKey = localStorage.getItem(keyName) || document.getElementById(keyInputId).value.trim();
-        
+
         if (!apiKey) {
             // 恢复到之前的选项
             if (previousTranslationApi) {
@@ -429,22 +429,22 @@ function handleTranslationApiChange(event) {
                 // 如果没有之前的值，默认切换到Google Dictionary
                 event.target.value = 'google_dictionary';
             }
-            
+
             // 显示警告消息
             warningElement.textContent = '⚠️ ' + t('msg.apiKeyRequired', { api: apiDisplayName });
             warningElement.style.display = 'block';
-            
+
             // 5秒后自动隐藏
             setTimeout(() => {
                 warningElement.style.display = 'none';
             }, 5000);
-            
+
             // 展开API Keys配置区域
             const apiKeysSection = document.getElementById('api-keys');
             if (apiKeysSection.classList.contains('collapsed')) {
                 toggleCollapsible('api-keys');
             }
-            
+
             // 高亮对应的API Key输入框
             const keyInput = document.getElementById(keyInputId);
             if (keyInput) {
@@ -453,27 +453,27 @@ function handleTranslationApiChange(event) {
                     keyInput.classList.remove('error-highlight');
                 }, 3000);
             }
-            
+
             return; // 不触发保存
         }
     }
-    
+
     // 清除警告消息
     warningElement.style.display = 'none';
-    
+
     // 记录当前选择作为下次的"之前选项"
     previousTranslationApi = newApi;
-    
+
     // 触发配置保存
     onSettingChange();
 }
 
 // 初始化时记录当前的翻译API
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     setTimeout(() => {
         const apiSelect = document.getElementById('translation-api-type');
         previousTranslationApi = apiSelect.value;
-        
+
         // 初始化 OpenRouter 流式模式选项的显示状态
         const streamingModeGroup = document.getElementById('openrouter-streaming-mode-group');
         if (apiSelect.value === 'openrouter') {
@@ -490,15 +490,15 @@ function onSettingChange() {
     if (autoSaveTimer) {
         clearTimeout(autoSaveTimer);
     }
-    
+
     // 200ms后自动保存（更快响应，静默保存）
     autoSaveTimer = setTimeout(async () => {
         // 先保存到本地浏览器
         saveConfigToLocalStorage();
-        
+
         // 再保存到服务器
         await saveConfig(true); // true表示是自动保存，不重启服务
-        
+
         // 如果服务正在运行，仅在必要时（如 ASR 后端等）重启；否则只保存并通知后端热加载配置
         const statusResponse = await fetch(`${API_BASE}/status`);
         const status = await statusResponse.json();
@@ -506,7 +506,7 @@ function onSettingChange() {
             try {
                 // 通过当前活动元素判断此次修改属于哪个配置项
                 const el = document.activeElement;
-                
+
                 // 检查元素是否有 data-restart-required 属性
                 const needRestart = el && el.getAttribute('data-restart-required') === 'true';
 
@@ -527,14 +527,14 @@ function onSettingChange() {
 // 保存配置
 async function saveConfig(autoSave = false) {
     const t = window.i18n ? window.i18n.t : (key) => key;
-    
+
     try {
         // 确定实际的 API 类型（如果是 OpenRouter 且启用了流式模式，使用 openrouter_streaming）
         let actualApiType = document.getElementById('translation-api-type').value;
         if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
             actualApiType = 'openrouter_streaming';
         }
-        
+
         const config = {
             translation: {
                 enable_translation: document.getElementById('enable-translation').checked,
@@ -544,6 +544,7 @@ async function saveConfig(autoSave = false) {
                 source_language: document.getElementById('source-language').value,
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
+                enable_pinyin: document.getElementById('enable-pinyin').checked,
                 enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,
             },
             mic_control: {
@@ -562,7 +563,7 @@ async function saveConfig(autoSave = false) {
                 type: document.getElementById('language-detector').value,
             }
         };
-        
+
         const response = await fetch(`${API_BASE}/config`, {
             method: 'POST',
             headers: {
@@ -570,9 +571,9 @@ async function saveConfig(autoSave = false) {
             },
             body: JSON.stringify(config),
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             if (!autoSave) {
                 showMessage(t('msg.configSaved'), 'success');
@@ -594,14 +595,14 @@ async function updateStatus() {
     try {
         const response = await fetch(`${API_BASE}/status`);
         const status = await response.json();
-        
+
         const statusText = document.getElementById('status-text');
         const statusDot = document.getElementById('status-dot');
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
-        
+
         const t = window.i18n ? window.i18n.t : (key) => key;
-        
+
         if (status.running) {
             statusText.textContent = t('status.running');
             statusDot.classList.add('running');
@@ -622,32 +623,32 @@ async function updateStatus() {
 async function startService() {
     const startBtn = document.getElementById('start-btn');
     const t = window.i18n ? window.i18n.t : (key) => key;
-    
+
     startBtn.disabled = true;
     startBtn.textContent = t('btn.starting');
     pendingWarningMessage = null;
-    
+
     try {
         // 先检查 DashScope API Key
         const dashscopeKey = document.getElementById('dashscope-api-key').value.trim();
-        
+
         if (!dashscopeKey) {
             showMessage('❌ ' + t('msg.dashscopeRequired'), 'error');
             startBtn.disabled = false;
             startBtn.textContent = t('btn.startService');
-            
+
             // 展开API Keys配置区域，提示用户输入
             const apiKeysSection = document.getElementById('api-keys');
             if (apiKeysSection.classList.contains('collapsed')) {
                 toggleCollapsible('api-keys');
             }
-            
+
             // 高亮并震动 API Key 输入框
             highlightAPIKeyInput('dashscope-api-key');
-            
+
             return;
         }
-        
+
         // 验证 DashScope API Key格式
         const checkDashscopeResponse = await fetch(`${API_BASE}/check-api-key`, {
             method: 'POST',
@@ -656,22 +657,22 @@ async function startService() {
             },
             body: JSON.stringify({ api_key: dashscopeKey }),
         });
-        
+
         const checkDashscopeResult = await checkDashscopeResponse.json();
-        
+
         if (!checkDashscopeResult.valid) {
             // 后端返回消息ID，需要本地化
             const localizedMsg = localizeBackendMessage(checkDashscopeResult.message_id, checkDashscopeResult.message);
             showMessage('❌ ' + t('msg.dashscopeValidationFailed') + localizedMsg, 'error');
             startBtn.disabled = false;
             startBtn.textContent = t('btn.startService');
-            
+
             // 高亮并震动 API Key 输入框
             highlightAPIKeyInput('dashscope-api-key');
-            
+
             return;
         }
-        
+
         // 检查翻译API所需的 Key 是否齐全
         const enableTranslation = document.getElementById('enable-translation').checked;
         const translationApiSelect = document.getElementById('translation-api-type');
@@ -692,7 +693,7 @@ async function startService() {
                 showMessage('⚠️ ' + pendingWarningMessage, 'warning');
             }
         }
-        
+
         // 所有检查通过，先同步配置到服务器
         try {
             await saveConfig(true); // autoSave = true，不显示成功消息
@@ -704,14 +705,26 @@ async function startService() {
             startBtn.textContent = t('btn.startService');
             return;
         }
-        
+
         // 准备 API Keys
+        const sonioxKey = document.getElementById('soniox-api-key').value.trim();
         const apiKeys = {
             dashscope: dashscopeKey,
             deepl: deeplKey,
-            openrouter: openrouterKey
+            openrouter: openrouterKey,
+            soniox: sonioxKey
         };
-        
+
+        // 检查 Soniox 后端是否需要 API Key
+        const asrBackend = document.getElementById('asr-backend').value;
+        if (asrBackend === 'soniox' && !sonioxKey) {
+            showMessage('❌ ' + t('msg.sonioxKeyRequired'), 'error');
+            startBtn.disabled = false;
+            startBtn.textContent = t('btn.startService');
+            highlightAPIKeyInput('soniox-api-key');
+            return;
+        }
+
         // 启动服务
         const response = await fetch(`${API_BASE}/service/start`, {
             method: 'POST',
@@ -720,9 +733,9 @@ async function startService() {
             },
             body: JSON.stringify({ api_keys: apiKeys }),
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             if (pendingWarningMessage) {
                 showMessage('⚠️ ' + pendingWarningMessage + ' ' + t('msg.serviceStartSuccess'), 'warning');
@@ -750,10 +763,10 @@ async function startService() {
 function highlightAPIKeyInput(inputId) {
     const apiKeyInput = document.getElementById(inputId);
     if (!apiKeyInput) return;
-    
+
     apiKeyInput.classList.add('error-highlight');
     apiKeyInput.focus();
-    
+
     // 3秒后移除高亮
     setTimeout(() => {
         apiKeyInput.classList.remove('error-highlight');
@@ -764,17 +777,17 @@ function highlightAPIKeyInput(inputId) {
 async function stopService() {
     const stopBtn = document.getElementById('stop-btn');
     const t = window.i18n ? window.i18n.t : (key) => key;
-    
+
     stopBtn.disabled = true;
     stopBtn.textContent = t('btn.stopping');
-    
+
     try {
         const response = await fetch(`${API_BASE}/service/stop`, {
             method: 'POST',
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             showMessage(t('msg.serviceStopSuccess'), 'success');
             setTimeout(updateStatus, 500);
@@ -798,9 +811,9 @@ async function restartService() {
         const response = await fetch(`${API_BASE}/service/restart`, {
             method: 'POST',
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             console.log('服务已重启');
             setTimeout(updateStatus, 500);
@@ -813,25 +826,25 @@ async function restartService() {
 // 恢复默认设置
 async function resetToDefaults() {
     const t = window.i18n ? window.i18n.t : (key) => key;
-    
+
     if (!confirm(t('msg.confirmReset'))) {
         return;
     }
-    
+
     try {
         // 使用前端默认配置
         loadDefaultConfig();
-        
+
         // 根据翻译开关显示/隐藏翻译选项
         toggleTranslationOptions();
-        
+
         // 先保存到本地浏览器
         saveConfigToLocalStorage();
-        
+
         // 再保存到服务器
         await saveConfig();
         showMessage('✅ ' + t('msg.defaultsRestored'), 'success');
-        
+
         // 如果服务正在运行，重启
         const statusResponse = await fetch(`${API_BASE}/status`);
         const status = await statusResponse.json();
@@ -849,7 +862,7 @@ function showMessage(text, type) {
     const messageEl = document.getElementById('message');
     messageEl.textContent = text;
     messageEl.className = 'message ' + type;
-    
+
     // 5秒后自动隐藏
     setTimeout(() => {
         messageEl.className = 'message';
@@ -879,10 +892,10 @@ function localizeBackendMessage(messageId, defaultMessage) {
 function toggleCollapsible(id) {
     const content = document.getElementById(id);
     const icon = document.getElementById(id + '-icon');
-    
+
     content.classList.toggle('collapsed');
     icon.classList.toggle('collapsed');
-    
+
     // 更新图标
     if (content.classList.contains('collapsed')) {
         icon.textContent = '▶';

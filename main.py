@@ -69,25 +69,34 @@ try:
 except Exception:
     _kakasi = None
 
+# ============ 可选的中文拼音标注支持 ============
+try:
+    from pypinyin import pinyin, Style
+    _pypinyin_available = True
+except ImportError:
+    _pypinyin_available = False
+
 
 def _contains_kanji(text: str) -> bool:
     """Check if the text contains any CJK ideographs."""
     return any('\u4e00' <= ch <= '\u9fff' for ch in text)
 
 
-def add_furigana_if_needed(text: str, target_language: str) -> str:
-    """Append Hiragana readings to Japanese translations when enabled."""
-    if not text or not getattr(config, 'ENABLE_JA_FURIGANA', False):
-        print("未启用日语假名标注")
-        return text
+def _contains_chinese(text: str) -> bool:
+    """Check if the text contains Chinese characters."""
+    return any('\u4e00' <= ch <= '\u9fff' for ch in text)
 
-    lang = (target_language or '').lower()
-    if not lang.startswith('ja'):
-        print("未启用日语假名标注")
+
+def add_furigana(text: str) -> str:
+    """Add hiragana readings to Japanese text with kanji.
+    
+    This function adds furigana regardless of configuration - 
+    the caller should check ENABLE_JA_FURIGANA before calling.
+    """
+    if not text:
         return text
 
     if _kakasi is None:
-        print("pykakasi 库未正确加载，无法添加假名标注")
         return text
 
     try:
@@ -105,6 +114,93 @@ def add_furigana_if_needed(text: str, target_language: str) -> str:
         return "".join(parts)
     except Exception:
         return text
+
+
+def add_pinyin(text: str) -> str:
+    """Add pinyin with tones to Chinese text, grouped by words.
+    
+    Uses jieba for word segmentation. Output format: 大家dà'jiā晚上好wǎn'shàng'hǎo
+    Pinyin is obtained for the entire sentence at once for correct pronunciation of polyphonic characters.
+    """
+    if not text or not _pypinyin_available:
+        return text
+    
+    if not _contains_chinese(text):
+        return text
+    
+    try:
+        import jieba
+        
+        # 先获取整句话的拼音（这样多音字会根据上下文正确发音）
+        # pypinyin 会为每个字符返回一个列表项，包括标点符号
+        full_pinyin = pinyin(text, style=Style.TONE)
+        
+        # 建立字符位置到拼音的映射（只取中文字符的拼音）
+        char_to_pinyin = {}
+        for i, char in enumerate(text):
+            if i < len(full_pinyin):
+                py = full_pinyin[i][0]
+                # 只有当拼音与原字符不同时才记录（标点符号的"拼音"等于自身）
+                if _contains_chinese(char) and py != char:
+                    char_to_pinyin[i] = py
+        
+        # 使用 jieba 分词
+        words = list(jieba.cut(text))
+        
+        result_parts = []
+        char_index = 0
+        
+        for word in words:
+            if _contains_chinese(word):
+                # 收集这个词中每个中文字符的拼音
+                word_pinyins = []
+                for char in word:
+                    if char_index in char_to_pinyin:
+                        word_pinyins.append(char_to_pinyin[char_index])
+                    char_index += 1
+                
+                # 用单引号连接多个音节
+                if word_pinyins:
+                    py_str = "'".join(word_pinyins)
+                    result_parts.append(f"{word}{py_str}")
+                else:
+                    result_parts.append(word)
+            else:
+                # 非中文词（含标点、空格、英文等），直接添加
+                result_parts.append(word)
+                char_index += len(word)
+        
+        return "".join(result_parts)
+    except ImportError:
+        # jieba 未安装
+        return text
+    except Exception:
+        return text
+
+
+def add_furigana_if_needed(text: str, language: str) -> str:
+    """Add furigana to text if it's Japanese and furigana is enabled."""
+    if not text or not getattr(config, 'ENABLE_JA_FURIGANA', False):
+        return text
+    
+    lang = (language or '').lower()
+    if not lang.startswith('ja'):
+        return text
+    
+    return add_furigana(text)
+
+
+def add_pinyin_if_needed(text: str, language: str) -> str:
+    """Add pinyin to text if it's Chinese and pinyin is enabled."""
+    if not text or not getattr(config, 'ENABLE_ZH_PINYIN', False):
+        return text
+    
+    lang = (language or '').lower()
+    if not lang.startswith('zh'):
+        return text
+    
+    return add_pinyin(text)
+
 
 # ============ 全局变量 ============
 mic = None
@@ -245,13 +341,17 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self.translating_partial = True
         success = False
         try:
+            # 检测实际语言（即使手动指定了源语言，也要检测识别结果的真实语言）
+            detected_lang_info = language_detector.detect(segment)
+            detected_lang = detected_lang_info['language']
+            
             # 在 executor 中运行同步翻译
             loop = asyncio.get_running_loop()
             translated_text = await loop.run_in_executor(
                 executor, 
                 lambda: translator.translate(
                     segment,
-                    source_language=config.SOURCE_LANGUAGE,
+                    source_language='auto',
                     target_language=config.TARGET_LANGUAGE,
                     context_prefix=config.CONTEXT_PREFIX,
                     is_partial=True,
@@ -274,8 +374,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             elif not translation_display:
                 translation_display = "……"
 
-            # 构建显示文本：[{源语言}→{目标语言}] {翻译后文本} (原始文本)
-            source_lang = self._normalize_lang(config.SOURCE_LANGUAGE)
+            # 构建显示文本：使用检测到的实际语言
+            source_lang = self._normalize_lang(detected_lang)
             target_lang = self._normalize_lang(config.TARGET_LANGUAGE)
             
             display_text = f"[{source_lang}→{target_lang}] {translation_display} ({segment_display})"
@@ -326,10 +426,14 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     )
 
         else:
-            # 如果禁用翻译，直接显示识别结果
+            # 如果禁用翻译，直接显示识别结果（但仍应用假名/拼音标注）
             if not config.ENABLE_TRANSLATION:
-                print(f'识别：{text}')
-                display_text = text
+                # 检测语言并应用标注
+                source_lang_info = language_detector.detect(text)
+                source_lang = source_lang_info['language']
+                display_text = add_furigana_if_needed(text, source_lang)
+                display_text = add_pinyin_if_needed(display_text, source_lang)
+                print(f'识别：{display_text}')
             else:
                 # 启用翻译，执行翻译逻辑
                 source_lang_info = language_detector.detect(text)
@@ -362,14 +466,22 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 
                 is_translated = True
                 print(f'目标语言：{actual_target}')
+                
+                # 为译文添加标注（日语假名/中文拼音）
                 display_translated_text = add_furigana_if_needed(translated_text, actual_target)
+                display_translated_text = add_pinyin_if_needed(display_translated_text, actual_target)
                 print(f'译文：{display_translated_text}')
+                
+                # 为源文本添加标注（日语假名/中文拼音）
+                display_source_text = add_furigana_if_needed(text, source_lang)
+                display_source_text = add_pinyin_if_needed(display_source_text, source_lang)
 
-                display_text = f"[{normalized_source}→{actual_target}] {display_translated_text} ({text})"
+                display_text = f"[{normalized_source}→{actual_target}] {display_translated_text} ({display_source_text})"
                 
                 # 如果消息过长，尝试去掉原文部分
                 if len(display_text) > 144:
                     display_text = f"[{normalized_source}→{actual_target}] {display_translated_text}"
+
 
         if display_text is None:
             return
@@ -517,7 +629,7 @@ async def stop_recognition_async(recognizer: SpeechRecognizer):
             pass
         recognition_started = False
     else:
-        # qwen 使用 pause
+        # qwen 和 soniox 使用 pause（保持连接，发送静音数据）
         try:
             await loop.run_in_executor(executor, recognizer.pause)
         except Exception:
@@ -534,7 +646,8 @@ async def start_recognition_async(recognizer: SpeechRecognizer):
     loop = asyncio.get_event_loop()
 
     try:
-        if CURRENT_ASR_BACKEND == 'qwen' and recognition_started:
+        # qwen 和 soniox 支持 pause/resume，dashscope 需要完全停止/启动
+        if CURRENT_ASR_BACKEND in ('qwen', 'soniox') and recognition_started:
             await loop.run_in_executor(executor, recognizer.resume)
         else:
             await loop.run_in_executor(executor, recognizer.start)

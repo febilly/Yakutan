@@ -1,0 +1,848 @@
+# Real-time translation
+URL: /stt/rt/real-time-translation
+
+Learn how real-time translation works.
+
+***
+
+title: Real-time translation
+description: Learn how real-time translation works.
+---------------------------------------------------
+
+import { CodeBlock, Pre } from "@/components/codeblock";
+import { DynamicCodeBlock } from "@/components/dynamic-codeblock";
+import { LuTriangleAlert } from "react-icons/lu";
+
+## Overview
+
+Soniox Speech-to-Text AI introduces a new kind of translation designed
+for low latency applications. Unlike traditional systems that wait until
+the end of a sentence before producing a translation, Soniox translates
+**mid-sentence**—as words are spoken. This innovation enables a completely new
+experience: you can follow conversations across languages in real-time, without
+delays.
+
+***
+
+## How it works
+
+* **Always transcribes speech:** every spoken word is transcribed, regardless of translation settings.
+* **Translation:** choose between:
+  * **One-way translation** → translate all speech into a single target language.
+  * **Two-way translation** → translate back and forth between two languages.
+* **Low latency:** translations are streamed in chunks, balancing speed and accuracy.
+* **Unified token stream:** transcriptions and translations arrive together, labeled for easy handling.
+
+### Example
+
+Speaker says:
+
+```json
+"Hello everyone, thank you for joining us today."
+```
+
+The token stream unfolds like this:
+
+```json
+[Transcription] Hello everyone,
+[Translation]   Bonjour à tous,
+
+[Transcription] thank you
+[Translation]   merci
+
+[Transcription] for joining us
+[Translation]   de nous avoir rejoints
+
+[Transcription] today.
+[Translation]   aujourd'hui.
+```
+
+Notice how:
+
+* **Transcription tokens arrive first,** as soon as words are recognized.
+* **Translation tokens follow,** chunk by chunk, without waiting for the full sentence.
+* Developers can display tokens immediately for **low latency transcription and translation.**
+
+***
+
+## Translation modes
+
+Soniox provides two translation modes: translate all speech into a single target language, or enable seamless two-way conversations between languages.
+
+### One-way translation
+
+Translate **all spoken languages** into a single target language.
+
+**Example: translate everything into French**
+
+```json
+{
+  "translation": {
+    "type": "one_way",
+    "target_language": "fr"
+  }
+}
+```
+
+* All speech is **transcribed.**
+* All speech is **translated into French.**
+
+### Two-way translation
+
+Translate **back and forth** between two specified languages.
+
+**Example: Japanese ⟷ Korean**
+
+```json
+{
+  "translation": {
+    "type": "two_way",
+    "language_a": "ja",
+    "language_b": "ko"
+  }
+}
+```
+
+* All speech is **transcribed.**
+* Japanese speech is **translated into Korean.**
+* Korean speech is **translated into Japanese.**
+
+***
+
+## Token format
+
+Each result (transcription or translation) is returned as a **token** with clear metadata.
+
+| Field                | Description                                                                                          |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| `text`               | Token text                                                                                           |
+| `translation_status` | `"none"` (not translated) <br /> `"original"` (spoken text) <br /> `"translation"` (translated text) |
+| `language`           | Language of the token                                                                                |
+| `source_language`    | Original language (only for translated tokens)                                                       |
+
+### Example: two-way translation
+
+Two way translation between English (`en`) and German (`de`).
+
+**Config**
+
+```json
+{
+  "translation": {
+    "type": "two_way",
+    "language_a": "en",
+    "language_b": "de"
+  }
+}
+```
+
+**Text**
+
+```json
+[en] Good morning
+[de] Guten Morgen
+
+[de] Wie geht’s?
+[en] How are you?
+
+[fr] Bonjour à tous
+(fr is only transcribed, not translated)
+
+[en] I’m fine, thanks.
+[de] Mir geht’s gut, danke.
+```
+
+**Tokens**
+
+{/* NOTE(miha): ``` tags put this code into scrollable view, that we didn't want */}
+
+<DynamicCodeBlock
+  lang="json"
+  code={`// ===== (1) =====
+// Transcription tokens to be translated
+{
+  "text": "Good",
+  "translation_status": "original",
+  "language": "en"
+}
+{
+  "text": " morn",
+  "translation_status": "original",
+  "language": "en"
+}
+{
+  "text": "ing",
+  "translation_status": "original",
+  "language": "en"
+}
+// Translation tokens of previous transcription tokens
+{
+  "text": "Gu",
+  "translation_status": "translation",
+  "language": "de",
+  "source_language": "en"
+}
+{
+  "text": "ten",
+  "translation_status": "translation",
+  "language": "de",
+  "source_language": "en"
+}
+{
+  "text": " Morgen",
+  "translation_status": "translation",
+  "language": "de",
+  "source_language": "en"
+}
+
+// ===== (2) =====
+// Transcription tokens to be translated
+{
+  "text": "Wie",
+  "translation_status": "original",
+  "language": "de"
+}
+{
+  "text": " geht’s?",
+  "translation_status": "original",
+  "language": "de"
+}
+// Translation tokens of previous transcription tokens
+{
+  "text": "How",
+  "translation_status": "translation",
+  "language": "en",
+  "source_language": "de"
+}
+{
+  "text": " are",
+  "translation_status": "translation",
+  "language": "en",
+  "source_language": "de"
+}
+{
+  "text": " you",
+  "translation_status": "translation",
+  "language": "en",
+  "source_language": "de"
+}
+{
+  "text": "?",
+  "translation_status": "translation",
+  "language": "en",
+  "source_language": "de"
+}
+
+// ===== (3) =====
+// Transcription tokens NOT to be translated
+{
+  "text": "Bon",
+  "translation_status": "none",
+  "language": "fr"
+}
+{
+  "text": "jour",
+  "translation_status": "none",
+  "language": "fr"
+}
+{
+  "text": " à",
+  "translation_status": "none",
+  "language": "fr"
+}
+{
+  "text": " tous",
+  "translation_status": "none",
+  "language": "fr"
+}
+
+// ===== (4) =====
+// Transcription tokens to be translated
+{
+  "text": "I’m",
+  "translation_status": "original",
+  "language": "en"
+}
+{
+  "text": " fine,",
+  "translation_status": "original",
+  "language": "en"
+}
+{
+  "text": " thanks.",
+  "translation_status": "original",
+  "language": "en"
+}
+// Translation tokens of previous transcription tokens
+{
+  "text": "Mir",
+  "translation_status": "translation",
+  "language": "de",
+  "source_language": "en"
+}
+{
+  "text": " geht’s",
+  "translation_status": "translation",
+  "language": "de",
+  "source_language": "en"
+}
+{
+  "text": " gut",
+  "translation_status": "translation",
+  "language": "de",
+  "source_language": "en"
+}
+{
+  "text": " dan",
+  "translation_status": "translation",
+  "language": "de",
+  "source_language": "en"
+}
+{
+  "text": "ke.",
+  "translation_status": "translation",
+  "language": "de",
+  "source_language": "en"
+}`}
+/>
+
+<Callout type="warn">
+  Transcription and translation chunks follow each
+  other, but tokens are not 1-to-1 mapped and may not align.
+</Callout>
+
+***
+
+## Supported languages
+
+**All pairs supported** — translate between any two [supported languages](/stt/concepts/supported-languages).
+
+***
+
+## Timestamps
+
+* **Spoken tokens** (`translation_status: "none"` or `"original"`) include timestamps (`start_ms`, `end_ms`) that align to the exact position in the audio.
+* **Translated tokens do not** include timestamps, since they are generated
+  immediately after the spoken tokens and directly follow their timing.
+
+This way, you can always align transcripts to the original audio, while translations stream naturally in sequence.
+
+***
+
+## Code example
+
+**Prerequisite:** Complete the steps in [Get started](/stt/get-started).
+
+<Tabs
+  items={[
+  'Python',
+  'Node.js']}
+>
+  <Tab>
+    <Accordions>
+      <Accordion title="Code" id="code">
+        See on GitHub: [soniox\_realtime.py](https://github.com/soniox/soniox_examples/blob/master/speech_to_text/python/soniox_realtime.py).
+
+        <FileCodeBlock path="./content/stt/rt/_examples/soniox_realtime.py" lang="python">
+          ```
+          import json
+          import os
+          import threading
+          import time
+          import argparse
+          from typing import Optional
+
+          from websockets import ConnectionClosedOK
+          from websockets.sync.client import connect
+
+          SONIOX_WEBSOCKET_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
+
+
+          # Get Soniox STT config.
+          def get_config(api_key: str, audio_format: str, translation: str) -> dict:
+              config = {
+                  # Get your API key at console.soniox.com, then run: export SONIOX_API_KEY=<YOUR_API_KEY>
+                  "api_key": api_key,
+                  #
+                  # Select the model to use.
+                  # See: soniox.com/docs/stt/models
+                  "model": "stt-rt-v3",
+                  #
+                  # Set language hints when possible to significantly improve accuracy.
+                  # See: soniox.com/docs/stt/concepts/language-hints
+                  "language_hints": ["en", "es"],
+                  #
+                  # Enable language identification. Each token will include a "language" field.
+                  # See: soniox.com/docs/stt/concepts/language-identification
+                  "enable_language_identification": True,
+                  #
+                  # Enable speaker diarization. Each token will include a "speaker" field.
+                  # See: soniox.com/docs/stt/concepts/speaker-diarization
+                  "enable_speaker_diarization": True,
+                  #
+                  # Set context to help the model understand your domain, recognize important terms,
+                  # and apply custom vocabulary and translation preferences.
+                  # See: soniox.com/docs/stt/concepts/context
+                  "context": {
+                      "general": [
+                          {"key": "domain", "value": "Healthcare"},
+                          {"key": "topic", "value": "Diabetes management consultation"},
+                          {"key": "doctor", "value": "Dr. Martha Smith"},
+                          {"key": "patient", "value": "Mr. David Miller"},
+                          {"key": "organization", "value": "St John's Hospital"},
+                      ],
+                      "text": "Mr. David Miller visited his healthcare provider last month for a routine follow-up related to diabetes care. The clinician reviewed his recent test results, noted improved glucose levels, and adjusted his medication schedule accordingly. They also discussed meal planning strategies and scheduled the next check-up for early spring.",
+                      "terms": [
+                          "Celebrex",
+                          "Zyrtec",
+                          "Xanax",
+                          "Prilosec",
+                          "Amoxicillin Clavulanate Potassium",
+                      ],
+                      "translation_terms": [
+                          {"source": "Mr. Smith", "target": "Sr. Smith"},
+                          {"source": "St John's", "target": "St John's"},
+                          {"source": "stroke", "target": "ictus"},
+                      ],
+                  },
+                  #
+                  # Use endpointing to detect when the speaker stops.
+                  # It finalizes all non-final tokens right away, minimizing latency.
+                  # See: soniox.com/docs/stt/rt/endpoint-detection
+                  "enable_endpoint_detection": True,
+              }
+
+              # Audio format.
+              # See: soniox.com/docs/stt/rt/real-time-transcription#audio-formats
+              if audio_format == "auto":
+                  # Set to "auto" to let Soniox detect the audio format automatically.
+                  config["audio_format"] = "auto"
+              elif audio_format == "pcm_s16le":
+                  # Example of a raw audio format; Soniox supports many others as well.
+                  config["audio_format"] = "pcm_s16le"
+                  config["sample_rate"] = 16000
+                  config["num_channels"] = 1
+              else:
+                  raise ValueError(f"Unsupported audio_format: {audio_format}")
+
+              # Translation options.
+              # See: soniox.com/docs/stt/rt/real-time-translation#translation-modes
+              if translation == "none":
+                  pass
+              elif translation == "one_way":
+                  # Translates all languages into the target language.
+                  config["translation"] = {
+                      "type": "one_way",
+                      "target_language": "es",
+                  }
+              elif translation == "two_way":
+                  # Translates from language_a to language_b and back from language_b to language_a.
+                  config["translation"] = {
+                      "type": "two_way",
+                      "language_a": "en",
+                      "language_b": "es",
+                  }
+              else:
+                  raise ValueError(f"Unsupported translation: {translation}")
+
+              return config
+
+
+          # Read the audio file and send its bytes to the websocket.
+          def stream_audio(audio_path: str, ws) -> None:
+              with open(audio_path, "rb") as fh:
+                  while True:
+                      data = fh.read(3840)
+                      if len(data) == 0:
+                          break
+                      ws.send(data)
+                      # Sleep for 120 ms to simulate real-time streaming.
+                      time.sleep(0.120)
+
+              # Empty string signals end-of-audio to the server
+              ws.send("")
+
+
+          # Convert tokens into a readable transcript.
+          def render_tokens(final_tokens: list[dict], non_final_tokens: list[dict]) -> str:
+              text_parts: list[str] = []
+              current_speaker: Optional[str] = None
+              current_language: Optional[str] = None
+
+              # Process all tokens in order.
+              for token in final_tokens + non_final_tokens:
+                  text = token["text"]
+                  speaker = token.get("speaker")
+                  language = token.get("language")
+                  is_translation = token.get("translation_status") == "translation"
+
+                  # Speaker changed -> add a speaker tag.
+                  if speaker is not None and speaker != current_speaker:
+                      if current_speaker is not None:
+                          text_parts.append("\n\n")
+                      current_speaker = speaker
+                      current_language = None  # Reset language on speaker changes.
+                      text_parts.append(f"Speaker {current_speaker}:")
+
+                  # Language changed -> add a language or translation tag.
+                  if language is not None and language != current_language:
+                      current_language = language
+                      prefix = "[Translation] " if is_translation else ""
+                      text_parts.append(f"\n{prefix}[{current_language}] ")
+                      text = text.lstrip()
+
+                  text_parts.append(text)
+
+              text_parts.append("\n===============================")
+
+              return "".join(text_parts)
+
+
+          def run_session(
+              api_key: str,
+              audio_path: str,
+              audio_format: str,
+              translation: str,
+          ) -> None:
+              config = get_config(api_key, audio_format, translation)
+
+              print("Connecting to Soniox...")
+              with connect(SONIOX_WEBSOCKET_URL) as ws:
+                  # Send first request with config.
+                  ws.send(json.dumps(config))
+
+                  # Start streaming audio in the background.
+                  threading.Thread(
+                      target=stream_audio,
+                      args=(audio_path, ws),
+                      daemon=True,
+                  ).start()
+
+                  print("Session started.")
+
+                  final_tokens: list[dict] = []
+
+                  try:
+                      while True:
+                          message = ws.recv()
+                          res = json.loads(message)
+
+                          # Error from server.
+                          # See: https://soniox.com/docs/stt/api-reference/websocket-api#error-response
+                          if res.get("error_code") is not None:
+                              print(f"Error: {res['error_code']} - {res['error_message']}")
+                              break
+
+                          # Parse tokens from current response.
+                          non_final_tokens: list[dict] = []
+                          for token in res.get("tokens", []):
+                              if token.get("text"):
+                                  if token.get("is_final"):
+                                      # Final tokens are returned once and should be appended to final_tokens.
+                                      final_tokens.append(token)
+                                  else:
+                                      # Non-final tokens update as more audio arrives; reset them on every response.
+                                      non_final_tokens.append(token)
+
+                          # Render tokens.
+                          text = render_tokens(final_tokens, non_final_tokens)
+                          print(text)
+
+                          # Session finished.
+                          if res.get("finished"):
+                              print("Session finished.")
+
+                  except ConnectionClosedOK:
+                      # Normal, server closed after finished.
+                      pass
+                  except KeyboardInterrupt:
+                      print("\nInterrupted by user.")
+                  except Exception as e:
+                      print(f"Error: {e}")
+
+
+          def main():
+              parser = argparse.ArgumentParser()
+              parser.add_argument("--audio_path", type=str)
+              parser.add_argument("--audio_format", default="auto")
+              parser.add_argument("--translation", default="none")
+              args = parser.parse_args()
+
+              api_key = os.environ.get("SONIOX_API_KEY")
+              if api_key is None:
+                  raise RuntimeError("Missing SONIOX_API_KEY.")
+
+              run_session(api_key, args.audio_path, args.audio_format, args.translation)
+
+
+          if __name__ == "__main__":
+              main()
+
+          ```
+        </FileCodeBlock>
+      </Accordion>
+
+      <Accordion title="Run" id="run">
+        ```sh title="Terminal"
+        # One-way translation of a live audio stream
+        python soniox_realtime.py --audio_path ../assets/coffee_shop.mp3 --translation one_way
+
+        # Two-way translation of a live audio stream
+        python soniox_realtime.py --audio_path ../assets/two_way_translation.mp3 --translation two_way
+        ```
+      </Accordion>
+    </Accordions>
+  </Tab>
+
+  <Tab>
+    <Accordions>
+      <Accordion title="Code" id="code">
+        See on GitHub: [soniox\_realtime.js](https://github.com/soniox/soniox_examples/blob/master/speech_to_text/nodejs/soniox_realtime.js).
+
+        <FileCodeBlock path="./content/stt/rt/_examples/soniox_realtime.js" lang="js">
+          ```
+          import fs from "fs";
+          import WebSocket from "ws";
+          import { parseArgs } from "node:util";
+
+          const SONIOX_WEBSOCKET_URL = "wss://stt-rt.soniox.com/transcribe-websocket";
+
+          // Get Soniox STT config
+          function getConfig(apiKey, audioFormat, translation) {
+            const config = {
+              // Get your API key at console.soniox.com, then run: export SONIOX_API_KEY=<YOUR_API_KEY>
+              api_key: apiKey,
+
+              // Select the model to use.
+              // See: soniox.com/docs/stt/models
+              model: "stt-rt-v3",
+
+              // Set language hints when possible to significantly improve accuracy.
+              // See: soniox.com/docs/stt/concepts/language-hints
+              language_hints: ["en", "es"],
+
+              // Enable language identification. Each token will include a "language" field.
+              // See: soniox.com/docs/stt/concepts/language-identification
+              enable_language_identification: true,
+
+              // Enable speaker diarization. Each token will include a "speaker" field.
+              // See: soniox.com/docs/stt/concepts/speaker-diarization
+              enable_speaker_diarization: true,
+
+              // Set context to help the model understand your domain, recognize important terms,
+              // and apply custom vocabulary and translation preferences.
+              // See: soniox.com/docs/stt/concepts/context
+              context: {
+                general: [
+                  { key: "domain", value: "Healthcare" },
+                  { key: "topic", value: "Diabetes management consultation" },
+                  { key: "doctor", value: "Dr. Martha Smith" },
+                  { key: "patient", value: "Mr. David Miller" },
+                  { key: "organization", value: "St John's Hospital" },
+                ],
+                text: "Mr. David Miller visited his healthcare provider last month for a routine follow-up related to diabetes care. The clinician reviewed his recent test results, noted improved glucose levels, and adjusted his medication schedule accordingly. They also discussed meal planning strategies and scheduled the next check-up for early spring.",
+                terms: [
+                  "Celebrex",
+                  "Zyrtec",
+                  "Xanax",
+                  "Prilosec",
+                  "Amoxicillin Clavulanate Potassium",
+                ],
+                translation_terms: [
+                  { source: "Mr. Smith", target: "Sr. Smith" },
+                  { source: "St John's", target: "St John's" },
+                  { source: "stroke", target: "ictus" },
+                ],
+              },
+
+              // Use endpointing to detect when the speaker stops.
+              // It finalizes all non-final tokens right away, minimizing latency.
+              // See: soniox.com/docs/stt/rt/endpoint-detection
+              enable_endpoint_detection: true,
+            };
+
+            // Audio format.
+            // See: soniox.com/docs/stt/rt/real-time-transcription#audio-formats
+            if (audioFormat === "auto") {
+              // Set to "auto" to let Soniox detect the audio format automatically.
+              config.audio_format = "auto";
+            } else if (audioFormat === "pcm_s16le") {
+              // Example of a raw audio format; Soniox supports many others as well.
+              config.audio_format = "pcm_s16le";
+              config.sample_rate = 16000;
+              config.num_channels = 1;
+            } else {
+              throw new Error(`Unsupported audio_format: ${audioFormat}`);
+            }
+
+            // Translation options.
+            // See: soniox.com/docs/stt/rt/real-time-translation#translation-modes
+            if (translation === "one_way") {
+              // Translates all languages into the target language.
+              config.translation = { type: "one_way", target_language: "es" };
+            } else if (translation === "two_way") {
+              // Translates from language_a to language_b and back from language_b to language_a.
+              config.translation = {
+                type: "two_way",
+                language_a: "en",
+                language_b: "es",
+              };
+            } else if (translation !== "none") {
+              throw new Error(`Unsupported translation: ${translation}`);
+            }
+
+            return config;
+          }
+
+          // Read the audio file and send its bytes to the websocket.
+          async function streamAudio(audioPath, ws) {
+            const stream = fs.createReadStream(audioPath, { highWaterMark: 3840 });
+
+            for await (const chunk of stream) {
+              ws.send(chunk);
+              // Sleep for 120 ms to simulate real-time streaming.
+              await new Promise((res) => setTimeout(res, 120));
+            }
+
+            // Empty string signals end-of-audio to the server
+            ws.send("");
+          }
+
+          // Convert tokens into readable transcript
+          function renderTokens(finalTokens, nonFinalTokens) {
+            let textParts = [];
+            let currentSpeaker = null;
+            let currentLanguage = null;
+
+            const allTokens = [...finalTokens, ...nonFinalTokens];
+
+            // Process all tokens in order.
+            for (const token of allTokens) {
+              let { text, speaker, language } = token;
+              const isTranslation = token.translation_status === "translation";
+
+              // Speaker changed -> add a speaker tag.
+              if (speaker && speaker !== currentSpeaker) {
+                if (currentSpeaker !== null) textParts.push("\n\n");
+                currentSpeaker = speaker;
+                currentLanguage = null; // Reset language on speaker changes.
+                textParts.push(`Speaker ${currentSpeaker}:`);
+              }
+
+              // Language changed -> add a language or translation tag.
+              if (language && language !== currentLanguage) {
+                currentLanguage = language;
+                const prefix = isTranslation ? "[Translation] " : "";
+                textParts.push(`\n${prefix}[${currentLanguage}] `);
+                text = text.trimStart();
+              }
+
+              textParts.push(text);
+            }
+
+            textParts.push("\n===============================");
+            return textParts.join("");
+          }
+
+          function runSession(apiKey, audioPath, audioFormat, translation) {
+            const config = getConfig(apiKey, audioFormat, translation);
+
+            console.log("Connecting to Soniox...");
+            const ws = new WebSocket(SONIOX_WEBSOCKET_URL);
+
+            let finalTokens = [];
+
+            ws.on("open", () => {
+              // Send first request with config.
+              ws.send(JSON.stringify(config));
+
+              // Start streaming audio in the background.
+              streamAudio(audioPath, ws).catch((err) =>
+                console.error("Audio stream error:", err),
+              );
+              console.log("Session started.");
+            });
+
+            ws.on("message", (msg) => {
+              const res = JSON.parse(msg.toString());
+
+              // Error from server.
+              // See: https://soniox.com/docs/stt/api-reference/websocket-api#error-response
+              if (res.error_code) {
+                console.error(`Error: ${res.error_code} - ${res.error_message}`);
+                ws.close();
+                return;
+              }
+
+              // Parse tokens from current response.
+              let nonFinalTokens = [];
+              if (res.tokens) {
+                for (const token of res.tokens) {
+                  if (token.text) {
+                    if (token.is_final) {
+                      // Final tokens are returned once and should be appended to final_tokens.
+                      finalTokens.push(token);
+                    } else {
+                      // Non-final tokens update as more audio arrives; reset them on every response.
+                      nonFinalTokens.push(token);
+                    }
+                  }
+                }
+              }
+
+              // Render tokens.
+              const text = renderTokens(finalTokens, nonFinalTokens);
+              console.log(text);
+
+              // Session finished.
+              if (res.finished) {
+                console.log("Session finished.");
+                ws.close();
+              }
+            });
+
+            ws.on("error", (err) => console.error("WebSocket error:", err));
+          }
+
+          async function main() {
+            const { values: argv } = parseArgs({
+              options: {
+                audio_path: { type: "string", required: true },
+                audio_format: { type: "string", default: "auto" },
+                translation: { type: "string", default: "none" },
+              },
+            });
+
+            const apiKey = process.env.SONIOX_API_KEY;
+            if (!apiKey) {
+              throw new Error(
+                "Missing SONIOX_API_KEY.\n" +
+                  "1. Get your API key at https://console.soniox.com\n" +
+                  "2. Run: export SONIOX_API_KEY=<YOUR_API_KEY>",
+              );
+            }
+
+            runSession(apiKey, argv.audio_path, argv.audio_format, argv.translation);
+          }
+
+          main().catch((err) => {
+            console.error("Error:", err.message);
+            process.exit(1);
+          });
+
+          ```
+        </FileCodeBlock>
+      </Accordion>
+
+      <Accordion title="Run" id="run">
+        ```sh title="Terminal"
+        # One-way translation of a live audio stream
+        node soniox_realtime.js --audio_path ../assets/coffee_shop.mp3 --translation one_way
+
+        # Two-way translation of a live audio stream
+        node soniox_realtime.js --audio_path ../assets/two_way_translation.mp3 --translation two_way
+        ```
+      </Accordion>
+    </Accordions>
+  </Tab>
+</Tabs>

@@ -15,6 +15,12 @@ try:
 except ImportError:  # pragma: no cover
     QwenSpeechRecognizer = None  # type: ignore[assignment]
 
+try:
+    from .soniox_speech_recognizer import SonioxSpeechRecognizer, WEBSOCKETS_AVAILABLE
+except ImportError:  # pragma: no cover
+    SonioxSpeechRecognizer = None  # type: ignore[assignment]
+    WEBSOCKETS_AVAILABLE = False
+
 
 def _normalize_qwen_language(lang: Optional[str]) -> Optional[str]:
     """Normalize language code to Qwen ASR 2-letter hint.
@@ -143,6 +149,31 @@ def create_recognizer(
         
         return DashscopeSpeechRecognizer(callback=callback, **recognition_kwargs)
     
+    elif backend == 'soniox':
+        if SonioxSpeechRecognizer is None or not WEBSOCKETS_AVAILABLE:
+            raise RuntimeError('SonioxSpeechRecognizer 不可用，请安装 websockets 库: pip install websockets')
+        
+        # 从环境变量获取 API Key
+        import os
+        api_key = os.environ.get('SONIOX_API_KEY', '')
+        if not api_key:
+            raise RuntimeError('SONIOX_API_KEY 环境变量未设置')
+        
+        recognition_kwargs = {
+            'api_key': api_key,
+            'model': getattr(config, 'SONIOX_MODEL', 'stt-rt-v3'),
+            'sample_rate': sample_rate,
+            'num_channels': 1,
+            'audio_format': 'pcm_s16le',
+            'language_hints': getattr(config, 'SONIOX_LANGUAGE_HINTS', ['en', 'zh', 'ja', 'ko']),
+            'enable_endpoint_detection': getattr(config, 'SONIOX_ENABLE_ENDPOINT_DETECTION', True),
+        }
+        
+        # 合并额外参数
+        recognition_kwargs.update(extra_kwargs)
+        
+        return SonioxSpeechRecognizer(callback=callback, **recognition_kwargs)
+    
     else:
         raise ValueError(f'不支持的识别后端: {backend}')
 
@@ -163,6 +194,12 @@ def is_backend_available(backend: str) -> bool:
         # dashscope (Fun-ASR) 仅在中国大陆版可用
         use_international = getattr(config, 'USE_INTERNATIONAL_ENDPOINT', False)
         return not use_international
+    elif backend == 'soniox':
+        # Soniox 需要 websockets 库和 API Key
+        import os
+        has_lib = SonioxSpeechRecognizer is not None and WEBSOCKETS_AVAILABLE
+        has_key = bool(os.environ.get('SONIOX_API_KEY', ''))
+        return has_lib and has_key
     else:
         return False
 

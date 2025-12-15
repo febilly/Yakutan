@@ -64,6 +64,7 @@ def get_config_dict():
             'api_type': config.TRANSLATION_API_TYPE,
             'show_partial_results': config.SHOW_PARTIAL_RESULTS,
             'enable_furigana': getattr(config, 'ENABLE_JA_FURIGANA', False),
+            'enable_pinyin': getattr(config, 'ENABLE_ZH_PINYIN', False),
             'enable_reverse_translation': config.ENABLE_REVERSE_TRANSLATION,
         },
         # 麦克风控制配置
@@ -126,6 +127,8 @@ def update_config(config_data):
                 config.SHOW_PARTIAL_RESULTS = trans['show_partial_results']
             if 'enable_furigana' in trans:
                 config.ENABLE_JA_FURIGANA = trans['enable_furigana']
+            if 'enable_pinyin' in trans:
+                config.ENABLE_ZH_PINYIN = trans['enable_pinyin']
             if 'enable_reverse_translation' in trans:
                 config.ENABLE_REVERSE_TRANSLATION = trans['enable_reverse_translation']
         
@@ -235,6 +238,9 @@ def start_service():
         
         if 'openrouter' in api_keys and api_keys['openrouter']:
             os.environ['OPENROUTER_API_KEY'] = api_keys['openrouter']
+        
+        if 'soniox' in api_keys and api_keys['soniox']:
+            os.environ['SONIOX_API_KEY'] = api_keys['soniox']
         
         service_thread = threading.Thread(target=run_service_async, daemon=True)
         service_thread.start()

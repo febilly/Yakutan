@@ -45,8 +45,10 @@ const translations = {
         'hint.targetLanguage': '可直接输入语言代码，或从下拉列表快速选择',
         'label.fallbackLanguage': '备用语言（当源语言与目标语言相同时使用）',
         'hint.fallbackLanguage': '可直接输入语言代码，留空则禁用备用语言',
-        'label.enableFurigana': '日语译文添加假名',
-        'hint.enableFurigana': '仅在目标语言为日语时可用',
+        'label.enableFurigana': '日语添加假名',
+        'hint.enableFurigana': '为日语文本的汉字标注假名读音',
+        'label.enablePinyin': '中文添加拼音',
+        'hint.enablePinyin': '为中文标注拼音（带声调）',
         'select.quickSelect': '-- 快速选择 --',
         'select.disabled': '禁用',
 
@@ -96,6 +98,9 @@ const translations = {
         'asr.qwen': 'Qwen3 ASR（推荐）',
         'asr.dashscope': 'Fun-ASR（仅中国大陆版可用）',
         'asr.dashscopeDisabled': 'Fun-ASR（国际版不可用）',
+        'asr.soniox': 'Soniox（多语言，需要API Key）',
+        'label.sonioxKey': 'Soniox API Key (可选，用于多语言识别)',
+        'hint.sonioxKey': '支持60+语言的语音识别。',
         'label.pauseOnMute': '游戏静音时暂停转录',
         'hint.pauseOnMute': '第一次解除静音后开始转录',
         'label.enableHotWords': '启用热词',
@@ -167,6 +172,7 @@ const translations = {
         'msg.confirmReset': '确定要恢复默认设置吗？（API Keys将被保留）',
         'msg.apiKeyRequired': '使用 {api} 需要配置 API Key，请先在"API Keys 配置"中填写',
         'msg.autoSwitchToGoogle': '未检测到所选翻译接口的 API Key，已自动切换为 Google Dictionary。',
+        'msg.sonioxKeyRequired': 'Soniox 后端需要配置 API Key',
 
         // 语言选择器
         'label.uiLanguage': '界面语言'
@@ -197,8 +203,10 @@ const translations = {
         'hint.targetLanguage': 'Enter language code directly or select from the dropdown',
         'label.fallbackLanguage': 'Fallback Language (used when source equals target)',
         'hint.fallbackLanguage': 'Enter language code directly, leave empty to disable',
-        'label.enableFurigana': 'Add furigana to Japanese output',
-        'hint.enableFurigana': 'Available only when target language is Japanese',
+        'label.enableFurigana': 'Add furigana to Japanese text',
+        'hint.enableFurigana': 'Add hiragana readings to Japanese kanji',
+        'label.enablePinyin': 'Add pinyin to Chinese text',
+        'hint.enablePinyin': 'Add pinyin with tones to Chinese characters',
         'select.quickSelect': '-- Quick Select --',
         'select.disabled': 'Disabled',
 
@@ -248,6 +256,9 @@ const translations = {
         'asr.qwen': 'Qwen3 ASR (Recommended)',
         'asr.dashscope': 'Fun-ASR (China Mainland only)',
         'asr.dashscopeDisabled': 'Fun-ASR (Not available for International)',
+        'asr.soniox': 'Soniox (Multilingual, requires API Key)',
+        'label.sonioxKey': 'Soniox API Key (optional, for multilingual recognition)',
+        'hint.sonioxKey': 'Supports 60+ languages for speech recognition.',
         'label.pauseOnMute': 'Pause transcription when muted in game',
         'hint.pauseOnMute': 'Starts transcription after first unmute',
         'label.enableHotWords': 'Enable Hot Words',
@@ -319,6 +330,7 @@ const translations = {
         'msg.confirmReset': 'Are you sure you want to reset to defaults? (API Keys will be preserved)',
         'msg.apiKeyRequired': 'API Key is required for {api}, please fill it in "API Keys Configuration" first',
         'msg.autoSwitchToGoogle': 'API Key for selected translation API not found, automatically switched to Google Dictionary.',
+        'msg.sonioxKeyRequired': 'Soniox backend requires API Key',
 
         // Language selector
         'label.uiLanguage': 'UI Language'
@@ -383,12 +395,12 @@ function loadLanguageFromStorage() {
 function t(key, params = {}) {
     const langData = translations[currentLanguage] || translations[DEFAULT_LANGUAGE];
     let text = langData[key] || translations[DEFAULT_LANGUAGE][key] || key;
-    
+
     // 替换参数 {param}
     for (const [paramKey, paramValue] of Object.entries(params)) {
         text = text.replace(new RegExp(`\\{${paramKey}\\}`, 'g'), paramValue);
     }
-    
+
     return text;
 }
 
