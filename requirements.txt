@@ -17,10 +17,16 @@ python-dotenv>=1.0.0
 googletrans>=4.0.0
 deepl
 openai>=2.8.0
+httpx>=0.27.0
 pykakasi>=2.2.1
+pypinyin>=0.51.0
+jieba>=0.42.1
 
 # 语言检测库（用于自动检测源语言）
 fast-langdetect>=0.2.0
+
+# WebSocket 客户端（用于部分 ASR/流式组件）
+websockets>=12.0
 
 # Web UI 框架
 flask>=3.0.0

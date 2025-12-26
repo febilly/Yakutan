@@ -22,6 +22,8 @@ datas = [
 hiddenimports = [
     'dashscope',
     'dashscope.audio.asr',
+    'dashscope.audio.qwen_omni',
+    'dashscope.audio.qwen_omni.omni_realtime',
     'deepl',
     'flask',
     'flask_cors',
@@ -31,7 +33,14 @@ hiddenimports = [
     'googletrans',
     'aiohttp',
     'asyncio',
+    'dotenv',
     'main',  # 确保main模块被包含
+    'openai',
+    'pykakasi',
+    'httpx',
+    'websockets',
+    'pypinyin',
+    'jieba',
 ]
 
 a = Analysis(
