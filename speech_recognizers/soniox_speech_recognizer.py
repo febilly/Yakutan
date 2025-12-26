@@ -230,12 +230,15 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
         # 累积 final tokens
         self._final_tokens.extend(new_final_tokens)
         
-        # 检查是否有 <end> token（endpoint detection）
-        has_endpoint = any(t.get("text") == "<end>" for t in new_final_tokens)
+        # 需要过滤的特殊 token
+        SPECIAL_TOKENS = {"<end>", "<fin>"}
         
-        # 构建当前文本
-        final_text = "".join(t.get("text", "") for t in self._final_tokens if t.get("text") != "<end>")
-        non_final_text = "".join(t.get("text", "") for t in non_final_tokens)
+        # 检查是否有 <end> 或 <fin> token（endpoint detection 或 manual finalization）
+        has_endpoint = any(t.get("text") in SPECIAL_TOKENS for t in new_final_tokens)
+        
+        # 构建当前文本（过滤掉特殊 token）
+        final_text = "".join(t.get("text", "") for t in self._final_tokens if t.get("text") not in SPECIAL_TOKENS)
+        non_final_text = "".join(t.get("text", "") for t in non_final_tokens if t.get("text") not in SPECIAL_TOKENS)
         
         combined_text = final_text + non_final_text
         combined_text = combined_text.strip()
