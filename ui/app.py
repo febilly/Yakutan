@@ -195,8 +195,8 @@ def update_config_api():
         if update_config(config_data):
             # 如果服务正在运行，通知主服务线程在下一次可行时重载翻译器实例（无需重启识别线程）
             try:
-                import main as main_module
                 if service_status.get('running') and service_loop is not None:
+                    import main as main_module
                     # 在主服务的事件循环线程安全地调度重初始化操作
                     service_loop.call_soon_threadsafe(getattr(main_module, 'reinitialize_translator', lambda: None))
             except Exception as e:
