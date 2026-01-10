@@ -110,6 +110,9 @@ const translations = {
 
         // 高级设置
         'section.advancedSettings': '高级设置',
+        'subsection.display': '显示设置',
+        'label.showOriginalAndLangTag': '显示原文及语言标识',
+        'hint.showOriginalAndLangTag': '关闭后只显示译文',
         'subsection.vad': 'VAD（语音活动检测）设置 - 仅Qwen后端',
         'label.enableVad': '启用VAD',
         'hint.enableVad': '自动检测语音结束并断句',
@@ -268,6 +271,9 @@ const translations = {
 
         // Advanced settings
         'section.advancedSettings': 'Advanced Settings',
+        'subsection.display': 'Display',
+        'label.showOriginalAndLangTag': 'Show original text and language tag',
+        'hint.showOriginalAndLangTag': 'When off, show translation only',
         'subsection.vad': 'VAD (Voice Activity Detection) Settings - Qwen backend only',
         'label.enableVad': 'Enable VAD',
         'hint.enableVad': 'Automatically detect end of speech and segment',

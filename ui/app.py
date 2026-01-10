@@ -66,6 +66,7 @@ def get_config_dict():
             'enable_furigana': getattr(config, 'ENABLE_JA_FURIGANA', False),
             'enable_pinyin': getattr(config, 'ENABLE_ZH_PINYIN', False),
             'enable_reverse_translation': config.ENABLE_REVERSE_TRANSLATION,
+            'show_original_and_lang_tag': getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True),
         },
         # 麦克风控制配置
         'mic_control': {
@@ -132,6 +133,8 @@ def update_config(config_data):
                 config.ENABLE_ZH_PINYIN = trans['enable_pinyin']
             if 'enable_reverse_translation' in trans:
                 config.ENABLE_REVERSE_TRANSLATION = trans['enable_reverse_translation']
+            if 'show_original_and_lang_tag' in trans:
+                config.SHOW_ORIGINAL_AND_LANG_TAG = bool(trans['show_original_and_lang_tag'])
         
         # 更新麦克风控制配置
         if 'mic_control' in config_data:

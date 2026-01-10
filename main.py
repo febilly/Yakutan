@@ -371,22 +371,24 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
             display_translation = add_furigana_if_needed(translated_text, config.TARGET_LANGUAGE)
 
-            segment_display = f"{segment.strip()}……"
             translation_display = display_translation.strip()
             if translation_display and not translation_display.endswith("……"):
                 translation_display = f"{translation_display}……"
             elif not translation_display:
                 translation_display = "……"
 
-            # 构建显示文本：使用检测到的实际语言
-            source_lang = self._normalize_lang(detected_lang)
-            target_lang = self._normalize_lang(config.TARGET_LANGUAGE)
-            
-            display_text = f"[{source_lang}→{target_lang}] {translation_display} ({segment_display})"
-            
-            # 如果消息过长，尝试去掉原文部分
-            if len(display_text) > 144:
-                display_text = f"[{source_lang}→{target_lang}] {translation_display}"
+            show_tag = getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True)
+            if show_tag:
+                segment_display = f"{segment.strip()}……"
+                # 构建显示文本：使用检测到的实际语言
+                source_lang = self._normalize_lang(detected_lang)
+                target_lang = self._normalize_lang(config.TARGET_LANGUAGE)
+                display_text = f"[{source_lang}→{target_lang}] {translation_display} ({segment_display})"
+                # 如果消息过长，尝试去掉原文部分
+                if len(display_text) > 144:
+                    display_text = f"[{source_lang}→{target_lang}] {translation_display}"
+            else:
+                display_text = translation_display
             
             # 发送 OSC
             await osc_manager.send_text(display_text, ongoing=True)
@@ -480,11 +482,15 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 display_source_text = add_furigana_if_needed(text, source_lang)
                 display_source_text = add_pinyin_if_needed(display_source_text, source_lang)
 
-                display_text = f"[{normalized_source}→{actual_target}] {display_translated_text} ({display_source_text})"
-                
-                # 如果消息过长，尝试去掉原文部分
-                if len(display_text) > 144:
-                    display_text = f"[{normalized_source}→{actual_target}] {display_translated_text}"
+                show_tag = getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True)
+                if show_tag:
+                    display_text = f"[{normalized_source}→{actual_target}] {display_translated_text} ({display_source_text})"
+
+                    # 如果消息过长，尝试去掉原文部分
+                    if len(display_text) > 144:
+                        display_text = f"[{normalized_source}→{actual_target}] {display_translated_text}"
+                else:
+                    display_text = str(display_translated_text)
 
 
         if display_text is None:

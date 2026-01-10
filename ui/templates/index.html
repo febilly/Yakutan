@@ -341,6 +341,20 @@
                         <span class="collapse-icon collapsed" id="advanced-settings-icon">▶</span>
                     </div>
                     <div class="collapsible-content collapsed" id="advanced-settings">
+                        <div class="subsection">
+                            <h3 data-i18n="subsection.display">显示设置</h3>
+                            <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.showOriginalAndLangTag">显示原文及语言标识</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="show-original-and-lang-tag" onchange="onSettingChange(this)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" data-i18n="hint.showOriginalAndLangTag">关闭后只显示译文</small>
+                            </div>
+                        </div>
+
                         <!-- VAD设置 -->
                         <div class="subsection">
                             <h3 data-i18n="subsection.vad">VAD（语音活动检测）设置 - 仅Qwen后端</h3>

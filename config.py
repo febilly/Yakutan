@@ -105,6 +105,11 @@ ENABLE_ZH_PINYIN = False
 ENABLE_REVERSE_TRANSLATION = True  # True: 翻译后再反向翻译回源语言
                                     # False: 不进行反向翻译
 
+# 是否显示原文及语言标识
+# True: 保持当前行为（显示如 [en→ja] 译文 (原文)）
+# False: 只显示译文本身（不显示语言标识与原文）
+SHOW_ORIGINAL_AND_LANG_TAG = True
+
 # 翻译上下文前缀
 CONTEXT_PREFIX = "This is an audio transcription of a conversation within the online multiplayer social game VRChat:"
 

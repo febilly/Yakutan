@@ -251,6 +251,11 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
                 document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
                 document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? true;
+
+                const showTag = document.getElementById('show-original-and-lang-tag');
+                if (showTag) {
+                    showTag.checked = config.translation.show_original_and_lang_tag ?? true;
+                }
             }
 
             if (config.mic_control) {
@@ -315,6 +320,9 @@ function loadDefaultConfig() {
     document.getElementById('enable-pinyin').checked = false;
     document.getElementById('enable-reverse-translation').checked = true;
     document.getElementById('openrouter-streaming-mode').checked = false;
+
+    const showTag = document.getElementById('show-original-and-lang-tag');
+    if (showTag) showTag.checked = true;
 
     // 麦克风控制
     document.getElementById('enable-mic-control').checked = true;
@@ -624,6 +632,9 @@ async function saveConfig(autoSave = false) {
                 enable_furigana: document.getElementById('enable-furigana').checked,
                 enable_pinyin: document.getElementById('enable-pinyin').checked,
                 enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,
+                show_original_and_lang_tag: document.getElementById('show-original-and-lang-tag')
+                    ? document.getElementById('show-original-and-lang-tag').checked
+                    : true,
             },
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
