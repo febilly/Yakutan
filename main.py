@@ -3,6 +3,7 @@ import os
 import signal  # for keyboard events handling (press "Ctrl+C" to terminate recording)
 import sys
 import asyncio
+import audioop
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
@@ -205,6 +206,9 @@ def add_pinyin_if_needed(text: str, language: str) -> str:
 # ============ 全局变量 ============
 mic = None
 stream = None
+input_sample_rate = config.SAMPLE_RATE  # 实际采集采样率（可能与 config.SAMPLE_RATE 不同）
+input_block_size = config.BLOCK_SIZE   # 实际采集每次 read 的帧数
+_resample_state = None                # audioop.ratecv 状态
 executor = ThreadPoolExecutor(max_workers=config.MAX_WORKERS)
 stop_event = None  # 将在 main() 函数中创建，避免绑定到错误的事件循环
 recognition_active = False  # 标记识别是否正在运行
@@ -508,19 +512,76 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
 async def init_audio_stream():
     """异步初始化音频流"""
-    global mic, stream
+    global mic, stream, input_sample_rate, input_block_size, _resample_state
     loop = asyncio.get_event_loop()
     
     def _init():
-        global mic, stream
+        global mic, stream, input_sample_rate, input_block_size, _resample_state
         mic = pyaudio.PyAudio()
-        stream = mic.open(
-            format=pyaudio.paInt16,
-            channels=config.CHANNELS,
-            rate=config.SAMPLE_RATE,
-            input=True,
-            frames_per_buffer=config.BLOCK_SIZE
-        )
+        device_index = getattr(config, 'MIC_DEVICE_INDEX', None)
+        target_rate = int(config.SAMPLE_RATE)
+
+        def _open_with(rate: int, frames_per_buffer: int, idx: Optional[int]):
+            kwargs = dict(
+                format=pyaudio.paInt16,
+                channels=config.CHANNELS,
+                rate=int(rate),
+                input=True,
+                frames_per_buffer=int(frames_per_buffer),
+            )
+            if idx is not None:
+                kwargs['input_device_index'] = int(idx)
+            return mic.open(**kwargs)
+
+        def _get_device_default_rate(idx: Optional[int]) -> Optional[int]:
+            try:
+                info = mic.get_device_info_by_index(int(idx)) if idx is not None else mic.get_default_input_device_info()
+                r = info.get('defaultSampleRate')
+                if r:
+                    return int(round(float(r)))
+            except Exception:
+                return None
+            return None
+
+        # 先尝试按 16k（ASR 期望）打开；失败则按设备默认采样率打开并重采样
+        try:
+            input_sample_rate = target_rate
+            input_block_size = int(config.BLOCK_SIZE)
+            _resample_state = None
+            stream = _open_with(target_rate, input_block_size, int(device_index) if device_index is not None else None)
+        except Exception as e_open_16k:
+            device_rate = _get_device_default_rate(int(device_index) if device_index is not None else None)
+
+            if device_rate is not None and device_rate > 0 and device_rate != target_rate:
+                # 保持时间窗口大致一致：按采集采样率缩放 block size
+                scaled_block = int(round(config.BLOCK_SIZE * (device_rate / target_rate)))
+                scaled_block = max(256, scaled_block)
+                try:
+                    input_sample_rate = int(device_rate)
+                    input_block_size = int(scaled_block)
+                    _resample_state = None
+                    stream = _open_with(input_sample_rate, input_block_size, int(device_index) if device_index is not None else None)
+                    print(f"[Audio] 设备不支持 {target_rate}Hz，已使用 {input_sample_rate}Hz 采集并实时重采样")
+                except Exception as e_open_device_rate:
+                    # 最后回退系统默认
+                    try:
+                        input_sample_rate = target_rate
+                        input_block_size = int(config.BLOCK_SIZE)
+                        _resample_state = None
+                        stream = _open_with(target_rate, input_block_size, None)
+                        print(f"[Audio] 指定麦克风设备不可用，已回退到系统默认：{e_open_device_rate}")
+                    except Exception:
+                        raise
+            else:
+                # 没拿到设备默认采样率：直接回退系统默认
+                try:
+                    input_sample_rate = target_rate
+                    input_block_size = int(config.BLOCK_SIZE)
+                    _resample_state = None
+                    stream = _open_with(target_rate, input_block_size, None)
+                    print(f"[Audio] 指定麦克风设备不可用，已回退到系统默认：{e_open_16k}")
+                except Exception:
+                    raise
         return stream
     
     return await loop.run_in_executor(executor, _init)
@@ -546,15 +607,31 @@ async def close_audio_stream():
 
 async def read_audio_data():
     """异步读取音频数据"""
-    global stream
+    global stream, input_sample_rate, input_block_size, _resample_state
     if not stream:
         return None
     
     loop = asyncio.get_event_loop()
     
     def _read():
+        global _resample_state
         try:
-            return stream.read(config.BLOCK_SIZE, exception_on_overflow=False)
+            data = stream.read(input_block_size, exception_on_overflow=False)
+            if not data:
+                return None
+            if int(input_sample_rate) != int(config.SAMPLE_RATE):
+                # 16-bit PCM, 单声道，实时重采样到 ASR 期望的采样率
+                converted, _state = audioop.ratecv(
+                    data,
+                    2,
+                    int(config.CHANNELS),
+                    int(input_sample_rate),
+                    int(config.SAMPLE_RATE),
+                    _resample_state,
+                )
+                _resample_state = _state
+                return converted
+            return data
         except Exception as e:
             print(f'Error reading audio data: {e}')
             return None

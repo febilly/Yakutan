@@ -71,6 +71,7 @@ def get_config_dict():
         'mic_control': {
             'enable_mic_control': config.ENABLE_MIC_CONTROL,
             'mute_delay_seconds': config.MUTE_DELAY_SECONDS,
+            'mic_device_index': getattr(config, 'MIC_DEVICE_INDEX', None),
         },
         # 语言检测器配置
         'language_detector': {
@@ -139,6 +140,12 @@ def update_config(config_data):
                 config.ENABLE_MIC_CONTROL = mic['enable_mic_control']
             if 'mute_delay_seconds' in mic:
                 config.MUTE_DELAY_SECONDS = float(mic['mute_delay_seconds'])
+            if 'mic_device_index' in mic:
+                value = mic['mic_device_index']
+                if value is None or value == '':
+                    config.MIC_DEVICE_INDEX = None
+                else:
+                    config.MIC_DEVICE_INDEX = int(value)
         
         # 更新语言检测器配置
         if 'language_detector' in config_data:
@@ -214,6 +221,85 @@ def update_config_api():
 def get_status():
     """获取服务状态"""
     return jsonify(service_status)
+
+
+@app.route('/api/audio/input-devices', methods=['GET'])
+def list_input_devices():
+    """列出当前系统可用的麦克风输入设备（PyAudio）。"""
+    try:
+        try:
+            import pyaudio
+        except Exception as e:  # pragma: no cover
+            return jsonify({'devices': [], 'default_index': None, 'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None), 'error': str(e)})
+
+        pa = pyaudio.PyAudio()
+        devices = []
+        default_index = None
+        preferred_host_api_index = None
+        try:
+            try:
+                default_info = pa.get_default_input_device_info()
+                default_index = default_info.get('index')
+            except Exception:
+                default_index = None
+
+            # 选择一个 Host API，避免同一设备被不同 Host API 重复枚举
+            # 优先 WASAPI（更贴近系统设备管理器的“启用/禁用”状态），否则用默认 Host API
+            try:
+                host_api_count = pa.get_host_api_count()
+                for host_api_idx in range(host_api_count):
+                    try:
+                        host_api_info = pa.get_host_api_info_by_index(host_api_idx)
+                    except Exception:
+                        continue
+                    name = str(host_api_info.get('name') or '')
+                    if 'wasapi' in name.lower():
+                        preferred_host_api_index = host_api_idx
+                        break
+            except Exception:
+                preferred_host_api_index = None
+
+            if preferred_host_api_index is None:
+                try:
+                    preferred_host_api_index = pa.get_default_host_api_info().get('index')
+                except Exception:
+                    preferred_host_api_index = None
+
+            count = pa.get_device_count()
+            seen_names = set()
+            for idx in range(count):
+                try:
+                    info = pa.get_device_info_by_index(idx)
+                except Exception:
+                    continue
+
+                if preferred_host_api_index is not None and info.get('hostApi') != preferred_host_api_index:
+                    continue
+
+                max_in = int(info.get('maxInputChannels', 0) or 0)
+                if max_in <= 0:
+                    continue
+
+                name = str(info.get('name') or f'Device {idx}')
+                name_key = " ".join(name.strip().lower().split())
+                if name_key in seen_names:
+                    continue
+                seen_names.add(name_key)
+
+                devices.append({'index': idx, 'name': name, 'max_input_channels': max_in})
+        finally:
+            try:
+                pa.terminate()
+            except Exception:
+                pass
+
+        return jsonify({
+            'devices': devices,
+            'default_index': default_index,
+            'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None),
+        })
+    except Exception as e:
+        return jsonify({'devices': [], 'default_index': None, 'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None), 'error': str(e)}), 500
 
 
 @app.route('/api/service/start', methods=['POST'])

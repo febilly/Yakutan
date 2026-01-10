@@ -118,6 +118,10 @@ TRANSLATION_CONTEXT_AWARE = True
 # 麦克风控制配置
 # ============================================================================
 
+# 选择的麦克风输入设备（PyAudio device index）
+# None 表示使用系统默认输入设备
+MIC_DEVICE_INDEX = None
+
 # 是否考虑游戏内麦克风的开关情况
 ENABLE_MIC_CONTROL = True  # True: 根据 VRChat 麦克风状态控制识别的启动/停止
                            # False: 程序启动时立即开始识别,忽略麦克风开关消息

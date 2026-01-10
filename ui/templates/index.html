@@ -154,6 +154,14 @@
                             </label>
                         </div>
                     </div>
+
+                    <div class="form-group">
+                        <label for="mic-device">麦克风</label>
+                        <select id="mic-device" class="form-control" onchange="onSettingChange(this)"
+                            data-restart-required="true">
+                            <option value="">系统默认</option>
+                        </select>
+                    </div>
                 </section>
 
                 <!-- 翻译API设置 -->

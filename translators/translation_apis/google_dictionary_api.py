@@ -34,9 +34,21 @@ class GoogleDictionaryAPI(BaseTranslationAPI):
         self._session_timeout = aiohttp.ClientTimeout(total=self.timeout)
         self._session = None
         self._loop = None
-        
-        # 提前进行一次翻译，以建立长连接
-        self.translate("你好", source_language="auto", target_language="en")
+
+        # 提前进行一次翻译以建立长连接。
+        # 注意：当在运行中的事件循环线程里初始化时，不能同步阻塞执行（会触发 event loop already running）。
+        try:
+            asyncio.get_running_loop()
+            in_running_loop = True
+        except RuntimeError:
+            in_running_loop = False
+
+        if not in_running_loop:
+            try:
+                self.translate("你好", source_language="auto", target_language="en")
+            except Exception:
+                # 预热失败不影响正常使用
+                pass
     
     async def _get_session(self):
         """获取或创建 HTTP 长连接会话"""
@@ -150,14 +162,17 @@ class GoogleDictionaryAPI(BaseTranslationAPI):
     def __del__(self):
         """析构函数，确保资源清理"""
         try:
-            if self._loop and not self._loop.is_closed():
-                if self._loop.is_running():
-                    # 如果事件循环正在运行，使用 create_task 替代
-                    self._loop.create_task(self.close())
-                else:
-                    # 否则直接运行关闭任务
+            # 仅在我们自建的 loop 未运行时清理。
+            # 运行中的 loop 无法在 __del__ 内安全阻塞/await，避免产生警告。
+            if self._loop and (not self._loop.is_closed()) and (not self._loop.is_running()):
+                try:
                     self._loop.run_until_complete(self.close())
-                self._loop.close()
+                except Exception:
+                    pass
+                try:
+                    self._loop.close()
+                except Exception:
+                    pass
                 self._loop = None
         except Exception:
             # 忽略清理过程中的错误
@@ -188,16 +203,35 @@ class GoogleDictionaryAPI(BaseTranslationAPI):
                 "请使用 ContextAwareTranslator 包装器来启用上下文感知翻译。"
             )
         
+        # 同步执行异步翻译：
+        # - 若当前线程没有运行中的 event loop：复用/创建 self._loop
+        # - 若当前线程正处于运行中的 event loop 回调：用临时新 loop 执行，避免 run_until_complete 报错
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
+            in_running_loop = True
         except RuntimeError:
-            # 没有运行中的事件循环，复用或创建新的
-            if self._loop is None or self._loop.is_closed():
-                self._loop = asyncio.new_event_loop()
-            loop = self._loop
-            asyncio.set_event_loop(loop)
-        
-        # 同步执行异步翻译
-        return loop.run_until_complete(
+            in_running_loop = False
+
+        if in_running_loop:
+            tmp_loop = asyncio.new_event_loop()
+            try:
+                result = tmp_loop.run_until_complete(
+                    self._translate_async(text, source_language, target_language)
+                )
+                # 临时 loop 分支可能创建 aiohttp session；在关闭 loop 前显式关闭，避免资源泄漏/告警
+                try:
+                    tmp_loop.run_until_complete(self.close())
+                except Exception:
+                    pass
+                return result
+            finally:
+                try:
+                    tmp_loop.close()
+                except Exception:
+                    pass
+
+        if self._loop is None or self._loop.is_closed():
+            self._loop = asyncio.new_event_loop()
+        return self._loop.run_until_complete(
             self._translate_async(text, source_language, target_language)
         )

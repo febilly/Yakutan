@@ -24,6 +24,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     loadConfigFromLocalStorage();
     loadAPIKeys();
+    refreshMicDevices(true);
+    setupMicDeviceAutoRefresh();
     updateStatus();
     // 每2秒更新一次状态
     setInterval(updateStatus, 2000);
@@ -31,6 +33,72 @@ document.addEventListener('DOMContentLoaded', function () {
     // 显示配置保存提示
     showConfigStorageInfo();
 });
+
+// 刷新后端输入设备列表（PyAudio）
+async function refreshMicDevices(preserveSelection = true) {
+    const micSelect = document.getElementById('mic-device');
+    if (!micSelect) return;
+
+    const previousValue = preserveSelection ? micSelect.value : '';
+
+    try {
+        const response = await fetch(`${API_BASE}/audio/input-devices`);
+        const data = await response.json();
+        const devices = Array.isArray(data.devices) ? data.devices : [];
+
+        // 重建选项
+        micSelect.innerHTML = '';
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = '系统默认';
+        micSelect.appendChild(defaultOpt);
+
+        const indices = new Set();
+        devices.forEach((d) => {
+            const idx = d.index;
+            if (idx === undefined || idx === null) return;
+            const idxStr = String(idx);
+            indices.add(idxStr);
+
+            const opt = document.createElement('option');
+            opt.value = idxStr;
+            const name = d.name ? String(d.name) : `Device ${idxStr}`;
+            opt.textContent = `${name} (#${idxStr})`;
+            micSelect.appendChild(opt);
+        });
+
+        // 优先保留当前选择；否则使用后端当前配置；最后回退默认
+        const serverSelected = (data.selected_index === undefined || data.selected_index === null) ? '' : String(data.selected_index);
+        if (previousValue && indices.has(previousValue)) {
+            micSelect.value = previousValue;
+        } else if (serverSelected && indices.has(serverSelected)) {
+            micSelect.value = serverSelected;
+        } else {
+            micSelect.value = '';
+        }
+    } catch (e) {
+        // 静默失败：不影响其它功能
+        console.warn('获取麦克风列表失败:', e);
+    }
+}
+
+function setupMicDeviceAutoRefresh() {
+    // 尽量监听浏览器设备变化事件（不保证每个环境都触发）
+    try {
+        if (navigator.mediaDevices) {
+            if (typeof navigator.mediaDevices.addEventListener === 'function') {
+                navigator.mediaDevices.addEventListener('devicechange', () => refreshMicDevices(true));
+            } else if ('ondevicechange' in navigator.mediaDevices) {
+                navigator.mediaDevices.ondevicechange = () => refreshMicDevices(true);
+            }
+        }
+    } catch (_) {
+        // ignore
+    }
+
+    // 后端设备列表变化更可靠：做一个低频轮询刷新
+    setInterval(() => refreshMicDevices(true), 5000);
+}
 
 // 显示配置保存信息
 function showConfigStorageInfo() {
@@ -188,6 +256,12 @@ function loadConfigFromLocalStorage() {
             if (config.mic_control) {
                 document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control ?? true;
                 document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds || 0.2;
+
+                const micSelect = document.getElementById('mic-device');
+                if (micSelect) {
+                    const idx = config.mic_control.mic_device_index;
+                    micSelect.value = (idx === undefined || idx === null) ? '' : String(idx);
+                }
             }
 
             if (config.asr) {
@@ -245,6 +319,10 @@ function loadDefaultConfig() {
     // 麦克风控制
     document.getElementById('enable-mic-control').checked = true;
     document.getElementById('mute-delay').value = 0.2;
+
+    // 麦克风设备
+    const micSelect = document.getElementById('mic-device');
+    if (micSelect) micSelect.value = '';
 
     // ASR 配置
     document.getElementById('asr-backend').value = 'qwen';  // 可选: 'qwen', 'dashscope'
@@ -485,7 +563,7 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // 当设置改变时自动保存（延迟保存，避免频繁请求）
-function onSettingChange() {
+function onSettingChange(changedElement = null) {
     // 清除之前的定时器
     if (autoSaveTimer) {
         clearTimeout(autoSaveTimer);
@@ -504,8 +582,8 @@ function onSettingChange() {
         const status = await statusResponse.json();
         if (status.running) {
             try {
-                // 通过当前活动元素判断此次修改属于哪个配置项
-                const el = document.activeElement;
+            // 优先使用传入的变更元素；否则退回到当前活动元素
+            const el = changedElement || document.activeElement;
 
                 // 检查元素是否有 data-restart-required 属性
                 const needRestart = el && el.getAttribute('data-restart-required') === 'true';
@@ -550,6 +628,10 @@ async function saveConfig(autoSave = false) {
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
                 mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value),
+                mic_device_index: (() => {
+                    const v = document.getElementById('mic-device') ? document.getElementById('mic-device').value : '';
+                    return v === '' ? null : parseInt(v);
+                })(),
             },
             asr: {
                 preferred_backend: document.getElementById('asr-backend').value,
