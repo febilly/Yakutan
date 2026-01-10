@@ -11,12 +11,21 @@ PyInstaller配置文件 - Web UI版本
 
 block_cipher = None
 
+from PyInstaller.utils.hooks import collect_data_files
+import importlib.util
+
 # 需要包含的数据文件（资源文件）
 datas = [
     ('hot_words', 'hot_words'),  # 公共热词目录
     ('ui/templates', 'ui/templates'),  # UI模板文件
     ('ui/static', 'ui/static'),  # UI静态文件（CSS、JS等）
 ]
+
+# pykakasi 假名转换依赖包内词典/数据文件；未打包会导致假名功能无效
+# 某些环境里 pykakasi 可能以单文件 module 形式存在（不是 package），此时跳过数据收集以避免告警。
+_pykakasi_spec = importlib.util.find_spec('pykakasi')
+if _pykakasi_spec is not None and getattr(_pykakasi_spec, 'submodule_search_locations', None):
+    datas += collect_data_files('pykakasi')
 
 # 需要包含的隐藏导入
 hiddenimports = [
