@@ -258,3 +258,7 @@ python main.py
 ## 致谢
 - 本项目部分基于阿里给的 Fun-ASR 示例代码
 - 快速的 Google Translate API 来自 https://github.com/SakiRinn/LiveCaptions-Translator
+
+## 许可证
+本项目的代码，除下述例外以外，遵循 MIT 许可证，详见 [LICENSE.md](LICENSE.md) 文件
+- /docs 文件夹下的内容来自各 API 提供商的文档，是啥授权我也不知道
