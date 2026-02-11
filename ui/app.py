@@ -197,6 +197,21 @@ def get_config():
     return jsonify(get_config_dict())
 
 
+@app.route('/api/env', methods=['GET'])
+def get_env_status():
+    """获取环境变量状态（不返回敏感信息）"""
+    openai_api_key_set = bool(os.getenv('OPENAI_API_KEY'))
+    openrouter_api_key_set = bool(os.getenv('OPENROUTER_API_KEY'))
+    return jsonify({
+        'openrouter': {
+            'api_key_set': openai_api_key_set or openrouter_api_key_set,
+        },
+        'openai': {
+            'api_key_set': openai_api_key_set,
+        },
+    })
+
+
 @app.route('/api/config', methods=['POST'])
 def update_config_api():
     """更新配置"""

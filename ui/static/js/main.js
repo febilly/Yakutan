@@ -10,6 +10,16 @@ const CONFIG_STORAGE_KEY = 'vrchat_translator_config';
 // 待显示的警告消息（用于自动切换翻译API）
 let pendingWarningMessage = null;
 
+// 环境变量状态（由后端提供）
+let envStatus = {
+    openrouter: {
+        api_key_set: false,
+    },
+    openai: {
+        api_key_set: false,
+    },
+};
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function () {
     // 先初始化 i18n 系统
@@ -24,6 +34,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     loadConfigFromLocalStorage();
     loadAPIKeys();
+    loadEnvStatus();
     refreshMicDevices(true);
     setupMicDeviceAutoRefresh();
     updateStatus();
@@ -33,6 +44,41 @@ document.addEventListener('DOMContentLoaded', function () {
     // 显示配置保存提示
     showConfigStorageInfo();
 });
+
+// 从服务器加载环境变量状态
+async function loadEnvStatus() {
+    try {
+        const response = await fetch(`${API_BASE}/env`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data && data.openrouter) {
+            envStatus.openrouter.api_key_set = !!data.openrouter.api_key_set;
+        }
+        if (data && data.openai) {
+            envStatus.openai.api_key_set = !!data.openai.api_key_set;
+        }
+        applyOpenrouterEnvStatus();
+    } catch (e) {
+        // 静默失败：不影响其它功能
+        console.warn('获取环境变量状态失败:', e);
+    }
+}
+
+function applyOpenrouterEnvStatus() {
+    const openrouterInput = document.getElementById('openrouter-api-key');
+    const hint = document.getElementById('openrouter-env-hint');
+    if (!openrouterInput || !hint) return;
+
+    if (envStatus.openrouter.api_key_set) {
+        openrouterInput.value = '';
+        openrouterInput.placeholder = '已在环境变量配置';
+        openrouterInput.disabled = true;
+        hint.style.display = 'block';
+    } else {
+        openrouterInput.disabled = false;
+        hint.style.display = 'none';
+    }
+}
 
 // 刷新后端输入设备列表（PyAudio）
 async function refreshMicDevices(preserveSelection = true) {
@@ -145,6 +191,8 @@ function loadAPIKeys() {
     document.getElementById('deepl-api-key').addEventListener('input', saveAPIKey);
     document.getElementById('openrouter-api-key').addEventListener('input', saveAPIKey);
     document.getElementById('soniox-api-key').addEventListener('input', saveAPIKey);
+
+    applyOpenrouterEnvStatus();
 }
 
 // 处理国际版端点开关变化
@@ -497,7 +545,7 @@ function handleTranslationApiChange(event) {
         keyInputId = 'deepl-api-key';
         apiDisplayName = 'DeepL';
     } else if (newApi === 'openrouter') {
-        requiresKey = true;
+        requiresKey = !envStatus.openrouter.api_key_set;
         keyName = 'openrouter_api_key';
         keyInputId = 'openrouter-api-key';
         apiDisplayName = 'OpenRouter';
@@ -772,10 +820,11 @@ async function startService() {
         let translationApiType = translationApiSelect.value;
         const deeplKey = document.getElementById('deepl-api-key').value.trim();
         const openrouterKey = document.getElementById('openrouter-api-key').value.trim();
+        const hasOpenrouterKey = envStatus.openrouter.api_key_set || !!openrouterKey;
 
         if (enableTranslation) {
             const requiresDeeplKey = translationApiType === 'deepl' && !deeplKey;
-            const requiresOpenrouterKey = translationApiType === 'openrouter' && !openrouterKey;
+            const requiresOpenrouterKey = translationApiType === 'openrouter' && !hasOpenrouterKey;
 
             if (requiresDeeplKey || requiresOpenrouterKey) {
                 translationApiType = 'google_dictionary';

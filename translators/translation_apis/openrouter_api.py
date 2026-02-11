@@ -3,22 +3,13 @@ OpenRouter translation API implementation using hosted large language models.
 使用 OpenAI 兼容接口
 支持普通翻译和流式翻译两种模式
 """
-import os
 from typing import Optional, List, Dict
 
 from .base_translation_api import BaseTranslationAPI
-from proxy_detector import detect_system_proxy
+import config
+from openai_compat_client import OpenAICompatClientBase
 
-try:
-    from openai import OpenAI
-except ImportError:
-    raise ImportError(
-        "OpenAI 库未安装。请运行以下命令安装：\n"
-        "pip install --upgrade openai"
-    )
-
-
-class OpenRouterAPI(BaseTranslationAPI):
+class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
     """
     Translation API that routes requests through OpenRouter.
     Supports both standard and streaming-optimized translation modes.
@@ -26,12 +17,12 @@ class OpenRouterAPI(BaseTranslationAPI):
 
     SUPPORTS_CONTEXT = True
     
-    # OpenRouter 的 OpenAI 兼容端点
-    BASE_URL = "https://openrouter.ai/api/v1"
+    # OpenAI 兼容端点（优先 OPENAI_BASE_URL）
+    BASE_URL = config.OPENAI_COMPAT_BASE_URL
 
     def __init__(
         self,
-        model: str = "google/gemini-2.5-flash-lite",
+        model: Optional[str] = None,
         temperature: float = 0.2,
         timeout: int = 30,
         max_retries: int = 3,
@@ -47,45 +38,13 @@ class OpenRouterAPI(BaseTranslationAPI):
             max_retries: 最大重试次数
             streaming_mode: 是否使用流式翻译模式（支持 previous_translation 和 is_partial）
         """
-        self.model = model
+        self.model = model or config.OPENAI_COMPAT_MODEL
         self.temperature = temperature
         self.timeout = timeout
         self.max_retries = max_retries
         self.streaming_mode = streaming_mode
         
-        # 获取 API Key
-        self.api_key = os.getenv("OPENROUTER_API_KEY")
-        if not self.api_key:
-            raise ValueError(
-                "OpenRouter API Key 未设置。请在网页控制面板的 'API Keys 配置' 中填写 OpenRouter API Key。"
-            )
-        
-        # 创建 OpenAI 客户端
-        client_kwargs = {
-            "api_key": self.api_key,
-            "base_url": self.BASE_URL,
-        }
-        
-        # OpenRouter 特有的 headers
-        default_headers = {}
-        app_url = os.getenv("OPENROUTER_APP_URL", "")
-        app_title = os.getenv("OPENROUTER_APP_TITLE", "")
-        if app_url:
-            default_headers["HTTP-Referer"] = app_url
-        if app_title:
-            default_headers["X-Title"] = app_title
-        if default_headers:
-            client_kwargs["default_headers"] = default_headers
-        
-        # 检测系统代理
-        proxies = detect_system_proxy()
-        if proxies:
-            import httpx
-            proxy_url = proxies.get('https') or proxies.get('http')
-            if proxy_url:
-                client_kwargs["http_client"] = httpx.Client(proxy=proxy_url)
-        
-        self.client = OpenAI(**client_kwargs)
+        super().__init__(base_url=self.BASE_URL, model=self.model)
 
     def translate(
         self,
@@ -118,9 +77,8 @@ class OpenRouterAPI(BaseTranslationAPI):
         if self.streaming_mode:
             return self._translate_streaming(text, source_language, target_language, 
                                              context, context_pairs, **kwargs)
-        else:
-            return self._translate_standard(text, source_language, target_language,
-                                           context, context_pairs, **kwargs)
+        return self._translate_standard(text, source_language, target_language,
+                                        context, context_pairs, **kwargs)
 
     def _translate_standard(
         self,
@@ -132,7 +90,6 @@ class OpenRouterAPI(BaseTranslationAPI):
         **kwargs
     ) -> str:
         """标准翻译模式"""
-        # 构建上下文块（优先使用 context_pairs，包含原文和译文）
         if context_pairs:
             context_lines = []
             for pair in context_pairs:
@@ -144,20 +101,17 @@ class OpenRouterAPI(BaseTranslationAPI):
         else:
             context_block = "None."
         
-        # 源语言描述
         source_descriptor = (
             source_language
             if source_language and source_language.lower() != "auto"
             else "auto-detect the source language"
         )
 
-        # 系统提示词
         system_prompt = (
             "You are a helpful translation assistant. Always respond with a concise, light, and friendly tone. "
             "Return only the translated text with no additional commentary."
         )
 
-        # 构建用户消息
         user_message = (
             "Previous conversation context (source text and translations):\n"
             f"{context_block}\n\n"
@@ -175,7 +129,6 @@ class OpenRouterAPI(BaseTranslationAPI):
             f"<text>{text}</text>"
         )
 
-        # 构建消息列表
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
@@ -196,7 +149,6 @@ class OpenRouterAPI(BaseTranslationAPI):
         previous_translation = kwargs.get('previous_translation')
         is_partial = kwargs.get('is_partial', False)
 
-        # 系统提示词
         system_prompt = (
             "You are a skilled bilingual translator assisting with VRChat conversations. "
             f"Translate all provided source text into {target_language} while preserving intent, tone, and register. "
@@ -207,8 +159,6 @@ class OpenRouterAPI(BaseTranslationAPI):
         )
 
         user_sections = []
-        
-        # 构建上下文块（优先使用 context_pairs，包含原文和译文）
         if context_pairs:
             context_lines = ["Previous conversation (source and translation pairs):"]
             for pair in context_pairs:
@@ -235,7 +185,6 @@ class OpenRouterAPI(BaseTranslationAPI):
 
         user_sections.append("Return only the translation text.")
 
-        # 构建消息列表
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": "\n\n".join(user_sections)},
@@ -246,16 +195,20 @@ class OpenRouterAPI(BaseTranslationAPI):
     def _call_api(self, messages: List[Dict[str, str]]) -> str:
         """调用 OpenRouter API"""
         try:
-            completion = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                timeout=self.timeout,
-                extra_body={"provider": {"sort": "latency"}},
-            )
+            self._maybe_rotate_key()
+            # print(f"[OpenRouter] sending request: base_url={self.base_url}, model={self.model}, api_key_set={bool(self.api_key)}")
+            request_kwargs: Dict[str, object] = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": self.temperature,
+                "timeout": self.timeout,
+            }
+            if self._is_openrouter_base_url():
+                request_kwargs["extra_body"] = {"provider": {"sort": "latency"}}
+            completion = self.client.chat.completions.create(**request_kwargs)
             
             if completion.choices and completion.choices[0].message.content:
-                return completion.choices[0].message.content.strip()
+                return self.clean_response(completion.choices[0].message.content)
             
             return "[ERROR] Empty response from model"
             
@@ -263,6 +216,7 @@ class OpenRouterAPI(BaseTranslationAPI):
             error_msg = str(e)
             print(f"[OpenRouter] API 调用错误: {error_msg}")
             return f"[ERROR] {error_msg}"
+
 
 
 # 为了向后兼容，保留 OpenRouterStreamingAPI 作为别名
@@ -274,7 +228,7 @@ class OpenRouterStreamingAPI(OpenRouterAPI):
     
     def __init__(
         self,
-        model: str = "google/gemini-2.5-flash-lite",
+        model: Optional[str] = None,
         temperature: float = 0.2,
         timeout: int = 30,
         max_retries: int = 3,

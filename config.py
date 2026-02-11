@@ -2,6 +2,9 @@
 配置文件 - 统一管理所有配置项
 """
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ============================================================================
 # 语音识别后端配置
@@ -77,8 +80,13 @@ FALLBACK_LANGUAGE = 'en'  # 备用翻译语言（当源语言和目标语言相�
 # 注意: openrouter_streaming 是 openrouter 的流式翻译模式，支持翻译部分结果
 TRANSLATION_API_TYPE = 'qwen_mt'
 
-# OpenRouter 翻译模型配置
-OPENROUTER_TRANSLATION_MODEL = 'google/gemini-2.5-flash-lite'
+# OpenAI 兼容服务配置（优先使用 OPENAI_*，否则回退 OPENROUTER_*）
+OPENAI_BASE_URL = os.getenv('OPENAI_BASE_URL', '').strip()
+OPENROUTER_BASE_URL = os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1').strip()
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', '').strip()
+OPENROUTER_TRANSLATION_MODEL = os.getenv('OPENROUTER_TRANSLATION_MODEL', 'google/gemini-2.5-flash-lite').strip()
+OPENAI_COMPAT_BASE_URL = OPENAI_BASE_URL or OPENROUTER_BASE_URL
+OPENAI_COMPAT_MODEL = OPENAI_MODEL or OPENROUTER_TRANSLATION_MODEL
 OPENROUTER_TRANSLATION_TEMPERATURE = 0.2
 OPENROUTER_TRANSLATION_TIMEOUT = 30
 OPENROUTER_TRANSLATION_MAX_RETRIES = 3

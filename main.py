@@ -299,6 +299,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self.translating_partial = False # 标记是否正在进行流式翻译
         self.last_partial_source_segment = None
         self.pending_partial_segment = None
+        self._partial_request_seq = 0
+        self._latest_partial_request_id = 0
+        self._partial_inflight = 0
+        self._finalized_seq = 0
 
     @staticmethod
     def _normalize_lang(lang):
@@ -337,14 +341,14 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
     def on_error(self, error: Exception) -> None:
         logger.error('Speech recognizer failed: %s', error)
 
-    async def _translate_partial_task(self, segment: str):
+    async def _translate_partial_task(self, segment: str, request_id: int, finalized_seq: int):
         """异步流式翻译任务"""
-        if self.translating_partial:
-            return
-        
+        self._partial_inflight += 1
         self.translating_partial = True
         success = False
         try:
+            if finalized_seq != self._finalized_seq:
+                return
             # 检测实际语言（即使手动指定了源语言，也要检测识别结果的真实语言）
             detected_lang_info = language_detector.detect(segment)
             detected_lang = detected_lang_info['language']
@@ -362,6 +366,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     previous_translation=self.last_partial_translation
                 )
             )
+            if request_id != self._latest_partial_request_id or finalized_seq != self._finalized_seq:
+                return
             success = True
             
             if translated_text and not translated_text.startswith("[ERROR]"):
@@ -397,10 +403,12 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             # logger.error(f"流式翻译错误: {e}")
             pass
         finally:
-            self.translating_partial = False
-            self.pending_partial_segment = None
-            if success:
-                self.last_partial_source_segment = segment
+            self._partial_inflight = max(0, self._partial_inflight - 1)
+            self.translating_partial = self._partial_inflight > 0
+            if request_id == self._latest_partial_request_id and finalized_seq == self._finalized_seq:
+                self.pending_partial_segment = None
+                if success:
+                    self.last_partial_source_segment = segment
 
     def on_result(self, event: RecognitionEvent) -> None:
         text = event.text
@@ -422,12 +430,14 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     segment and
                     segment != self.last_partial_source_segment and
                     segment != self.pending_partial_segment and
-                    self.loop and
-                    not self.translating_partial
+                    self.loop
                 ):
+                    self._partial_request_seq += 1
+                    request_id = self._partial_request_seq
+                    self._latest_partial_request_id = request_id
                     self.pending_partial_segment = segment
                     asyncio.run_coroutine_threadsafe(
-                        self._translate_partial_task(segment),
+                        self._translate_partial_task(segment, request_id, self._finalized_seq),
                         self.loop
                     )
 
@@ -464,11 +474,13 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     is_partial=False,
                     previous_translation=self.last_partial_translation
                 )
+                self._finalized_seq += 1
                 
                 # 重置流式翻译状态
                 self.last_partial_translation = None
                 self.last_partial_source_segment = None
                 self.pending_partial_segment = None
+                self._latest_partial_request_id = 0
                 
                 is_translated = True
                 print(f'目标语言：{actual_target}')
