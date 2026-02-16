@@ -10,7 +10,6 @@ from typing import Optional
 import pyaudio
 
 from dotenv import load_dotenv
-from osc_manager import osc_manager
 from translators.context_aware_translator import ContextAwareTranslator
 from hot_words_manager import HotWordsManager
 from proxy_detector import detect_system_proxy, print_proxy_info
@@ -32,6 +31,8 @@ import config
 
 # 加载 .env 文件中的环境变量
 load_dotenv()
+
+from osc_manager import osc_manager
 
 # 配置日志
 logging.basicConfig(level=getattr(logging, config.LOG_LEVEL))
@@ -215,6 +216,7 @@ recognition_active = False  # 标记识别是否正在运行
 recognition_started = False  # 标记是否已建立识别会话
 recognition_instance: Optional[SpeechRecognizer] = None  # 全局识别实例
 mute_delay_task = None  # 延迟停止任务
+main_loop: Optional[asyncio.AbstractEventLoop] = None  # 主事件循环（用于线程安全调度）
 CURRENT_ASR_BACKEND = config.PREFERRED_ASR_BACKEND
 vocabulary_id = None  # 热词表 ID
 
@@ -813,9 +815,24 @@ async def handle_mute_change(is_muted):
             logger.info(f'[ASR] 语音识别已{start_word}')
 
 
+def handle_mute_change_sync(is_muted):
+    """同步桥接：将OSC线程中的静音事件安全投递到主事件循环。"""
+    loop = main_loop
+    if loop is None or not loop.is_running():
+        logger.warning('[ASR] 主事件循环不可用，忽略静音状态变化')
+        return
+
+    try:
+        asyncio.run_coroutine_threadsafe(handle_mute_change(is_muted), loop)
+    except Exception as e:
+        logger.error(f'[ASR] 投递静音状态变化失败: {e}')
+
+
 async def main():
     """主异步函数"""
-    global recognition_instance, recognition_active, vocabulary_id, CURRENT_ASR_BACKEND, recognition_started, executor, stop_event
+    global recognition_instance, recognition_active, vocabulary_id, CURRENT_ASR_BACKEND, recognition_started, executor, stop_event, main_loop
+
+    main_loop = asyncio.get_running_loop()
     
     # 创建当前事件循环的 stop_event
     stop_event = asyncio.Event()
@@ -870,10 +887,10 @@ async def main():
 
     # 启动OSC服务器
     print('[OSC] 启动OSC服务器...')
-    await osc_manager.start_server()
+    await osc_manager.start_server(app_name="Yakutan")
     
     # 设置静音状态回调
-    osc_manager.set_mute_callback(handle_mute_change)
+    osc_manager.set_mute_callback(handle_mute_change_sync)
     print('[OSC] 已设置静音状态回调')
 
     # 创建识别回调
