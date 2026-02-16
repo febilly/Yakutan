@@ -6,7 +6,9 @@
 // 支持的语言列表
 const SUPPORTED_LANGUAGES = {
     'zh-CN': '简体中文',
-    'en': 'English'
+    'en': 'English',
+    'ja': '日本語',
+    'ko': '한국어'
 };
 
 // 默认语言
@@ -91,6 +93,8 @@ const translations = {
         'label.deeplKey': 'DeepL API Key (可选，用于翻译)',
         'link.getApiKey': '获取API Key →',
         'label.openrouterKey': 'OpenRouter API Key (可选，用于LLM翻译)',
+        'hint.openrouterEnvLocked': '已从环境变量读取，输入框已锁定',
+        'placeholder.openrouterEnvConfigured': '已在环境变量配置',
 
         // 语音识别设置
         'section.asrSettings': '语音识别设置',
@@ -136,9 +140,13 @@ const translations = {
         'sourceLang.ja': '日语',
         'sourceLang.ko': '韩语',
         'hint.sourceLanguage': '建议保持"自动检测"',
+        'label.micDevice': '麦克风',
+        'label.device': '设备',
+        'option.systemDefault': '系统默认',
 
         // 页脚
         'footer.text': 'Yakutan',
+        'link.github': 'GitHub',
 
         // 消息 - 来自后端的消息ID
         'msg.configUpdated': '配置已更新',
@@ -252,6 +260,8 @@ const translations = {
         'label.deeplKey': 'DeepL API Key (optional, for translation)',
         'link.getApiKey': 'Get API Key →',
         'label.openrouterKey': 'OpenRouter API Key (optional, for LLM translation)',
+        'hint.openrouterEnvLocked': 'Loaded from environment variable; input is locked',
+        'placeholder.openrouterEnvConfigured': 'Configured via environment variable',
 
         // Speech recognition settings
         'section.asrSettings': 'Speech Recognition Settings',
@@ -297,9 +307,13 @@ const translations = {
         'sourceLang.ja': 'Japanese',
         'sourceLang.ko': 'Korean',
         'hint.sourceLanguage': 'Recommended to keep "Auto Detect"',
+        'label.micDevice': 'Microphone',
+        'label.device': 'Device',
+        'option.systemDefault': 'System Default',
 
         // Footer
         'footer.text': 'Yakutan',
+        'link.github': 'GitHub',
 
         // Messages - Backend message IDs
         'msg.configUpdated': 'Configuration updated',
@@ -340,6 +354,316 @@ const translations = {
 
         // Language selector
         'label.uiLanguage': 'UI Language'
+    },
+
+    'ja': {
+        'page.title': 'Yakutan コントロールパネル',
+        'header.title': '🎤 Yakutan コントロールパネル',
+        'status.notRunning': 'サービス停止中',
+        'status.running': 'サービス稼働中',
+
+        'section.serviceControl': 'サービス制御',
+        'btn.startService': 'サービス開始',
+        'btn.stopService': 'サービス停止',
+        'btn.resetDefaults': 'デフォルトに戻す',
+        'hint.autoSave': 'すべての設定はブラウザに自動保存されます',
+        'btn.starting': '開始中...',
+        'btn.stopping': '停止中...',
+
+        'section.basicSettings': '基本設定',
+        'label.enableTranslation': '翻訳を有効化',
+        'label.showPartialResults': '途中結果を表示',
+        'hint.partialResults': '翻訳有効時は非推奨です',
+        'label.targetLanguage': '翻訳先言語',
+        'hint.targetLanguage': '言語コードを直接入力するか、ドロップダウンから選択してください',
+        'label.fallbackLanguage': 'フォールバック言語（原文と言語が同じ場合に使用）',
+        'hint.fallbackLanguage': '言語コードを直接入力。空欄で無効化されます',
+        'label.enableFurigana': '日本語にふりがなを追加',
+        'hint.enableFurigana': '日本語テキストの漢字に読み仮名を付与します',
+        'label.enablePinyin': '中国語にピンインを追加',
+        'hint.enablePinyin': '中国語に声調付きピンインを付与します',
+        'select.quickSelect': '-- クイック選択 --',
+        'select.disabled': '無効',
+
+        'lang.zhCN': '簡体字中国語 (zh-CN)',
+        'lang.zhTW': '繁体字中国語 (zh-TW)',
+        'lang.en': '英語 (en)',
+        'lang.enGB': '英語（英国） (en-GB)',
+        'lang.ja': '日本語 (ja)',
+        'lang.ko': '韓国語 (ko)',
+        'lang.es': 'スペイン語 (es)',
+        'lang.fr': 'フランス語 (fr)',
+        'lang.de': 'ドイツ語 (de)',
+        'lang.ru': 'ロシア語 (ru)',
+        'lang.ar': 'アラビア語 (ar)',
+        'lang.pt': 'ポルトガル語 (pt)',
+        'lang.it': 'イタリア語 (it)',
+
+        'section.translationApi': '翻訳 API 設定',
+        'label.translationApi': '翻訳 API',
+        'api.qwenMt': 'Qwen-MT（Alibaba Cloud、DashScope Key を使用）',
+        'api.deepl': 'DeepL（高品質）',
+        'api.googleDict': 'Google Dictionary（無料・高速、ネットワーク接続に注意）',
+        'api.googleWeb': 'Google Web（無料・予備、ネットワーク接続に注意）',
+        'api.openrouter': 'OpenRouter（LLM）',
+        'label.streamingMode': 'ストリーミング翻訳モード',
+        'hint.streamingMode': '有効化すると途中結果をリアルタイム翻訳できます',
+        'label.reverseTranslation': '逆翻訳を有効化',
+        'hint.reverseTranslation': '常に Google Dictionary API を使用します。ネットワーク接続に注意してください',
+
+        'section.apiKeys': 'API Keys 設定',
+        'label.dashscopeKey': 'Alibaba Cloud DashScope API Key',
+        'label.required': '*必須',
+        'label.international': '国際版',
+        'hint.dashscopeKey': 'Qwen と FunASR の音声認識の両方で必要です。',
+        'link.getChinaKey': '中国本土版 API Key を取得',
+        'link.getIntlKey': '国際版 API Key を取得',
+        'label.deeplKey': 'DeepL API Key（任意、翻訳用）',
+        'link.getApiKey': 'API Key を取得 →',
+        'label.openrouterKey': 'OpenRouter API Key（任意、LLM 翻訳用）',
+        'hint.openrouterEnvLocked': '環境変数から読み込み済みのため、入力欄はロックされています',
+        'placeholder.openrouterEnvConfigured': '環境変数で設定済み',
+
+        'section.asrSettings': '音声認識設定',
+        'label.asrBackend': '認識バックエンド',
+        'asr.qwen': 'Qwen3 ASR（推奨）',
+        'asr.dashscope': 'Fun-ASR（中国本土版のみ）',
+        'asr.dashscopeDisabled': 'Fun-ASR（国際版では利用不可）',
+        'asr.soniox': 'Soniox（多言語、API Key が必要）',
+        'label.sonioxKey': 'Soniox API Key（任意、多言語認識用）',
+        'hint.sonioxKey': '60 以上の言語の音声認識に対応しています。',
+        'label.pauseOnMute': 'ゲームでミュート中は文字起こしを停止',
+        'hint.pauseOnMute': '最初にミュート解除した後に文字起こしを開始します',
+        'label.enableHotWords': 'ホットワードを有効化',
+        'hint.enableHotWords': '特定語彙の認識精度を向上させます',
+        'label.muteDelay': 'ミュート遅延（秒）',
+        'hint.muteDelay': 'ミュート後に認識停止まで待機し、最後の語句の欠落を防ぎます',
+
+        'section.advancedSettings': '詳細設定',
+        'subsection.display': '表示設定',
+        'label.showOriginalAndLangTag': '原文と言語タグを表示',
+        'hint.showOriginalAndLangTag': 'オフ時は翻訳文のみ表示します',
+        'subsection.vad': 'VAD（音声区間検出）設定 - Qwen バックエンドのみ',
+        'label.enableVad': 'VAD を有効化',
+        'hint.enableVad': '発話終了を自動検出して区切ります',
+        'label.vadThreshold': 'VAD しきい値（0.0-1.0）',
+        'hint.vadThreshold': '小さいほど敏感になり、区切りが発生しやすくなります',
+        'label.vadSilenceDuration': 'VAD 無音継続時間（ms）',
+        'hint.vadSilenceDuration': 'この長さの無音を検出すると区切りを実行します',
+        'subsection.websocket': 'WebSocket キープアライブ設定 - Qwen バックエンドのみ',
+        'label.keepaliveInterval': 'ハートビート間隔（秒）',
+        'hint.keepaliveInterval': 'アイドル時の接続タイムアウトを防ぎます。0 で無効化',
+        'subsection.langDetector': '言語検出器設定',
+        'label.detectorType': '検出器タイプ',
+        'detector.cjke': 'CJK-英語検出器（推奨）',
+        'detector.enzh': '英中検出器',
+        'detector.fasttext': '汎用検出器（より多くの言語に対応）',
+        'subsection.sourceLang': '原文言語設定',
+        'label.sourceLanguage': '原文言語',
+        'sourceLang.auto': '自動検出',
+        'sourceLang.zh': '中国語',
+        'sourceLang.en': '英語',
+        'sourceLang.ja': '日本語',
+        'sourceLang.ko': '韓国語',
+        'hint.sourceLanguage': '通常は「自動検出」のままを推奨します',
+        'label.micDevice': 'マイク',
+        'label.device': 'デバイス',
+        'option.systemDefault': 'システム既定',
+
+        'footer.text': 'Yakutan',
+        'link.github': 'GitHub',
+
+        'msg.configUpdated': '設定を更新しました',
+        'msg.configUpdateFailed': '設定の更新に失敗しました',
+        'msg.serviceAlreadyRunning': 'サービスは既に稼働中です',
+        'msg.serviceStarted': 'サービスを開始しました',
+        'msg.startFailed': '開始に失敗しました',
+        'msg.serviceNotRunning': 'サービスは停止中です',
+        'msg.serviceStopped': 'サービスを停止しました',
+        'msg.stopFailed': '停止に失敗しました',
+        'msg.noRestartNeeded': 'サービスは停止中のため、再起動は不要です',
+        'msg.serviceRestarted': 'サービスを再起動しました',
+        'msg.restartFailed': '再起動に失敗しました',
+        'msg.enterDashscopeKey': 'DashScope API Key を入力してください',
+        'msg.invalidKeyFormat': 'API Key 形式が無効です（sk- で始まる必要があります）',
+        'msg.replacePlaceholder': 'プレースホルダーを実際の API Key に置き換えてください',
+        'msg.keyFormatValid': 'API Key 形式は有効です',
+        'msg.checkFailed': '確認に失敗しました',
+
+        'msg.configSaved': '設定を保存しました！',
+        'msg.saveConfigFailed': '設定の保存に失敗しました',
+        'msg.dashscopeRequired': 'エラー：サービス開始には Alibaba Cloud DashScope API Key が必要です！',
+        'msg.dashscopeValidationFailed': 'DashScope API Key の検証に失敗しました: ',
+        'msg.syncConfigFailed': '設定の同期に失敗したため、サービスを開始できません',
+        'msg.serviceStartSuccess': 'サービスを開始しました',
+        'msg.serviceStartFailed': 'サービス開始に失敗しました: ',
+        'msg.startServiceFailed': 'サービス開始に失敗しました',
+        'msg.serviceStopSuccess': 'サービスを停止しました',
+        'msg.serviceStopFailed': 'サービス停止に失敗しました: ',
+        'msg.stopServiceFailed': 'サービス停止に失敗しました',
+        'msg.defaultsRestored': 'デフォルトを復元しました',
+        'msg.restoreDefaultsFailed': 'デフォルト復元に失敗しました',
+        'msg.confirmReset': 'デフォルトに戻しますか？（API Keys は保持されます）',
+        'msg.apiKeyRequired': '{api} を使用するには API Key が必要です。先に「API Keys 設定」で入力してください',
+        'msg.autoSwitchToGoogle': '選択した翻訳 API の API Key が見つからないため、Google Dictionary に自動切替しました。',
+        'msg.sonioxKeyRequired': 'Soniox バックエンドには API Key が必要です',
+
+        'label.uiLanguage': '表示言語'
+    },
+
+    'ko': {
+        'page.title': 'Yakutan 제어판',
+        'header.title': '🎤 Yakutan 제어판',
+        'status.notRunning': '서비스 중지됨',
+        'status.running': '서비스 실행 중',
+
+        'section.serviceControl': '서비스 제어',
+        'btn.startService': '서비스 시작',
+        'btn.stopService': '서비스 중지',
+        'btn.resetDefaults': '기본값 복원',
+        'hint.autoSave': '모든 설정은 브라우저에 자동 저장됩니다',
+        'btn.starting': '시작 중...',
+        'btn.stopping': '중지 중...',
+
+        'section.basicSettings': '기본 설정',
+        'label.enableTranslation': '번역 사용',
+        'label.showPartialResults': '중간 결과 표시',
+        'hint.partialResults': '번역 사용 시 권장되지 않습니다',
+        'label.targetLanguage': '대상 언어',
+        'hint.targetLanguage': '언어 코드를 직접 입력하거나 드롭다운에서 선택하세요',
+        'label.fallbackLanguage': '대체 언어(원문과 대상 언어가 같을 때 사용)',
+        'hint.fallbackLanguage': '언어 코드를 직접 입력하고, 비워 두면 비활성화됩니다',
+        'label.enableFurigana': '일본어 후리가나 추가',
+        'hint.enableFurigana': '일본어 한자에 읽는 법(히라가나)을 추가합니다',
+        'label.enablePinyin': '중국어 병음 추가',
+        'hint.enablePinyin': '중국어에 성조 포함 병음을 추가합니다',
+        'select.quickSelect': '-- 빠른 선택 --',
+        'select.disabled': '사용 안 함',
+
+        'lang.zhCN': '중국어 간체 (zh-CN)',
+        'lang.zhTW': '중국어 번체 (zh-TW)',
+        'lang.en': '영어 (en)',
+        'lang.enGB': '영국식 영어 (en-GB)',
+        'lang.ja': '일본어 (ja)',
+        'lang.ko': '한국어 (ko)',
+        'lang.es': '스페인어 (es)',
+        'lang.fr': '프랑스어 (fr)',
+        'lang.de': '독일어 (de)',
+        'lang.ru': '러시아어 (ru)',
+        'lang.ar': '아랍어 (ar)',
+        'lang.pt': '포르투갈어 (pt)',
+        'lang.it': '이탈리아어 (it)',
+
+        'section.translationApi': '번역 API 설정',
+        'label.translationApi': '번역 API',
+        'api.qwenMt': 'Qwen-MT (Alibaba Cloud, DashScope Key 사용)',
+        'api.deepl': 'DeepL (고품질)',
+        'api.googleDict': 'Google Dictionary (무료, 빠름, 네트워크 연결 확인)',
+        'api.googleWeb': 'Google Web (무료, 백업용, 네트워크 연결 확인)',
+        'api.openrouter': 'OpenRouter (LLM)',
+        'label.streamingMode': '스트리밍 번역 모드',
+        'hint.streamingMode': '활성화하면 중간 결과를 실시간으로 번역합니다',
+        'label.reverseTranslation': '역방향 번역 사용',
+        'hint.reverseTranslation': '항상 Google Dictionary API를 사용합니다. 네트워크 연결을 확인하세요',
+
+        'section.apiKeys': 'API Keys 설정',
+        'label.dashscopeKey': 'Alibaba Cloud DashScope API Key',
+        'label.required': '*필수',
+        'label.international': '국제판',
+        'hint.dashscopeKey': 'Qwen 및 FunASR 음성 인식 모두에 필요합니다.',
+        'link.getChinaKey': '중국 본토용 API Key 받기',
+        'link.getIntlKey': '국제판 API Key 받기',
+        'label.deeplKey': 'DeepL API Key (선택, 번역용)',
+        'link.getApiKey': 'API Key 받기 →',
+        'label.openrouterKey': 'OpenRouter API Key (선택, LLM 번역용)',
+        'hint.openrouterEnvLocked': '환경 변수에서 로드되어 입력란이 잠겨 있습니다',
+        'placeholder.openrouterEnvConfigured': '환경 변수로 설정됨',
+
+        'section.asrSettings': '음성 인식 설정',
+        'label.asrBackend': '인식 백엔드',
+        'asr.qwen': 'Qwen3 ASR (권장)',
+        'asr.dashscope': 'Fun-ASR (중국 본토 전용)',
+        'asr.dashscopeDisabled': 'Fun-ASR (국제판에서는 사용 불가)',
+        'asr.soniox': 'Soniox (다국어, API Key 필요)',
+        'label.sonioxKey': 'Soniox API Key (선택, 다국어 인식용)',
+        'hint.sonioxKey': '60개 이상의 언어 음성 인식을 지원합니다.',
+        'label.pauseOnMute': '게임 음소거 시 전사 일시중지',
+        'hint.pauseOnMute': '처음 음소거 해제 후 전사가 시작됩니다',
+        'label.enableHotWords': '핫워드 사용',
+        'hint.enableHotWords': '특정 단어의 인식 정확도를 높입니다',
+        'label.muteDelay': '음소거 지연(초)',
+        'hint.muteDelay': '음소거 후 인식 중지까지 지연하여 마지막 단어 누락을 방지합니다',
+
+        'section.advancedSettings': '고급 설정',
+        'subsection.display': '표시 설정',
+        'label.showOriginalAndLangTag': '원문 및 언어 태그 표시',
+        'hint.showOriginalAndLangTag': '끄면 번역문만 표시합니다',
+        'subsection.vad': 'VAD(음성 활동 감지) 설정 - Qwen 백엔드 전용',
+        'label.enableVad': 'VAD 사용',
+        'hint.enableVad': '발화 종료를 자동 감지하여 문장을 분할합니다',
+        'label.vadThreshold': 'VAD 임계값 (0.0-1.0)',
+        'hint.vadThreshold': '값이 낮을수록 민감도가 높아 분할이 쉽게 발생합니다',
+        'label.vadSilenceDuration': 'VAD 무음 지속 시간(ms)',
+        'hint.vadSilenceDuration': '이 시간만큼 무음을 감지하면 분할을 수행합니다',
+        'subsection.websocket': 'WebSocket Keep-alive 설정 - Qwen 백엔드 전용',
+        'label.keepaliveInterval': '하트비트 간격(초)',
+        'hint.keepaliveInterval': '유휴 상태에서 연결 타임아웃을 방지합니다. 0으로 비활성화',
+        'subsection.langDetector': '언어 감지기 설정',
+        'label.detectorType': '감지기 유형',
+        'detector.cjke': 'CJK-영어 감지기 (권장)',
+        'detector.enzh': '영중 감지기',
+        'detector.fasttext': '범용 감지기(더 많은 언어 지원)',
+        'subsection.sourceLang': '원문 언어 설정',
+        'label.sourceLanguage': '원문 언어',
+        'sourceLang.auto': '자동 감지',
+        'sourceLang.zh': '중국어',
+        'sourceLang.en': '영어',
+        'sourceLang.ja': '일본어',
+        'sourceLang.ko': '한국어',
+        'hint.sourceLanguage': '"자동 감지" 유지를 권장합니다',
+        'label.micDevice': '마이크',
+        'label.device': '장치',
+        'option.systemDefault': '시스템 기본값',
+
+        'footer.text': 'Yakutan',
+        'link.github': 'GitHub',
+
+        'msg.configUpdated': '설정이 업데이트되었습니다',
+        'msg.configUpdateFailed': '설정 업데이트에 실패했습니다',
+        'msg.serviceAlreadyRunning': '서비스가 이미 실행 중입니다',
+        'msg.serviceStarted': '서비스가 시작되었습니다',
+        'msg.startFailed': '시작에 실패했습니다',
+        'msg.serviceNotRunning': '서비스가 실행 중이 아닙니다',
+        'msg.serviceStopped': '서비스가 중지되었습니다',
+        'msg.stopFailed': '중지에 실패했습니다',
+        'msg.noRestartNeeded': '서비스가 실행 중이 아니므로 재시작이 필요하지 않습니다',
+        'msg.serviceRestarted': '서비스가 재시작되었습니다',
+        'msg.restartFailed': '재시작에 실패했습니다',
+        'msg.enterDashscopeKey': 'DashScope API Key를 입력하세요',
+        'msg.invalidKeyFormat': 'API Key 형식이 올바르지 않습니다 (sk-로 시작해야 함)',
+        'msg.replacePlaceholder': '플레이스홀더를 실제 API Key로 바꿔 주세요',
+        'msg.keyFormatValid': 'API Key 형식이 유효합니다',
+        'msg.checkFailed': '확인에 실패했습니다',
+
+        'msg.configSaved': '설정이 저장되었습니다!',
+        'msg.saveConfigFailed': '설정 저장에 실패했습니다',
+        'msg.dashscopeRequired': '오류: 서비스를 시작하려면 Alibaba Cloud DashScope API Key가 필요합니다!',
+        'msg.dashscopeValidationFailed': 'DashScope API Key 검증 실패: ',
+        'msg.syncConfigFailed': '설정 동기화에 실패하여 서비스를 시작할 수 없습니다',
+        'msg.serviceStartSuccess': '서비스가 시작되었습니다',
+        'msg.serviceStartFailed': '서비스 시작 실패: ',
+        'msg.startServiceFailed': '서비스 시작에 실패했습니다',
+        'msg.serviceStopSuccess': '서비스가 중지되었습니다',
+        'msg.serviceStopFailed': '서비스 중지 실패: ',
+        'msg.stopServiceFailed': '서비스 중지에 실패했습니다',
+        'msg.defaultsRestored': '기본값이 복원되었습니다',
+        'msg.restoreDefaultsFailed': '기본값 복원에 실패했습니다',
+        'msg.confirmReset': '정말 기본값으로 복원하시겠습니까? (API Keys는 유지됩니다)',
+        'msg.apiKeyRequired': '{api}를 사용하려면 API Key가 필요합니다. 먼저 "API Keys 설정"에서 입력하세요',
+        'msg.autoSwitchToGoogle': '선택한 번역 API의 API Key를 찾을 수 없어 Google Dictionary로 자동 전환했습니다.',
+        'msg.sonioxKeyRequired': 'Soniox 백엔드는 API Key가 필요합니다',
+
+        'label.uiLanguage': 'UI 언어'
     }
 };
 
@@ -362,6 +686,9 @@ function setLanguage(lang) {
         applyTranslations();
         // 更新页面标题
         document.title = t('page.title');
+        document.dispatchEvent(new CustomEvent('i18n:languageChanged', {
+            detail: { language: currentLanguage }
+        }));
     }
 }
 
@@ -386,6 +713,10 @@ function loadLanguageFromStorage() {
                     currentLanguage = 'zh-CN';
                 } else if (langPrefix === 'en') {
                     currentLanguage = 'en';
+                } else if (langPrefix === 'ja') {
+                    currentLanguage = 'ja';
+                } else if (langPrefix === 'ko') {
+                    currentLanguage = 'ko';
                 }
             }
         }
@@ -424,6 +755,8 @@ function localizeMessage(messageId, params = {}) {
  * 应用翻译到页面元素
  */
 function applyTranslations() {
+    document.documentElement.lang = currentLanguage;
+
     // 更新所有带有 data-i18n 属性的元素
     document.querySelectorAll('[data-i18n]').forEach(el => {
         const key = el.getAttribute('data-i18n');

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Yakutan 控制面板</title>
+    <title data-i18n="page.title">Yakutan 控制面板</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 
@@ -156,10 +156,10 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="mic-device">麦克风</label>
+                        <label for="mic-device" data-i18n="label.micDevice">麦克风</label>
                         <select id="mic-device" class="form-control" onchange="onSettingChange(this)"
                             data-restart-required="true">
-                            <option value="">系统默认</option>
+                            <option value="" data-i18n="option.systemDefault">系统默认</option>
                         </select>
                     </div>
                 </section>
@@ -265,7 +265,7 @@
                                 (可选，用于LLM翻译)</label>
                             <input type="password" id="openrouter-api-key" class="form-control" placeholder="sk-or-...">
                             <small class="form-text" id="openrouter-env-hint" style="display: none;">
-                                已从环境变量读取，输入框已锁定
+                                <span data-i18n="hint.openrouterEnvLocked">已从环境变量读取，输入框已锁定</span>
                             </small>
                             <small class="form-text">
                                 <a href="https://openrouter.ai/" target="_blank" data-i18n="link.getApiKey">获取API Key
@@ -439,7 +439,7 @@
 
         <footer>
             <p><span data-i18n="footer.text">Yakutan</span> | <a href="https://github.com/febilly/Yakutan"
-                    target="_blank">GitHub</a></p>
+                    target="_blank" data-i18n="link.github">GitHub</a></p>
         </footer>
     </div>
 

@@ -45,6 +45,14 @@ document.addEventListener('DOMContentLoaded', function () {
     showConfigStorageInfo();
 });
 
+document.addEventListener('i18n:languageChanged', function () {
+    const useInternational = document.getElementById('use-international-endpoint')?.checked ?? false;
+    updateAsrOptionsForInternational(useInternational);
+    applyOpenrouterEnvStatus();
+    refreshMicDevices(true);
+    updateStatus();
+});
+
 // 从服务器加载环境变量状态
 async function loadEnvStatus() {
     try {
@@ -71,7 +79,8 @@ function applyOpenrouterEnvStatus() {
 
     if (envStatus.openrouter.api_key_set) {
         openrouterInput.value = '';
-        openrouterInput.placeholder = '已在环境变量配置';
+        const t = window.i18n ? window.i18n.t : (key) => key;
+        openrouterInput.placeholder = t('placeholder.openrouterEnvConfigured');
         openrouterInput.disabled = true;
         hint.style.display = 'block';
     } else {
@@ -96,7 +105,8 @@ async function refreshMicDevices(preserveSelection = true) {
         micSelect.innerHTML = '';
         const defaultOpt = document.createElement('option');
         defaultOpt.value = '';
-        defaultOpt.textContent = '系统默认';
+        const t = window.i18n ? window.i18n.t : (key) => key;
+        defaultOpt.textContent = t('option.systemDefault');
         micSelect.appendChild(defaultOpt);
 
         const indices = new Set();
@@ -108,7 +118,7 @@ async function refreshMicDevices(preserveSelection = true) {
 
             const opt = document.createElement('option');
             opt.value = idxStr;
-            const name = d.name ? String(d.name) : `Device ${idxStr}`;
+            const name = d.name ? String(d.name) : `${t('label.device')} ${idxStr}`;
             opt.textContent = `${name} (#${idxStr})`;
             micSelect.appendChild(opt);
         });
