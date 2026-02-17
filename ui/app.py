@@ -124,7 +124,10 @@ def update_config(config_data):
                 config.TRANSLATION_API_TYPE = trans['api_type']
                 # 前端的"流式翻译模式"开关会将 api_type 设为 'openrouter_streaming'
                 # 此时启用部分结果翻译（实时翻译未完成的句子）
-                config.TRANSLATE_PARTIAL_RESULTS = (trans['api_type'] == 'openrouter_streaming')
+                config.TRANSLATE_PARTIAL_RESULTS = trans['api_type'] in (
+                    'openrouter_streaming',
+                    'openrouter_streaming_deepl_hybrid',
+                )
             if 'show_partial_results' in trans:
                 config.SHOW_PARTIAL_RESULTS = trans['show_partial_results']
             if 'enable_furigana' in trans:

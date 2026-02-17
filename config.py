@@ -76,8 +76,12 @@ FALLBACK_LANGUAGE = 'en'  # 备用翻译语言（当源语言和目标语言相�
 # ============================================================================
 
 # 翻译 API 类型
-# 可选: 'google_web', 'google_dictionary', 'deepl', 'openrouter', 'openrouter_streaming', 'qwen_mt'
-# 注意: openrouter_streaming 是 openrouter 的流式翻译模式，支持翻译部分结果
+# 可选: 'google_web', 'google_dictionary', 'deepl', 'openrouter',
+#      'openrouter_streaming', 'openrouter_streaming_deepl_hybrid', 'qwen_mt'
+# 注意:
+# - openrouter_streaming 是 openrouter 的流式翻译模式，支持翻译部分结果
+# - openrouter_streaming_deepl_hybrid 在静音触发终译时，按流式更新次数阈值决定
+#   使用 DeepL（更新次数较少）或 LLM（更新次数较多）进行最终翻译
 TRANSLATION_API_TYPE = 'qwen_mt'
 
 # OpenAI 兼容服务配置（优先使用 OPENAI_*，否则回退 OPENROUTER_*）
@@ -100,8 +104,13 @@ ENABLE_TRANSLATION = True  # True: 识别后翻译文本
                            # False: 直接发送识别结果，不翻译
 
 # 是否启用流式翻译（翻译部分结果）
-# 当 TRANSLATION_API_TYPE 为 'openrouter_streaming' 时自动启用
+# 当 TRANSLATION_API_TYPE 为 'openrouter_streaming' 或
+# 'openrouter_streaming_deepl_hybrid' 时自动启用
 TRANSLATE_PARTIAL_RESULTS = False
+
+# 混合模式阈值：静音触发终译时，若本句流式翻译更新次数 <= 此值，优先用 DeepL 终译
+# 否则沿用 LLM 终译，降低译文大幅跳变的概率
+STREAMING_FINAL_DEEPL_MAX_UPDATES = 1
 
 # 是否为日语译文添加假名标注（仅目标语言为日语时生效）
 ENABLE_JA_FURIGANA = False

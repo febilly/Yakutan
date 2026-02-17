@@ -559,6 +559,21 @@ function handleTranslationApiChange(event) {
         keyName = 'openrouter_api_key';
         keyInputId = 'openrouter-api-key';
         apiDisplayName = 'OpenRouter';
+    } else if (newApi === 'openrouter_streaming_deepl_hybrid') {
+        const hasOpenrouterKey = envStatus.openrouter.api_key_set || !!(localStorage.getItem('openrouter_api_key') || document.getElementById('openrouter-api-key').value.trim());
+        const hasDeeplKey = !!(localStorage.getItem('deepl_api_key') || document.getElementById('deepl-api-key').value.trim());
+
+        if (!hasOpenrouterKey) {
+            requiresKey = true;
+            keyName = 'openrouter_api_key';
+            keyInputId = 'openrouter-api-key';
+            apiDisplayName = 'OpenRouter';
+        } else if (!hasDeeplKey) {
+            requiresKey = true;
+            keyName = 'deepl_api_key';
+            keyInputId = 'deepl-api-key';
+            apiDisplayName = 'DeepL';
+        }
     }
 
     // 如果需要API Key但未提供
@@ -835,8 +850,10 @@ async function startService() {
         if (enableTranslation) {
             const requiresDeeplKey = translationApiType === 'deepl' && !deeplKey;
             const requiresOpenrouterKey = translationApiType === 'openrouter' && !hasOpenrouterKey;
+            const requiresHybridOpenrouterKey = translationApiType === 'openrouter_streaming_deepl_hybrid' && !hasOpenrouterKey;
+            const requiresHybridDeeplKey = translationApiType === 'openrouter_streaming_deepl_hybrid' && !deeplKey;
 
-            if (requiresDeeplKey || requiresOpenrouterKey) {
+            if (requiresDeeplKey || requiresOpenrouterKey || requiresHybridOpenrouterKey || requiresHybridDeeplKey) {
                 translationApiType = 'google_dictionary';
                 translationApiSelect.value = translationApiType;
                 translationApiSelect.dispatchEvent(new Event('change'));

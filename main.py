@@ -55,10 +55,20 @@ elif config.TRANSLATION_API_TYPE == 'openrouter':
     from translators.translation_apis.openrouter_api import OpenRouterAPI as TranslationAPI
 elif config.TRANSLATION_API_TYPE == 'openrouter_streaming':
     from translators.translation_apis.openrouter_api import OpenRouterStreamingAPI as TranslationAPI
+elif config.TRANSLATION_API_TYPE == 'openrouter_streaming_deepl_hybrid':
+    from translators.translation_apis.openrouter_api import OpenRouterStreamingAPI as TranslationAPI
 elif config.TRANSLATION_API_TYPE == 'deepl':
     from translators.translation_apis.deepl_api import DeepLAPI as TranslationAPI
 else:  # 默认使用 qwen_mt
     from translators.translation_apis.qwen_mt_api import QwenMTAPI as TranslationAPI
+
+
+def is_streaming_translation_mode(api_type: str) -> bool:
+    return api_type in ('openrouter_streaming', 'openrouter_streaming_deepl_hybrid')
+
+
+def is_streaming_deepl_hybrid_mode() -> bool:
+    return config.TRANSLATION_API_TYPE == 'openrouter_streaming_deepl_hybrid'
 
 # ============ 可选的日语假名标注支持 ============
 try:
@@ -219,6 +229,7 @@ mute_delay_task = None  # 延迟停止任务
 main_loop: Optional[asyncio.AbstractEventLoop] = None  # 主事件循环（用于线程安全调度）
 CURRENT_ASR_BACKEND = config.PREFERRED_ASR_BACKEND
 vocabulary_id = None  # 热词表 ID
+recognition_callback = None  # 识别回调实例（用于静音触发状态联动）
 
 # ============ 初始化服务实例 ============
 
@@ -227,6 +238,10 @@ def reinitialize_translator():
     在运行时切换翻译 API 或目标语言后调用此函数以使后端使用新配置。
     """
     global translation_api, translator, backwards_translation_api, backwards_translator
+    global deepl_fallback_translation_api, deepl_fallback_translator
+
+    if is_streaming_translation_mode(config.TRANSLATION_API_TYPE):
+        config.TRANSLATE_PARTIAL_RESULTS = True
 
     # 根据配置选择翻译 API 类（延迟导入以避免循环导入或不必要的实例化）
     if config.TRANSLATION_API_TYPE == 'google_web':
@@ -236,6 +251,8 @@ def reinitialize_translator():
     elif config.TRANSLATION_API_TYPE == 'openrouter':
         from translators.translation_apis.openrouter_api import OpenRouterAPI as TranslationAPIClass
     elif config.TRANSLATION_API_TYPE == 'openrouter_streaming':
+        from translators.translation_apis.openrouter_api import OpenRouterStreamingAPI as TranslationAPIClass
+    elif config.TRANSLATION_API_TYPE == 'openrouter_streaming_deepl_hybrid':
         from translators.translation_apis.openrouter_api import OpenRouterStreamingAPI as TranslationAPIClass
     elif config.TRANSLATION_API_TYPE == 'deepl':
         from translators.translation_apis.deepl_api import DeepLAPI as TranslationAPIClass
@@ -259,6 +276,21 @@ def reinitialize_translator():
         target_language="en",
         context_aware=True
     )
+
+    deepl_fallback_translation_api = None
+    deepl_fallback_translator = None
+    if is_streaming_deepl_hybrid_mode():
+        try:
+            from translators.translation_apis.deepl_api import DeepLAPI
+            deepl_fallback_translation_api = DeepLAPI()
+            deepl_fallback_translator = ContextAwareTranslator(
+                translation_api=deepl_fallback_translation_api,
+                max_context_size=6,
+                target_language=config.TARGET_LANGUAGE,
+                context_aware=True
+            )
+        except Exception as e:
+            logger.warning(f"[Translation] 混合模式下 DeepL 初始化失败，将回退 LLM 终译: {e}")
 
 
 # 在模块加载时进行一次初始化
@@ -305,6 +337,15 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self._latest_partial_request_id = 0
         self._partial_inflight = 0
         self._finalized_seq = 0
+        self._final_output_version = 0
+        self.partial_translation_update_count = 0
+        self._prefer_deepl_on_next_final = False
+
+    def mark_mute_finalization_requested(self) -> None:
+        self._prefer_deepl_on_next_final = True
+
+    def clear_mute_finalization_requested(self) -> None:
+        self._prefer_deepl_on_next_final = False
 
     @staticmethod
     def _normalize_lang(lang):
@@ -336,6 +377,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
     
     def on_session_started(self) -> None:
         logger.info('Speech recognizer session opened.')
+        self.partial_translation_update_count = 0
+        self._prefer_deepl_on_next_final = False
+        self._final_output_version = 0
 
     def on_session_stopped(self) -> None:
         logger.info('Speech recognizer session closed.')
@@ -343,7 +387,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
     def on_error(self, error: Exception) -> None:
         logger.error('Speech recognizer failed: %s', error)
 
-    async def _translate_partial_task(self, segment: str, request_id: int, finalized_seq: int):
+    async def _translate_partial_task(self, segment: str, request_id: int, finalized_seq: int, final_output_version: int):
         """异步流式翻译任务"""
         self._partial_inflight += 1
         self.translating_partial = True
@@ -368,12 +412,17 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     previous_translation=self.last_partial_translation
                 )
             )
-            if request_id != self._latest_partial_request_id or finalized_seq != self._finalized_seq:
+            if (
+                request_id != self._latest_partial_request_id or
+                finalized_seq != self._finalized_seq or
+                final_output_version != self._final_output_version
+            ):
                 return
             success = True
             
             if translated_text and not translated_text.startswith("[ERROR]"):
                 self.last_partial_translation = translated_text
+                self.partial_translation_update_count += 1
             else:
                 translated_text = ""
 
@@ -407,7 +456,11 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         finally:
             self._partial_inflight = max(0, self._partial_inflight - 1)
             self.translating_partial = self._partial_inflight > 0
-            if request_id == self._latest_partial_request_id and finalized_seq == self._finalized_seq:
+            if (
+                request_id == self._latest_partial_request_id and
+                finalized_seq == self._finalized_seq and
+                final_output_version == self._final_output_version
+            ):
                 self.pending_partial_segment = None
                 if success:
                     self.last_partial_source_segment = segment
@@ -438,8 +491,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     request_id = self._partial_request_seq
                     self._latest_partial_request_id = request_id
                     self.pending_partial_segment = segment
+                    final_output_version = self._final_output_version
                     asyncio.run_coroutine_threadsafe(
-                        self._translate_partial_task(segment, request_id, self._finalized_seq),
+                        self._translate_partial_task(segment, request_id, self._finalized_seq, final_output_version),
                         self.loop
                     )
 
@@ -468,21 +522,53 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     actual_target = config.TARGET_LANGUAGE
                     print(f'原文：{text} [{source_lang_info["language"]}]')
 
-                translated_text = translator.translate(
-                    text,
-                    source_language=config.SOURCE_LANGUAGE,
-                    target_language=actual_target,
-                    context_prefix=config.CONTEXT_PREFIX,
-                    is_partial=False,
-                    previous_translation=self.last_partial_translation
-                )
+                use_deepl_final = False
+                max_updates = max(0, int(getattr(config, 'STREAMING_FINAL_DEEPL_MAX_UPDATES', 2)))
+                if (
+                    self._prefer_deepl_on_next_final and
+                    is_streaming_deepl_hybrid_mode() and
+                    self.partial_translation_update_count <= max_updates and
+                    deepl_fallback_translator is not None
+                ):
+                    use_deepl_final = True
+
+                if use_deepl_final:
+                    translated_text = deepl_fallback_translator.translate(
+                        text,
+                        source_language=config.SOURCE_LANGUAGE,
+                        target_language=actual_target,
+                        context_prefix=config.CONTEXT_PREFIX,
+                        is_partial=False,
+                        previous_translation=self.last_partial_translation
+                    )
+                    if not translated_text or translated_text.startswith("[ERROR]"):
+                        translated_text = translator.translate(
+                            text,
+                            source_language=config.SOURCE_LANGUAGE,
+                            target_language=actual_target,
+                            context_prefix=config.CONTEXT_PREFIX,
+                            is_partial=False,
+                            previous_translation=self.last_partial_translation
+                        )
+                else:
+                    translated_text = translator.translate(
+                        text,
+                        source_language=config.SOURCE_LANGUAGE,
+                        target_language=actual_target,
+                        context_prefix=config.CONTEXT_PREFIX,
+                        is_partial=False,
+                        previous_translation=self.last_partial_translation
+                    )
                 self._finalized_seq += 1
+                self._final_output_version += 1
                 
                 # 重置流式翻译状态
                 self.last_partial_translation = None
                 self.last_partial_source_segment = None
                 self.pending_partial_segment = None
                 self._latest_partial_request_id = 0
+                self.partial_translation_update_count = 0
+                self._prefer_deepl_on_next_final = False
                 
                 is_translated = True
                 print(f'目标语言：{actual_target}')
@@ -762,7 +848,7 @@ async def handle_mute_change(is_muted):
     Args:
         is_muted: True表示静音(停止识别), False表示取消静音(开始识别)
     """
-    global recognition_active, recognition_instance, mute_delay_task, recognition_started
+    global recognition_active, recognition_instance, mute_delay_task, recognition_started, recognition_callback
     
     # 如果禁用了麦克风控制，则忽略所有麦克风状态变化
     if not config.ENABLE_MIC_CONTROL:
@@ -778,6 +864,8 @@ async def handle_mute_change(is_muted):
     if is_muted:
         # 静音状态 - 延迟停止识别
         if recognition_active:
+            if recognition_callback is not None:
+                recognition_callback.mark_mute_finalization_requested()
             # 如果已有延迟任务在运行，先取消它
             if mute_delay_task and not mute_delay_task.done():
                 mute_delay_task.cancel()
@@ -804,6 +892,8 @@ async def handle_mute_change(is_muted):
                 logger.info(f'[ASR] 语音识别已{stop_word}')
     else:
         # 取消静音 - 开始识别
+        if recognition_callback is not None:
+            recognition_callback.clear_mute_finalization_requested()
         # 如果有延迟停止任务，取消它
         if mute_delay_task and not mute_delay_task.done():
             mute_delay_task.cancel()
@@ -830,7 +920,7 @@ def handle_mute_change_sync(is_muted):
 
 async def main():
     """主异步函数"""
-    global recognition_instance, recognition_active, vocabulary_id, CURRENT_ASR_BACKEND, recognition_started, executor, stop_event, main_loop
+    global recognition_instance, recognition_active, vocabulary_id, CURRENT_ASR_BACKEND, recognition_started, executor, stop_event, main_loop, recognition_callback
 
     main_loop = asyncio.get_running_loop()
     
@@ -896,6 +986,7 @@ async def main():
     # 创建识别回调
     callback = VRChatRecognitionCallback()
     callback.loop = asyncio.get_event_loop()
+    recognition_callback = callback
 
     # 使用工厂创建识别实例
     recognition_instance = create_recognizer(
