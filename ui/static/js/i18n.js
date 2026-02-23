@@ -96,6 +96,8 @@ const translations = {
         'label.openrouterKey': 'OpenRouter API Key (可选，用于LLM翻译)',
         'hint.openrouterEnvLocked': '已从环境变量读取，输入框已锁定',
         'placeholder.openrouterEnvConfigured': '已在环境变量配置',
+        'label.doubaoKey': '豆包录音文件 API Key（x-api-key 或 AppID:AccessKey）',
+        'hint.doubaoKey': '用于豆包录音文件识别后端，支持 x-api-key 或 AppID:AccessKey。',
 
         // 语音识别设置
         'section.asrSettings': '语音识别设置',
@@ -103,6 +105,7 @@ const translations = {
         'asr.qwen': 'Qwen3 ASR（推荐）',
         'asr.dashscope': 'Fun-ASR（仅中国大陆版可用）',
         'asr.dashscopeDisabled': 'Fun-ASR（国际版不可用）',
+        'asr.doubaoFile': '豆包录音文件识别（关麦后返回）',
         'asr.soniox': 'Soniox（多语言，需要API Key）',
         'label.sonioxKey': 'Soniox API Key (可选，用于多语言识别)',
         'hint.sonioxKey': '支持60+语言的语音识别。',
@@ -185,6 +188,8 @@ const translations = {
         'msg.apiKeyRequired': '使用 {api} 需要配置 API Key，请先在"API Keys 配置"中填写',
         'msg.autoSwitchToGoogle': '未检测到所选翻译接口的 API Key，已自动切换为 Google Dictionary。',
         'msg.sonioxKeyRequired': 'Soniox 后端需要配置 API Key',
+        'msg.doubaoKeyRequired': '豆包录音文件后端需要配置 API Key',
+        'msg.doubaoKeyFormat': '豆包 API Key 格式无效，应为 x-api-key 或 AppID:AccessKey',
 
         // 语言选择器
         'label.uiLanguage': '界面语言'
@@ -264,6 +269,8 @@ const translations = {
         'label.openrouterKey': 'OpenRouter API Key (optional, for LLM translation)',
         'hint.openrouterEnvLocked': 'Loaded from environment variable; input is locked',
         'placeholder.openrouterEnvConfigured': 'Configured via environment variable',
+        'label.doubaoKey': 'Doubao File ASR API Key (x-api-key or AppID:AccessKey)',
+        'hint.doubaoKey': 'Used by Doubao file transcription backend. Supports x-api-key or AppID:AccessKey.',
 
         // Speech recognition settings
         'section.asrSettings': 'Speech Recognition Settings',
@@ -271,6 +278,7 @@ const translations = {
         'asr.qwen': 'Qwen3 ASR (Recommended)',
         'asr.dashscope': 'Fun-ASR (China Mainland only)',
         'asr.dashscopeDisabled': 'Fun-ASR (Not available for International)',
+        'asr.doubaoFile': 'Doubao File ASR (returns after mute)',
         'asr.soniox': 'Soniox (Multilingual, requires API Key)',
         'label.sonioxKey': 'Soniox API Key (optional, for multilingual recognition)',
         'hint.sonioxKey': 'Supports 60+ languages for speech recognition.',
@@ -353,6 +361,8 @@ const translations = {
         'msg.apiKeyRequired': 'API Key is required for {api}, please fill it in "API Keys Configuration" first',
         'msg.autoSwitchToGoogle': 'API Key for selected translation API not found, automatically switched to Google Dictionary.',
         'msg.sonioxKeyRequired': 'Soniox backend requires API Key',
+        'msg.doubaoKeyRequired': 'Doubao file backend requires API Key',
+        'msg.doubaoKeyFormat': 'Invalid Doubao API Key format. Expected x-api-key or AppID:AccessKey',
 
         // Language selector
         'label.uiLanguage': 'UI Language'
@@ -426,12 +436,15 @@ const translations = {
         'label.openrouterKey': 'OpenRouter API Key（任意、LLM 翻訳用）',
         'hint.openrouterEnvLocked': '環境変数から読み込み済みのため、入力欄はロックされています',
         'placeholder.openrouterEnvConfigured': '環境変数で設定済み',
+        'label.doubaoKey': 'Doubao 録音ファイル API Key（x-api-key または AppID:AccessKey）',
+        'hint.doubaoKey': 'Doubao 録音ファイル認識バックエンド用。x-api-key または AppID:AccessKey に対応。',
 
         'section.asrSettings': '音声認識設定',
         'label.asrBackend': '認識バックエンド',
         'asr.qwen': 'Qwen3 ASR（推奨）',
         'asr.dashscope': 'Fun-ASR（中国本土版のみ）',
         'asr.dashscopeDisabled': 'Fun-ASR（国際版では利用不可）',
+        'asr.doubaoFile': 'Doubao 録音ファイル認識（ミュート後に返却）',
         'asr.soniox': 'Soniox（多言語、API Key が必要）',
         'label.sonioxKey': 'Soniox API Key（任意、多言語認識用）',
         'hint.sonioxKey': '60 以上の言語の音声認識に対応しています。',
@@ -510,6 +523,8 @@ const translations = {
         'msg.apiKeyRequired': '{api} を使用するには API Key が必要です。先に「API Keys 設定」で入力してください',
         'msg.autoSwitchToGoogle': '選択した翻訳 API の API Key が見つからないため、Google Dictionary に自動切替しました。',
         'msg.sonioxKeyRequired': 'Soniox バックエンドには API Key が必要です',
+        'msg.doubaoKeyRequired': 'Doubao 録音ファイルバックエンドには API Key が必要です',
+        'msg.doubaoKeyFormat': 'Doubao API Key 形式が無効です。x-api-key または AppID:AccessKey 形式で入力してください',
 
         'label.uiLanguage': '表示言語'
     },
@@ -582,12 +597,15 @@ const translations = {
         'label.openrouterKey': 'OpenRouter API Key (선택, LLM 번역용)',
         'hint.openrouterEnvLocked': '환경 변수에서 로드되어 입력란이 잠겨 있습니다',
         'placeholder.openrouterEnvConfigured': '환경 변수로 설정됨',
+        'label.doubaoKey': 'Doubao 파일 ASR API Key (x-api-key 또는 AppID:AccessKey)',
+        'hint.doubaoKey': 'Doubao 파일 음성 인식 백엔드용입니다. x-api-key 또는 AppID:AccessKey를 지원합니다.',
 
         'section.asrSettings': '음성 인식 설정',
         'label.asrBackend': '인식 백엔드',
         'asr.qwen': 'Qwen3 ASR (권장)',
         'asr.dashscope': 'Fun-ASR (중국 본토 전용)',
         'asr.dashscopeDisabled': 'Fun-ASR (국제판에서는 사용 불가)',
+        'asr.doubaoFile': 'Doubao 파일 ASR (음소거 후 반환)',
         'asr.soniox': 'Soniox (다국어, API Key 필요)',
         'label.sonioxKey': 'Soniox API Key (선택, 다국어 인식용)',
         'hint.sonioxKey': '60개 이상의 언어 음성 인식을 지원합니다.',
@@ -666,6 +684,8 @@ const translations = {
         'msg.apiKeyRequired': '{api}를 사용하려면 API Key가 필요합니다. 먼저 "API Keys 설정"에서 입력하세요',
         'msg.autoSwitchToGoogle': '선택한 번역 API의 API Key를 찾을 수 없어 Google Dictionary로 자동 전환했습니다.',
         'msg.sonioxKeyRequired': 'Soniox 백엔드는 API Key가 필요합니다',
+        'msg.doubaoKeyRequired': 'Doubao 파일 백엔드는 API Key가 필요합니다',
+        'msg.doubaoKeyFormat': 'Doubao API Key 형식이 올바르지 않습니다. x-api-key 또는 AppID:AccessKey 형식이어야 합니다',
 
         'label.uiLanguage': 'UI 언어'
     }

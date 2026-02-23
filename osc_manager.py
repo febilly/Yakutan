@@ -137,21 +137,54 @@ class OSCManager:
                 self._mute_callback(mute_value)
         except Exception as e:
             self._emit(f"[OSC] Error while invoking mute callback: {e}", level="error")
+
+    @staticmethod
+    def _parse_mute_value(raw_value) -> Optional[bool]:
+        """Parse OSC mute payload into bool with tolerant type handling."""
+        if isinstance(raw_value, bool):
+            return raw_value
+        if isinstance(raw_value, (int, float)):
+            return bool(raw_value)
+        if isinstance(raw_value, str):
+            normalized = raw_value.strip().lower()
+            if normalized in ("true", "1", "on", "yes", "mute", "muted"):
+                return True
+            if normalized in ("false", "0", "off", "no", "unmute", "unmuted"):
+                return False
+        return None
     
     def _handle_mute_self(self, address, *args):
         """处理来自OSC的MuteSelf消息"""
-        if args and len(args) > 0:
-            mute_value = bool(args[0])
-            previous = self._last_mute_value
-            self._last_mute_value = mute_value
-            if previous == mute_value:
-                return
-            self._emit(f"[OSC] Received MuteSelf: {mute_value}")
-            if not self._vrchat_linked_logged:
-                self._vrchat_linked_logged = True
-                self._oscquery_connected = True
-                self._emit("[OSCQuery] Linked with VRChat (received first MuteSelf event)")
-            self._notify_mute_callback(mute_value)
+        if not args:
+            self._emit(f"[OSC] Received MuteSelf without args: address={address}", level="warning")
+            return
+
+        raw_value = args[0]
+        mute_value = self._parse_mute_value(raw_value)
+        if mute_value is None:
+            self._emit(
+                f"[OSC] Unable to parse MuteSelf value: raw={raw_value!r}, type={type(raw_value).__name__}",
+                level="warning",
+            )
+            return
+
+        previous = self._last_mute_value
+        self._last_mute_value = mute_value
+        if previous == mute_value:
+            self._emit(
+                f"[OSC] Received duplicated MuteSelf={mute_value} (raw={raw_value!r}), ignored",
+                level="debug",
+            )
+            return
+
+        self._emit(
+            f"[OSC] Received MuteSelf: {mute_value} (raw={raw_value!r}, type={type(raw_value).__name__})"
+        )
+        if not self._vrchat_linked_logged:
+            self._vrchat_linked_logged = True
+            self._oscquery_connected = True
+            self._emit("[OSCQuery] Linked with VRChat (received first MuteSelf event)")
+        self._notify_mute_callback(mute_value)
     
     async def start_server(self, app_name: Optional[str] = None):
         """Start OSCQuery service and wait for VRChat callbacks."""
@@ -183,15 +216,22 @@ class OSCManager:
         vrchat_osc_common.APP_HOST = "127.0.0.1"
         dispatcher = dict_to_dispatcher({VRCHAT_MUTE_PATH: self._handle_mute_self})
         return vrc_osc(self._oscquery_app_name, dispatcher, foreground=False)
-    
-    async def stop_server(self):
-        """Stop OSCQuery service."""
-        # 取消待处理消息
+
+    def reset_runtime_state(self):
+        """Reset per-run runtime state while keeping OSCQuery service alive."""
         with self._state_lock:
             if self._pending_timer is not None:
                 self._pending_timer.cancel()
                 self._pending_timer = None
             self._pending_message = None
+            self._message_history.clear()
+            self._last_send_time = 0.0
+
+        self._last_mute_value = None
+    
+    async def stop_server(self):
+        """Stop OSCQuery service."""
+        self.reset_runtime_state()
 
         with self._oscquery_lock:
             httpd = self._oscquery_httpd

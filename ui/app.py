@@ -177,7 +177,7 @@ def run_service_async():
     try:
         import main
         # 在 main() 函数内部会创建新的 stop_event，所以这里不需要清除
-        service_loop.run_until_complete(main.main())
+        service_loop.run_until_complete(main.main(keep_oscquery_alive=True))
         # 运行完成后获取 main 模块中的 stop_event 引用
         stop_event = main.stop_event
     except Exception as e:
@@ -348,6 +348,9 @@ def start_service():
         
         if 'soniox' in api_keys and api_keys['soniox']:
             os.environ['SONIOX_API_KEY'] = api_keys['soniox']
+
+        if 'doubao' in api_keys and api_keys['doubao']:
+            os.environ['DOUBAO_API_KEY'] = api_keys['doubao']
         
         service_thread = threading.Thread(target=run_service_async, daemon=True)
         service_thread.start()

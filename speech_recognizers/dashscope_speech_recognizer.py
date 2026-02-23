@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any, Optional
 
 from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
@@ -89,7 +90,22 @@ class DashscopeSpeechRecognizer(SpeechRecognizer):
         self._require_recognition().send_audio_frame(data)
 
     def pause(self) -> None:
-        self.stop()
+        recognition = self._require_recognition()
+
+        # 在暂停时主动发送少量静音帧，避免无音频直接 stop 触发后端报错。
+        # 这部分原先在 main.py 中处理，现在下沉到具体后端实现。
+        sample_rate = int(self._recognition_kwargs.get('sample_rate', 16000) or 16000)
+        channels = int(self._recognition_kwargs.get('channels', 1) or 1)
+        bytes_per_sample = 2  # int16
+        silence_ms = 100
+        silence_frames = max(1, int(sample_rate * silence_ms / 1000))
+        silence_data = b'\x00' * (silence_frames * channels * bytes_per_sample)
+
+        with suppress(Exception):
+            recognition.send_audio_frame(silence_data)
+
+        with suppress(Exception):
+            recognition.stop()
 
     def resume(self) -> None:
         self.start()

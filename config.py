@@ -15,11 +15,11 @@ load_dotenv()
 USE_INTERNATIONAL_ENDPOINT = False
 
 # 首选的语音识别后端
-PREFERRED_ASR_BACKEND = 'qwen'  # 可选: 'dashscope', 'qwen'
+PREFERRED_ASR_BACKEND = 'qwen'  # 可选: 'dashscope', 'qwen', 'soniox', 'doubao_file'
                                 # 注意: 'dashscope' (Fun-ASR) 仅支持中国大陆版
 
 # 有效的后端列表
-VALID_ASR_BACKENDS = {'dashscope', 'qwen', 'soniox'}
+VALID_ASR_BACKENDS = {'dashscope', 'qwen', 'soniox', 'doubao_file'}
 
 # ============================================================================
 # 语音识别模型配置
@@ -50,6 +50,16 @@ SONIOX_LANGUAGE_HINTS = ['en', 'zh', 'ja', 'ko']
 
 # 是否启用端点检测（自动断句）
 SONIOX_ENABLE_ENDPOINT_DETECTION = True
+
+# ============================================================================
+# 豆包录音文件识别（极速版）配置
+# ============================================================================
+
+DOUBAO_ASR_FLASH_URL = 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash'
+DOUBAO_ASR_RESOURCE_ID = 'volc.seedasr.auc'
+DOUBAO_ASR_MODEL_NAME = 'bigmodel'
+DOUBAO_ASR_TIMEOUT_SECONDS = 60
+DOUBAO_ASR_MAX_BUFFER_SECONDS = 60
 
 # ============================================================================
 # 音频参数配置

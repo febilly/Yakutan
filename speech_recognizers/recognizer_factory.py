@@ -9,6 +9,7 @@ import config
 
 from .base_speech_recognizer import SpeechRecognitionCallback, SpeechRecognizer
 from .dashscope_speech_recognizer import DashscopeSpeechRecognizer
+from .doubao_file_speech_recognizer import DoubaoFileSpeechRecognizer
 
 try:
     from .qwen_speech_recognizer import QwenSpeechRecognizer
@@ -47,6 +48,32 @@ def _normalize_qwen_language(lang: Optional[str]) -> Optional[str]:
     return None
 
 
+def _resolve_doubao_credentials() -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Resolve Doubao credentials from env vars.
+
+    支持两种方式：
+    1) DOUBAO_API_KEY="x-api-key"
+    2) DOUBAO_APP_ID + DOUBAO_ACCESS_KEY
+    3) DOUBAO_API_KEY="appid:access_key"
+    """
+    app_id = os.environ.get('DOUBAO_APP_ID', '').strip()
+    access_key = os.environ.get('DOUBAO_ACCESS_KEY', '').strip()
+    combined = os.environ.get('DOUBAO_API_KEY', '').strip()
+    api_key = ''
+
+    if combined:
+        if ':' in combined:
+            maybe_app_id, maybe_access_key = combined.split(':', 1)
+            if not app_id:
+                app_id = maybe_app_id.strip()
+            if not access_key:
+                access_key = maybe_access_key.strip()
+        else:
+            api_key = combined
+
+    return (api_key or None, app_id or None, access_key or None)
+
+
 def init_dashscope_api_key() -> None:
     """
     初始化 DashScope API Key
@@ -76,7 +103,7 @@ def create_recognizer(
     创建语音识别器实例
     
     Args:
-        backend: 识别后端，'dashscope' 或 'qwen'
+        backend: 识别后端，'dashscope'、'qwen'、'soniox' 或 'doubao_file'
         callback: 识别回调实例
         sample_rate: 音频采样率
         audio_format: 音频格式
@@ -173,6 +200,29 @@ def create_recognizer(
         recognition_kwargs.update(extra_kwargs)
         
         return SonioxSpeechRecognizer(callback=callback, **recognition_kwargs)
+
+    elif backend == 'doubao_file':
+        doubao_api_key, doubao_app_id, doubao_access_key = _resolve_doubao_credentials()
+        if not doubao_api_key and not (doubao_app_id and doubao_access_key):
+            raise RuntimeError('豆包录音文件识别缺少凭证，请设置 DOUBAO_API_KEY（x-api-key 或 appid:access_key）')
+
+        recognition_kwargs = {
+            'api_key': doubao_api_key,
+            'api_app_key': doubao_app_id,
+            'api_access_key': doubao_access_key,
+            'resource_id': getattr(config, 'DOUBAO_ASR_RESOURCE_ID', 'volc.seedasr.auc'),
+            'url': getattr(config, 'DOUBAO_ASR_FLASH_URL', 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash'),
+            'model_name': getattr(config, 'DOUBAO_ASR_MODEL_NAME', 'bigmodel'),
+            'sample_rate': sample_rate,
+            'channels': getattr(config, 'CHANNELS', 1),
+            'bits': getattr(config, 'BITS', 16),
+            'timeout_seconds': getattr(config, 'DOUBAO_ASR_TIMEOUT_SECONDS', 60),
+            'max_buffer_seconds': getattr(config, 'DOUBAO_ASR_MAX_BUFFER_SECONDS', 60),
+        }
+
+        recognition_kwargs.update(extra_kwargs)
+
+        return DoubaoFileSpeechRecognizer(callback=callback, **recognition_kwargs)
     
     else:
         raise ValueError(f'不支持的识别后端: {backend}')
@@ -183,7 +233,7 @@ def is_backend_available(backend: str) -> bool:
     检查指定后端是否可用
     
     Args:
-        backend: 后端名称，'dashscope' 或 'qwen'
+        backend: 后端名称，'dashscope'、'qwen'、'soniox' 或 'doubao_file'
     
     Returns:
         bool: True 表示可用，False 表示不可用
@@ -200,6 +250,9 @@ def is_backend_available(backend: str) -> bool:
         has_lib = SonioxSpeechRecognizer is not None and WEBSOCKETS_AVAILABLE
         has_key = bool(os.environ.get('SONIOX_API_KEY', ''))
         return has_lib and has_key
+    elif backend == 'doubao_file':
+        api_key, app_id, access_key = _resolve_doubao_credentials()
+        return bool(api_key or (app_id and access_key))
     else:
         return False
 
@@ -220,14 +273,22 @@ def select_backend(preferred_backend: str, valid_backends: set) -> str:
         preferred_backend = 'qwen'
     
     # 检查首选后端是否可用
-    if not is_backend_available(preferred_backend):
-        # 国际版不支持 Fun-ASR，回退到 qwen
-        if preferred_backend == 'dashscope':
-            print('[ASR] Fun-ASR 在国际版不可用，已自动切换到 Qwen')
-            return 'qwen'
-        # qwen 后端不可用，回退到 dashscope
-        if preferred_backend == 'qwen':
-            print('[ASR] Qwen 后端不可用，缺少依赖，已回退到 DashScope.')
-            return 'dashscope'
-    
+    if is_backend_available(preferred_backend):
+        return preferred_backend
+
+    if preferred_backend == 'dashscope' and getattr(config, 'USE_INTERNATIONAL_ENDPOINT', False):
+        print('[ASR] Fun-ASR 在国际版不可用，正在尝试其他后端...')
+    else:
+        print(f'[ASR] 首选后端 {preferred_backend} 不可用，正在尝试自动回退...')
+
+    for candidate in ('qwen', 'dashscope', 'doubao_file', 'soniox'):
+        if candidate == preferred_backend:
+            continue
+        if candidate not in valid_backends:
+            continue
+        if is_backend_available(candidate):
+            print(f'[ASR] 已自动切换到可用后端: {candidate}')
+            return candidate
+
+    print(f'[ASR] 未找到可用后端，保留原配置: {preferred_backend}')
     return preferred_backend

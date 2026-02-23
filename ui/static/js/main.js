@@ -34,6 +34,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     loadConfigFromLocalStorage();
     loadAPIKeys();
+    applyAsrBackendLocks();
     loadEnvStatus();
     refreshMicDevices(true);
     setupMicDeviceAutoRefresh();
@@ -171,11 +172,13 @@ function loadAPIKeys() {
     const dashscopeKey = localStorage.getItem('dashscope_api_key');
     const deeplKey = localStorage.getItem('deepl_api_key');
     const openrouterKey = localStorage.getItem('openrouter_api_key');
+    const doubaoKey = localStorage.getItem('doubao_api_key');
     const useInternational = localStorage.getItem('use_international_endpoint') === 'true';
 
     if (dashscopeKey) document.getElementById('dashscope-api-key').value = dashscopeKey;
     if (deeplKey) document.getElementById('deepl-api-key').value = deeplKey;
     if (openrouterKey) document.getElementById('openrouter-api-key').value = openrouterKey;
+    if (doubaoKey) document.getElementById('doubao-api-key').value = doubaoKey;
 
     const sonioxKey = localStorage.getItem('soniox_api_key');
     if (sonioxKey) document.getElementById('soniox-api-key').value = sonioxKey;
@@ -200,6 +203,7 @@ function loadAPIKeys() {
     document.getElementById('dashscope-api-key').addEventListener('input', saveAPIKey);
     document.getElementById('deepl-api-key').addEventListener('input', saveAPIKey);
     document.getElementById('openrouter-api-key').addEventListener('input', saveAPIKey);
+    document.getElementById('doubao-api-key').addEventListener('input', saveAPIKey);
     document.getElementById('soniox-api-key').addEventListener('input', saveAPIKey);
 
     applyOpenrouterEnvStatus();
@@ -243,6 +247,25 @@ function updateAsrOptionsForInternational(useInternational) {
             dashscopeOption.disabled = false;
             dashscopeOption.textContent = t('asr.dashscope');
         }
+    }
+}
+
+function applyAsrBackendLocks() {
+    const asrBackendSelect = document.getElementById('asr-backend');
+    const micControlToggle = document.getElementById('enable-mic-control');
+    const partialResultsToggle = document.getElementById('show-partial-results');
+    if (!asrBackendSelect || !micControlToggle || !partialResultsToggle) {
+        return;
+    }
+
+    const isDoubaoFile = asrBackendSelect.value === 'doubao_file';
+
+    if (isDoubaoFile) {
+        micControlToggle.disabled = true;
+        partialResultsToggle.disabled = true;
+    } else {
+        micControlToggle.disabled = false;
+        partialResultsToggle.disabled = false;
     }
 }
 
@@ -459,6 +482,8 @@ async function loadConfigFromServer() {
 // 保存配置到 localStorage
 function saveConfigToLocalStorage() {
     try {
+        applyAsrBackendLocks();
+
         // 确定实际的 API 类型（如果是 OpenRouter 且启用了流式模式，使用 openrouter_streaming）
         let actualApiType = document.getElementById('translation-api-type').value;
         if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
@@ -645,6 +670,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
 // 当设置改变时自动保存（延迟保存，避免频繁请求）
 function onSettingChange(changedElement = null) {
+    applyAsrBackendLocks();
+
     // 清除之前的定时器
     if (autoSaveTimer) {
         clearTimeout(autoSaveTimer);
@@ -688,6 +715,8 @@ async function saveConfig(autoSave = false) {
     const t = window.i18n ? window.i18n.t : (key) => key;
 
     try {
+        applyAsrBackendLocks();
+
         // 确定实际的 API 类型（如果是 OpenRouter 且启用了流式模式，使用 openrouter_streaming）
         let actualApiType = document.getElementById('translation-api-type').value;
         if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
@@ -790,15 +819,31 @@ async function startService() {
     const startBtn = document.getElementById('start-btn');
     const t = window.i18n ? window.i18n.t : (key) => key;
 
+    applyAsrBackendLocks();
+
     startBtn.disabled = true;
     startBtn.textContent = t('btn.starting');
     pendingWarningMessage = null;
 
     try {
-        // 先检查 DashScope API Key
+        const asrBackend = document.getElementById('asr-backend').value;
         const dashscopeKey = document.getElementById('dashscope-api-key').value.trim();
+        const doubaoKey = document.getElementById('doubao-api-key').value.trim();
+        const sonioxKey = document.getElementById('soniox-api-key').value.trim();
+        const deeplKey = document.getElementById('deepl-api-key').value.trim();
+        const openrouterKey = document.getElementById('openrouter-api-key').value.trim();
+        const hasOpenrouterKey = envStatus.openrouter.api_key_set || !!openrouterKey;
 
-        if (!dashscopeKey) {
+        const enableTranslation = document.getElementById('enable-translation').checked;
+        const translationApiSelect = document.getElementById('translation-api-type');
+        let translationApiType = translationApiSelect.value;
+
+        // 当前配置是否需要 DashScope Key
+        const dashscopeRequiredByAsr = asrBackend === 'qwen' || asrBackend === 'dashscope';
+        const dashscopeRequiredByTranslation = enableTranslation && translationApiType === 'qwen_mt';
+        const requiresDashscopeKey = dashscopeRequiredByAsr || dashscopeRequiredByTranslation;
+
+        if (requiresDashscopeKey && !dashscopeKey) {
             showMessage('❌ ' + t('msg.dashscopeRequired'), 'error');
             startBtn.disabled = false;
             startBtn.textContent = t('btn.startService');
@@ -815,37 +860,49 @@ async function startService() {
             return;
         }
 
-        // 验证 DashScope API Key格式
-        const checkDashscopeResponse = await fetch(`${API_BASE}/check-api-key`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ api_key: dashscopeKey }),
-        });
-
-        const checkDashscopeResult = await checkDashscopeResponse.json();
-
-        if (!checkDashscopeResult.valid) {
-            // 后端返回消息ID，需要本地化
-            const localizedMsg = localizeBackendMessage(checkDashscopeResult.message_id, checkDashscopeResult.message);
-            showMessage('❌ ' + t('msg.dashscopeValidationFailed') + localizedMsg, 'error');
+        if (asrBackend === 'doubao_file' && !doubaoKey) {
+            showMessage('❌ ' + t('msg.doubaoKeyRequired'), 'error');
             startBtn.disabled = false;
             startBtn.textContent = t('btn.startService');
 
-            // 高亮并震动 API Key 输入框
-            highlightAPIKeyInput('dashscope-api-key');
+            const apiKeysSection = document.getElementById('api-keys');
+            if (apiKeysSection.classList.contains('collapsed')) {
+                toggleCollapsible('api-keys');
+            }
+            highlightAPIKeyInput('doubao-api-key');
 
             return;
         }
 
-        // 检查翻译API所需的 Key 是否齐全
-        const enableTranslation = document.getElementById('enable-translation').checked;
-        const translationApiSelect = document.getElementById('translation-api-type');
-        let translationApiType = translationApiSelect.value;
-        const deeplKey = document.getElementById('deepl-api-key').value.trim();
-        const openrouterKey = document.getElementById('openrouter-api-key').value.trim();
-        const hasOpenrouterKey = envStatus.openrouter.api_key_set || !!openrouterKey;
+        if (asrBackend === 'soniox' && !sonioxKey) {
+            showMessage('❌ ' + t('msg.sonioxKeyRequired'), 'error');
+            startBtn.disabled = false;
+            startBtn.textContent = t('btn.startService');
+            highlightAPIKeyInput('soniox-api-key');
+
+            return;
+        }
+
+        if (requiresDashscopeKey) {
+            const checkDashscopeResponse = await fetch(`${API_BASE}/check-api-key`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ api_key: dashscopeKey }),
+            });
+
+            const checkDashscopeResult = await checkDashscopeResponse.json();
+
+            if (!checkDashscopeResult.valid) {
+                const localizedMsg = localizeBackendMessage(checkDashscopeResult.message_id, checkDashscopeResult.message);
+                showMessage('❌ ' + t('msg.dashscopeValidationFailed') + localizedMsg, 'error');
+                startBtn.disabled = false;
+                startBtn.textContent = t('btn.startService');
+                highlightAPIKeyInput('dashscope-api-key');
+                return;
+            }
+        }
 
         if (enableTranslation) {
             const requiresDeeplKey = translationApiType === 'deepl' && !deeplKey;
@@ -863,7 +920,6 @@ async function startService() {
             }
         }
 
-        // 所有检查通过，先同步配置到服务器
         try {
             await saveConfig(true); // autoSave = true，不显示成功消息
             console.log('✓ 配置已同步到服务器');
@@ -875,26 +931,14 @@ async function startService() {
             return;
         }
 
-        // 准备 API Keys
-        const sonioxKey = document.getElementById('soniox-api-key').value.trim();
         const apiKeys = {
             dashscope: dashscopeKey,
             deepl: deeplKey,
             openrouter: openrouterKey,
-            soniox: sonioxKey
+            doubao: doubaoKey,
+            soniox: sonioxKey,
         };
 
-        // 检查 Soniox 后端是否需要 API Key
-        const asrBackend = document.getElementById('asr-backend').value;
-        if (asrBackend === 'soniox' && !sonioxKey) {
-            showMessage('❌ ' + t('msg.sonioxKeyRequired'), 'error');
-            startBtn.disabled = false;
-            startBtn.textContent = t('btn.startService');
-            highlightAPIKeyInput('soniox-api-key');
-            return;
-        }
-
-        // 启动服务
         const response = await fetch(`${API_BASE}/service/start`, {
             method: 'POST',
             headers: {

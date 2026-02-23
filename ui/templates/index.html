@@ -275,6 +275,19 @@
                         </div>
 
                         <div class="api-key-group">
+                            <label for="doubao-api-key" data-i18n="label.doubaoKey">火山引擎 豆包语音识别 API Key</label>
+                            <input type="password" id="doubao-api-key" class="form-control" placeholder="x-api-key 或 appid:access-key">
+                            <small class="form-text">
+                                <span data-i18n="hint.doubaoKey">用于豆包录音文件识别后端。</span>
+                            </small>
+                            <small class="form-text">
+                                <a href="https://console.volcengine.com/speech/new/setting/apikeys" target="_blank" data-i18n="link.getApiKey">获取API Key
+                                    →</a>
+                            </small>
+
+                        </div>
+
+                        <div class="api-key-group">
                             <label for="soniox-api-key" data-i18n="label.sonioxKey">Soniox API Key (可选，用于多语言识别)</label>
                             <input type="password" id="soniox-api-key" class="form-control" placeholder="...">
                             <small class="form-text">
@@ -299,6 +312,7 @@
                                 data-restart-required="true">
                                 <option value="qwen" data-i18n="asr.qwen">Qwen3 ASR（中文最准）</option>
                                 <option value="dashscope" data-i18n="asr.dashscope">Fun-ASR（备用）</option>
+                                <option value="doubao_file" data-i18n="asr.doubaoFile">豆包录音文件识别（必须使用切换麦，每次闭麦后进行识别）</option>
                                 <option value="soniox" data-i18n="asr.soniox">Soniox（支持多语混讲）</option>
                             </select>
                         </div>

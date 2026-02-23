@@ -38,7 +38,7 @@ class GoogleDictionaryAPI(BaseTranslationAPI):
         # 提前进行一次翻译以建立长连接。
         # 注意：当在运行中的事件循环线程里初始化时，不能同步阻塞执行（会触发 event loop already running）。
         try:
-            asyncio.get_running_loop()
+            asyncio.get_running_loop()  #@IgnoreException
             in_running_loop = True
         except RuntimeError:
             in_running_loop = False
@@ -207,7 +207,7 @@ class GoogleDictionaryAPI(BaseTranslationAPI):
         # - 若当前线程没有运行中的 event loop：复用/创建 self._loop
         # - 若当前线程正处于运行中的 event loop 回调：用临时新 loop 执行，避免 run_until_complete 报错
         try:
-            asyncio.get_running_loop()
+            asyncio.get_running_loop()  #@IgnoreException
             in_running_loop = True
         except RuntimeError:
             in_running_loop = False
