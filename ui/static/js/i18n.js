@@ -96,8 +96,8 @@ const translations = {
         'label.openrouterKey': 'OpenRouter API Key (可选，用于LLM翻译)',
         'hint.openrouterEnvLocked': '已从环境变量读取，输入框已锁定',
         'placeholder.openrouterEnvConfigured': '已在环境变量配置',
-        'label.doubaoKey': '豆包录音文件 API Key（x-api-key 或 AppID:AccessKey）',
-        'hint.doubaoKey': '用于豆包录音文件识别后端，支持 x-api-key 或 AppID:AccessKey。',
+        'label.doubaoKey': '豆包录音文件 API Key',
+        'hint.doubaoKey': '用于豆包录音文件识别后端。',
 
         // 语音识别设置
         'section.asrSettings': '语音识别设置',
@@ -189,7 +189,7 @@ const translations = {
         'msg.autoSwitchToGoogle': '未检测到所选翻译接口的 API Key，已自动切换为 Google Dictionary。',
         'msg.sonioxKeyRequired': 'Soniox 后端需要配置 API Key',
         'msg.doubaoKeyRequired': '豆包录音文件后端需要配置 API Key',
-        'msg.doubaoKeyFormat': '豆包 API Key 格式无效，应为 x-api-key 或 AppID:AccessKey',
+        'msg.doubaoKeyFormat': '豆包 API Key 无效',
 
         // 语言选择器
         'label.uiLanguage': '界面语言'
@@ -269,8 +269,8 @@ const translations = {
         'label.openrouterKey': 'OpenRouter API Key (optional, for LLM translation)',
         'hint.openrouterEnvLocked': 'Loaded from environment variable; input is locked',
         'placeholder.openrouterEnvConfigured': 'Configured via environment variable',
-        'label.doubaoKey': 'Doubao File ASR API Key (x-api-key or AppID:AccessKey)',
-        'hint.doubaoKey': 'Used by Doubao file transcription backend. Supports x-api-key or AppID:AccessKey.',
+        'label.doubaoKey': 'Doubao File ASR API Key',
+        'hint.doubaoKey': 'Used by Doubao file transcription backend.',
 
         // Speech recognition settings
         'section.asrSettings': 'Speech Recognition Settings',
@@ -362,7 +362,7 @@ const translations = {
         'msg.autoSwitchToGoogle': 'API Key for selected translation API not found, automatically switched to Google Dictionary.',
         'msg.sonioxKeyRequired': 'Soniox backend requires API Key',
         'msg.doubaoKeyRequired': 'Doubao file backend requires API Key',
-        'msg.doubaoKeyFormat': 'Invalid Doubao API Key format. Expected x-api-key or AppID:AccessKey',
+        'msg.doubaoKeyFormat': 'Invalid Doubao API Key',
 
         // Language selector
         'label.uiLanguage': 'UI Language'
@@ -436,8 +436,8 @@ const translations = {
         'label.openrouterKey': 'OpenRouter API Key（任意、LLM 翻訳用）',
         'hint.openrouterEnvLocked': '環境変数から読み込み済みのため、入力欄はロックされています',
         'placeholder.openrouterEnvConfigured': '環境変数で設定済み',
-        'label.doubaoKey': 'Doubao 録音ファイル API Key（x-api-key または AppID:AccessKey）',
-        'hint.doubaoKey': 'Doubao 録音ファイル認識バックエンド用。x-api-key または AppID:AccessKey に対応。',
+        'label.doubaoKey': 'Doubao 録音ファイル API Key',
+        'hint.doubaoKey': 'Doubao 録音ファイル認識バックエンド用。',
 
         'section.asrSettings': '音声認識設定',
         'label.asrBackend': '認識バックエンド',
@@ -524,7 +524,7 @@ const translations = {
         'msg.autoSwitchToGoogle': '選択した翻訳 API の API Key が見つからないため、Google Dictionary に自動切替しました。',
         'msg.sonioxKeyRequired': 'Soniox バックエンドには API Key が必要です',
         'msg.doubaoKeyRequired': 'Doubao 録音ファイルバックエンドには API Key が必要です',
-        'msg.doubaoKeyFormat': 'Doubao API Key 形式が無効です。x-api-key または AppID:AccessKey 形式で入力してください',
+        'msg.doubaoKeyFormat': 'Doubao API Key が無効です',
 
         'label.uiLanguage': '表示言語'
     },
@@ -597,8 +597,8 @@ const translations = {
         'label.openrouterKey': 'OpenRouter API Key (선택, LLM 번역용)',
         'hint.openrouterEnvLocked': '환경 변수에서 로드되어 입력란이 잠겨 있습니다',
         'placeholder.openrouterEnvConfigured': '환경 변수로 설정됨',
-        'label.doubaoKey': 'Doubao 파일 ASR API Key (x-api-key 또는 AppID:AccessKey)',
-        'hint.doubaoKey': 'Doubao 파일 음성 인식 백엔드용입니다. x-api-key 또는 AppID:AccessKey를 지원합니다.',
+        'label.doubaoKey': 'Doubao 파일 ASR API Key',
+        'hint.doubaoKey': 'Doubao 파일 음성 인식 백엔드용입니다.',
 
         'section.asrSettings': '음성 인식 설정',
         'label.asrBackend': '인식 백엔드',
@@ -685,7 +685,7 @@ const translations = {
         'msg.autoSwitchToGoogle': '선택한 번역 API의 API Key를 찾을 수 없어 Google Dictionary로 자동 전환했습니다.',
         'msg.sonioxKeyRequired': 'Soniox 백엔드는 API Key가 필요합니다',
         'msg.doubaoKeyRequired': 'Doubao 파일 백엔드는 API Key가 필요합니다',
-        'msg.doubaoKeyFormat': 'Doubao API Key 형식이 올바르지 않습니다. x-api-key 또는 AppID:AccessKey 형식이어야 합니다',
+        'msg.doubaoKeyFormat': 'Doubao API Key가 올바르지 않습니다',
 
         'label.uiLanguage': 'UI 언어'
     }

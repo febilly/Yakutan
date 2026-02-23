@@ -49,7 +49,7 @@ class DoubaoFileSpeechRecognizer(SpeechRecognizer):
         resolved_app_key = str(api_app_key or "").strip()
         resolved_access_key = str(api_access_key or "").strip()
         if not resolved_api_key and (not resolved_app_key or not resolved_access_key):
-            raise ValueError("豆包录音文件识别需要 x-api-key 或 api_app_key+api_access_key")
+            raise ValueError("豆包录音文件识别需要 API Key")
 
         self._lock = threading.Lock()
         self._callback: Optional[SpeechRecognitionCallback] = None

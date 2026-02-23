@@ -51,10 +51,8 @@ def _normalize_qwen_language(lang: Optional[str]) -> Optional[str]:
 def _resolve_doubao_credentials() -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Resolve Doubao credentials from env vars.
 
-    支持两种方式：
-    1) DOUBAO_API_KEY="x-api-key"
-    2) DOUBAO_APP_ID + DOUBAO_ACCESS_KEY
-    3) DOUBAO_API_KEY="appid:access_key"
+    优先读取 DOUBAO_API_KEY。
+    同时兼容 DOUBAO_APP_ID + DOUBAO_ACCESS_KEY 组合方式。
     """
     app_id = os.environ.get('DOUBAO_APP_ID', '').strip()
     access_key = os.environ.get('DOUBAO_ACCESS_KEY', '').strip()
@@ -204,7 +202,7 @@ def create_recognizer(
     elif backend == 'doubao_file':
         doubao_api_key, doubao_app_id, doubao_access_key = _resolve_doubao_credentials()
         if not doubao_api_key and not (doubao_app_id and doubao_access_key):
-            raise RuntimeError('豆包录音文件识别缺少凭证，请设置 DOUBAO_API_KEY（x-api-key 或 appid:access_key）')
+            raise RuntimeError('豆包录音文件识别缺少凭证，请设置 DOUBAO_API_KEY')
 
         recognition_kwargs = {
             'api_key': doubao_api_key,
