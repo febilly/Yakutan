@@ -1,5 +1,5 @@
 """
-OpenAI-compatible client helper.
+OpenAI-compatible LLM client helper.
 Shared API key rotation and client construction.
 """
 import os
@@ -29,13 +29,13 @@ class OpenAICompatClientBase:
         self._api_keys = self._parse_api_keys(self._resolve_raw_api_keys())
         if not self._api_keys:
             raise ValueError(
-                "OpenRouter API Key 未设置。请在网页控制面板的 'API Keys 配置' 中填写 OpenRouter API Key。"
+                "LLM API Key 未设置。请在网页控制面板的 '翻译 API 设置' 中填写 LLM 配置。"
             )
         self._key_index = 0
         self.api_key = self._api_keys[0]
 
-        self.app_url = os.getenv("OPENROUTER_APP_URL", "")
-        self.app_title = os.getenv("OPENROUTER_APP_TITLE", "")
+        self.app_url = os.getenv("LLM_APP_URL", "") or os.getenv("OPENROUTER_APP_URL", "")
+        self.app_title = os.getenv("LLM_APP_TITLE", "") or os.getenv("OPENROUTER_APP_TITLE", "")
 
         self._create_client()
 
@@ -47,6 +47,9 @@ class OpenAICompatClientBase:
 
     @staticmethod
     def _resolve_raw_api_keys() -> str:
+        llm_keys = os.getenv("LLM_API_KEY", "").strip()
+        if llm_keys:
+            return llm_keys
         openai_keys = os.getenv("OPENAI_API_KEY", "").strip()
         if openai_keys:
             return openai_keys

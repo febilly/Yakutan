@@ -70,6 +70,103 @@ def is_streaming_translation_mode(api_type: str) -> bool:
 def is_streaming_deepl_hybrid_mode() -> bool:
     return config.TRANSLATION_API_TYPE == 'openrouter_streaming_deepl_hybrid'
 
+
+DUAL_OUTPUT_SEPARATOR = "\n"
+DUAL_OUTPUT_MAX_CHARS_PER_RESULT = 71
+
+
+def _normalize_optional_language_code(language: Optional[str]) -> Optional[str]:
+    if language is None:
+        return None
+    normalized = str(language).strip()
+    return normalized or None
+
+
+def _normalize_lang_code(lang):
+    """标准化语言代码"""
+    if not lang:
+        return 'auto'
+    lang_lower = str(lang).lower()
+    if lang_lower in ['zh', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant']:
+        return 'zh'
+    if lang_lower in ['en', 'en-us', 'en-gb']:
+        return 'en'
+    return lang_lower
+
+
+def has_secondary_translation_target() -> bool:
+    return _normalize_optional_language_code(getattr(config, 'SECONDARY_TARGET_LANGUAGE', None)) is not None
+
+
+def resolve_output_target_language(source_language: str, requested_target_language: Optional[str]) -> Optional[str]:
+    target_language = _normalize_optional_language_code(requested_target_language)
+    if target_language is None:
+        return None
+
+    fallback_language = _normalize_optional_language_code(getattr(config, 'FALLBACK_LANGUAGE', None))
+    if fallback_language and _normalize_lang_code(source_language) == _normalize_lang_code(target_language):
+        return fallback_language
+
+    return target_language
+
+
+def _sanitize_output_line(text: str) -> str:
+    if not text:
+        return ""
+    normalized = text.replace('\r\n', '\n').replace('\r', '\n')
+    return " ".join(part.strip() for part in normalized.split('\n') if part.strip())
+
+
+def limit_dual_output_text(text: str, max_chars: int = DUAL_OUTPUT_MAX_CHARS_PER_RESULT) -> str:
+    sanitized = _sanitize_output_line(text)
+    if len(sanitized) <= max_chars:
+        return sanitized
+    return sanitized[:max_chars].rstrip()
+
+
+def translate_with_backend(
+    translator_instance: ContextAwareTranslator,
+    deepl_translator_instance: Optional[ContextAwareTranslator],
+    text: str,
+    target_language: str,
+    previous_translation: Optional[str] = None,
+    prefer_deepl: bool = False,
+) -> str:
+    translate_kwargs = {
+        'source_language': config.SOURCE_LANGUAGE,
+        'target_language': target_language,
+        'context_prefix': config.CONTEXT_PREFIX,
+        'is_partial': False,
+    }
+    if previous_translation is not None:
+        translate_kwargs['previous_translation'] = previous_translation
+
+    if prefer_deepl and deepl_translator_instance is not None:
+        translated_text = deepl_translator_instance.translate(text, **translate_kwargs)
+        if translated_text and not translated_text.startswith("[ERROR]"):
+            return translated_text
+
+    return translator_instance.translate(text, **translate_kwargs)
+
+
+def get_display_translation_text(translated_text: str, target_language: str) -> str:
+    display_text = add_furigana_if_needed(translated_text, target_language)
+    return add_pinyin_if_needed(display_text, target_language)
+
+
+def build_dual_output_display(primary_text: str, secondary_text: Optional[str]) -> str:
+    output_lines = [limit_dual_output_text(primary_text)]
+    if secondary_text is not None:
+        output_lines.append(limit_dual_output_text(secondary_text))
+    return DUAL_OUTPUT_SEPARATOR.join(output_lines)
+
+
+def build_streaming_output_line(text: str) -> str:
+    formatted_text = _sanitize_output_line(text)
+    if formatted_text:
+        return f"{formatted_text}……"
+    return "……"
+
 # ============ 可选的日语假名标注支持 ============
 try:
     from pykakasi import kakasi as _kakasi_factory
@@ -250,8 +347,10 @@ def reinitialize_translator():
     """根据当前配置动态（重）初始化翻译器实例。
     在运行时切换翻译 API 或目标语言后调用此函数以使后端使用新配置。
     """
-    global translation_api, translator, backwards_translation_api, backwards_translator
+    global translation_api, translator, secondary_translation_api, secondary_translator
+    global backwards_translation_api, backwards_translator
     global deepl_fallback_translation_api, deepl_fallback_translator
+    global secondary_deepl_fallback_translation_api, secondary_deepl_fallback_translator
 
     if is_streaming_translation_mode(config.TRANSLATION_API_TYPE):
         config.TRANSLATE_PARTIAL_RESULTS = True
@@ -272,14 +371,27 @@ def reinitialize_translator():
     else:  # 默认使用 qwen_mt
         from translators.translation_apis.qwen_mt_api import QwenMTAPI as TranslationAPIClass
 
+    def _build_context_translator(api_factory, target_language: str):
+        translation_api_instance = api_factory()
+        translator_instance = ContextAwareTranslator(
+            translation_api=translation_api_instance,
+            max_context_size=6,
+            target_language=target_language,
+            context_aware=True
+        )
+        return translation_api_instance, translator_instance
+
     # 创建新的翻译 API 实例并注入 ContextAwareTranslator
-    translation_api = TranslationAPIClass()
-    translator = ContextAwareTranslator(
-        translation_api=translation_api,
-        max_context_size=6,
-        target_language=config.TARGET_LANGUAGE,
-        context_aware=True
-    )
+    translation_api, translator = _build_context_translator(TranslationAPIClass, config.TARGET_LANGUAGE)
+
+    secondary_translation_api = None
+    secondary_translator = None
+    secondary_target_language = _normalize_optional_language_code(getattr(config, 'SECONDARY_TARGET_LANGUAGE', None))
+    if secondary_target_language:
+        secondary_translation_api, secondary_translator = _build_context_translator(
+            TranslationAPIClass,
+            secondary_target_language,
+        )
 
     # 反向翻译器保持使用原先的后端（Google Dictionary），重新创建以确保同步配置
     backwards_translation_api = BackwardsTranslationAPI()
@@ -292,16 +404,20 @@ def reinitialize_translator():
 
     deepl_fallback_translation_api = None
     deepl_fallback_translator = None
+    secondary_deepl_fallback_translation_api = None
+    secondary_deepl_fallback_translator = None
     if is_streaming_deepl_hybrid_mode():
         try:
             from translators.translation_apis.deepl_api import DeepLAPI
-            deepl_fallback_translation_api = DeepLAPI()
-            deepl_fallback_translator = ContextAwareTranslator(
-                translation_api=deepl_fallback_translation_api,
-                max_context_size=6,
-                target_language=config.TARGET_LANGUAGE,
-                context_aware=True
+            deepl_fallback_translation_api, deepl_fallback_translator = _build_context_translator(
+                DeepLAPI,
+                config.TARGET_LANGUAGE,
             )
+            if secondary_target_language:
+                secondary_deepl_fallback_translation_api, secondary_deepl_fallback_translator = _build_context_translator(
+                    DeepLAPI,
+                    secondary_target_language,
+                )
         except Exception as e:
             logger.warning(f"[Translation] 混合模式下 DeepL 初始化失败，将回退 LLM 终译: {e}")
 
@@ -343,6 +459,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
     def __init__(self):
         self.loop = None  # 将在主线程中设置
         self.last_partial_translation = None # 用于流式翻译
+        self.last_partial_translation_secondary = None
         self.translating_partial = False # 标记是否正在进行流式翻译
         self.last_partial_source_segment = None
         self.pending_partial_segment = None
@@ -363,14 +480,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
     @staticmethod
     def _normalize_lang(lang):
         """标准化语言代码"""
-        if not lang:
-            return 'auto'
-        lang_lower = lang.lower()
-        if lang_lower in ['zh', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant']:
-            return 'zh'
-        if lang_lower in ['en', 'en-us', 'en-gb']:
-            return 'en'
-        return lang_lower
+        return _normalize_lang_code(lang)
 
     @staticmethod
     def _extract_streaming_segment(text: str) -> Optional[str]:
@@ -390,6 +500,11 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
     
     def on_session_started(self) -> None:
         logger.info('Speech recognizer session opened.')
+        self.last_partial_translation = None
+        self.last_partial_translation_secondary = None
+        self.last_partial_source_segment = None
+        self.pending_partial_segment = None
+        self._latest_partial_request_id = 0
         self.partial_translation_update_count = 0
         self._prefer_deepl_on_next_final = False
         self._final_output_version = 0
@@ -411,20 +526,45 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             # 检测实际语言（即使手动指定了源语言，也要检测识别结果的真实语言）
             detected_lang_info = language_detector.detect(segment)
             detected_lang = detected_lang_info['language']
+            actual_target = resolve_output_target_language(detected_lang, config.TARGET_LANGUAGE)
+            requested_secondary_target = _normalize_optional_language_code(
+                getattr(config, 'SECONDARY_TARGET_LANGUAGE', None)
+            )
+            actual_secondary_target = resolve_output_target_language(detected_lang, requested_secondary_target)
+            use_secondary_output = actual_secondary_target is not None and secondary_translator is not None
+
+            # 按“发送翻译请求”计数：在真正发起请求前递增
+            self.partial_translation_update_count += 1
             
             # 在 executor 中运行同步翻译
             loop = asyncio.get_running_loop()
-            translated_text = await loop.run_in_executor(
-                executor, 
+            primary_future = loop.run_in_executor(
+                executor,
                 lambda: translator.translate(
                     segment,
                     source_language='auto',
-                    target_language=config.TARGET_LANGUAGE,
+                    target_language=actual_target,
                     context_prefix=config.CONTEXT_PREFIX,
                     is_partial=True,
                     previous_translation=self.last_partial_translation
                 )
             )
+            secondary_future = None
+            if use_secondary_output:
+                secondary_future = loop.run_in_executor(
+                    executor,
+                    lambda: secondary_translator.translate(
+                        segment,
+                        source_language='auto',
+                        target_language=actual_secondary_target,
+                        context_prefix=config.CONTEXT_PREFIX,
+                        is_partial=True,
+                        previous_translation=self.last_partial_translation_secondary
+                    )
+                )
+
+            translated_text = await primary_future
+            secondary_translated_text = await secondary_future if secondary_future is not None else None
             if (
                 request_id != self._latest_partial_request_id or
                 finalized_seq != self._finalized_seq or
@@ -435,30 +575,40 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             
             if translated_text and not translated_text.startswith("[ERROR]"):
                 self.last_partial_translation = translated_text
-                self.partial_translation_update_count += 1
             else:
                 translated_text = ""
 
-            display_translation = add_furigana_if_needed(translated_text, config.TARGET_LANGUAGE)
-
-            translation_display = display_translation.strip()
-            if translation_display and not translation_display.endswith("……"):
-                translation_display = f"{translation_display}……"
-            elif not translation_display:
-                translation_display = "……"
-
-            show_tag = getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True)
-            if show_tag:
-                segment_display = f"{segment.strip()}……"
-                # 构建显示文本：使用检测到的实际语言
-                source_lang = self._normalize_lang(detected_lang)
-                target_lang = self._normalize_lang(config.TARGET_LANGUAGE)
-                display_text = f"[{source_lang}→{target_lang}] {translation_display} ({segment_display})"
-                # 如果消息过长，尝试去掉原文部分
-                if len(display_text) > 144:
-                    display_text = f"[{source_lang}→{target_lang}] {translation_display}"
+            if secondary_translated_text and not secondary_translated_text.startswith("[ERROR]"):
+                self.last_partial_translation_secondary = secondary_translated_text
             else:
-                display_text = translation_display
+                secondary_translated_text = ""
+
+            display_translation = get_display_translation_text(translated_text, actual_target)
+            translation_display = build_streaming_output_line(display_translation)
+
+            if use_secondary_output and actual_secondary_target is not None:
+                secondary_display_translation = get_display_translation_text(
+                    secondary_translated_text,
+                    actual_secondary_target,
+                )
+                secondary_translation_display = build_streaming_output_line(secondary_display_translation)
+                display_text = build_dual_output_display(
+                    translation_display,
+                    secondary_translation_display,
+                )
+            else:
+                show_tag = getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True)
+                if show_tag:
+                    segment_display = f"{segment.strip()}……"
+                    # 构建显示文本：使用检测到的实际语言
+                    source_lang = self._normalize_lang(detected_lang)
+                    target_lang = self._normalize_lang(actual_target)
+                    display_text = f"[{source_lang}→{target_lang}] {translation_display} ({segment_display})"
+                    # 如果消息过长，尝试去掉原文部分
+                    if len(display_text) > 144:
+                        display_text = f"[{source_lang}→{target_lang}] {translation_display}"
+                else:
+                    display_text = translation_display
             
             # 发送 OSC
             await osc_manager.send_text(display_text, ongoing=True)
@@ -525,15 +675,19 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 source_lang = source_lang_info['language']
 
                 normalized_source = self._normalize_lang(source_lang)
-                normalized_target = self._normalize_lang(config.TARGET_LANGUAGE)
+                requested_target = config.TARGET_LANGUAGE
+                requested_secondary_target = _normalize_optional_language_code(
+                    getattr(config, 'SECONDARY_TARGET_LANGUAGE', None)
+                )
 
-                if config.FALLBACK_LANGUAGE and normalized_source == normalized_target:
-                    actual_target = config.FALLBACK_LANGUAGE
-                    print(f'原文：{text} [{source_lang_info["language"]}]')
-                    print(f'检测到源语言与目标语言相同，使用备用语言: {config.FALLBACK_LANGUAGE}')
-                else:
-                    actual_target = config.TARGET_LANGUAGE
-                    print(f'原文：{text} [{source_lang_info["language"]}]')
+                actual_target = resolve_output_target_language(source_lang, requested_target)
+                actual_secondary_target = resolve_output_target_language(source_lang, requested_secondary_target)
+
+                print(f'原文：{text} [{source_lang_info["language"]}]')
+                if actual_target != _normalize_optional_language_code(requested_target):
+                    print(f'检测到主输出语言与源语言相同，使用备用语言: {config.FALLBACK_LANGUAGE}')
+                if requested_secondary_target and actual_secondary_target != requested_secondary_target:
+                    print(f'检测到第二输出语言与源语言相同，使用备用语言: {config.FALLBACK_LANGUAGE}')
 
                 use_deepl_final = False
                 max_updates = max(0, int(getattr(config, 'STREAMING_FINAL_DEEPL_MAX_UPDATES', 2)))
@@ -545,38 +699,45 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 ):
                     use_deepl_final = True
 
-                if use_deepl_final:
-                    translated_text = deepl_fallback_translator.translate(
+                use_secondary_output = actual_secondary_target is not None and secondary_translator is not None
+
+                if use_secondary_output:
+                    primary_future = executor.submit(
+                        translate_with_backend,
+                        translator,
+                        deepl_fallback_translator,
                         text,
-                        source_language=config.SOURCE_LANGUAGE,
-                        target_language=actual_target,
-                        context_prefix=config.CONTEXT_PREFIX,
-                        is_partial=False,
-                        previous_translation=self.last_partial_translation
+                        actual_target,
+                        self.last_partial_translation,
+                        use_deepl_final,
                     )
-                    if not translated_text or translated_text.startswith("[ERROR]"):
-                        translated_text = translator.translate(
-                            text,
-                            source_language=config.SOURCE_LANGUAGE,
-                            target_language=actual_target,
-                            context_prefix=config.CONTEXT_PREFIX,
-                            is_partial=False,
-                            previous_translation=self.last_partial_translation
-                        )
+                    secondary_future = executor.submit(
+                        translate_with_backend,
+                        secondary_translator,
+                        secondary_deepl_fallback_translator,
+                        text,
+                        actual_secondary_target,
+                        self.last_partial_translation_secondary,
+                        use_deepl_final,
+                    )
+                    translated_text = primary_future.result()
+                    secondary_translated_text = secondary_future.result()
                 else:
-                    translated_text = translator.translate(
+                    translated_text = translate_with_backend(
+                        translator,
+                        deepl_fallback_translator,
                         text,
-                        source_language=config.SOURCE_LANGUAGE,
-                        target_language=actual_target,
-                        context_prefix=config.CONTEXT_PREFIX,
-                        is_partial=False,
-                        previous_translation=self.last_partial_translation
+                        actual_target,
+                        self.last_partial_translation,
+                        use_deepl_final,
                     )
+                    secondary_translated_text = None
                 self._finalized_seq += 1
                 self._final_output_version += 1
                 
                 # 重置流式翻译状态
                 self.last_partial_translation = None
+                self.last_partial_translation_secondary = None
                 self.last_partial_source_segment = None
                 self.pending_partial_segment = None
                 self._latest_partial_request_id = 0
@@ -584,26 +745,40 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 self._prefer_deepl_on_next_final = False
                 
                 is_translated = True
-                print(f'目标语言：{actual_target}')
+                print(f'主目标语言：{actual_target}')
                 
                 # 为译文添加标注（日语假名/中文拼音）
-                display_translated_text = add_furigana_if_needed(translated_text, actual_target)
-                display_translated_text = add_pinyin_if_needed(display_translated_text, actual_target)
-                print(f'译文：{display_translated_text}')
+                display_translated_text = get_display_translation_text(translated_text, actual_target)
+                print(f'主译文：{display_translated_text}')
+
+                secondary_display_translated_text = None
+                if use_secondary_output and actual_secondary_target is not None:
+                    print(f'第二目标语言：{actual_secondary_target}')
+                    secondary_display_translated_text = get_display_translation_text(
+                        secondary_translated_text,
+                        actual_secondary_target,
+                    )
+                    print(f'第二译文：{secondary_display_translated_text}')
                 
                 # 为源文本添加标注（日语假名/中文拼音）
                 display_source_text = add_furigana_if_needed(text, source_lang)
                 display_source_text = add_pinyin_if_needed(display_source_text, source_lang)
 
-                show_tag = getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True)
-                if show_tag:
-                    display_text = f"[{normalized_source}→{actual_target}] {display_translated_text} ({display_source_text})"
-
-                    # 如果消息过长，尝试去掉原文部分
-                    if len(display_text) > 144:
-                        display_text = f"[{normalized_source}→{actual_target}] {display_translated_text}"
+                if use_secondary_output and secondary_display_translated_text is not None:
+                    display_text = build_dual_output_display(
+                        display_translated_text,
+                        secondary_display_translated_text,
+                    )
                 else:
-                    display_text = str(display_translated_text)
+                    show_tag = getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True)
+                    if show_tag:
+                        display_text = f"[{normalized_source}→{actual_target}] {display_translated_text} ({display_source_text})"
+
+                        # 如果消息过长，尝试去掉原文部分
+                        if len(display_text) > 144:
+                            display_text = f"[{normalized_source}→{actual_target}] {display_translated_text}"
+                    else:
+                        display_text = str(display_translated_text)
 
 
         if display_text is None:

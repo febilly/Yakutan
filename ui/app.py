@@ -60,8 +60,12 @@ def get_config_dict():
             'enable_translation': config.ENABLE_TRANSLATION,
             'source_language': config.SOURCE_LANGUAGE,
             'target_language': config.TARGET_LANGUAGE,
+            'secondary_target_language': getattr(config, 'SECONDARY_TARGET_LANGUAGE', None),
             'fallback_language': config.FALLBACK_LANGUAGE,
             'api_type': config.TRANSLATION_API_TYPE,
+            'llm_base_url': getattr(config, 'LLM_BASE_URL', ''),
+            'llm_model': getattr(config, 'LLM_MODEL', ''),
+            'openai_compat_extra_body_json': getattr(config, 'OPENAI_COMPAT_EXTRA_BODY_JSON', ''),
             'show_partial_results': config.SHOW_PARTIAL_RESULTS,
             'enable_furigana': getattr(config, 'ENABLE_JA_FURIGANA', False),
             'enable_pinyin': getattr(config, 'ENABLE_ZH_PINYIN', False),
@@ -118,6 +122,8 @@ def update_config(config_data):
                 config.SOURCE_LANGUAGE = trans['source_language']
             if 'target_language' in trans:
                 config.TARGET_LANGUAGE = trans['target_language']
+            if 'secondary_target_language' in trans:
+                config.SECONDARY_TARGET_LANGUAGE = trans['secondary_target_language'] if trans['secondary_target_language'] else None
             if 'fallback_language' in trans:
                 config.FALLBACK_LANGUAGE = trans['fallback_language'] if trans['fallback_language'] else None
             if 'api_type' in trans:
@@ -128,6 +134,17 @@ def update_config(config_data):
                     'openrouter_streaming',
                     'openrouter_streaming_deepl_hybrid',
                 )
+            if 'llm_base_url' in trans:
+                config.LLM_BASE_URL = (trans['llm_base_url'] or '').strip()
+            if 'llm_model' in trans:
+                config.LLM_MODEL = (trans['llm_model'] or '').strip()
+            if 'openai_compat_extra_body_json' in trans:
+                raw_extra_body = (trans['openai_compat_extra_body_json'] or '').strip()
+                if raw_extra_body:
+                    parsed_extra_body = json.loads(raw_extra_body)
+                    if not isinstance(parsed_extra_body, dict):
+                        return False, 'msg.invalidExtraBodyJson', 'OpenAI 兼容 extra_body 必须是 JSON 对象'
+                config.OPENAI_COMPAT_EXTRA_BODY_JSON = raw_extra_body
             if 'show_partial_results' in trans:
                 config.SHOW_PARTIAL_RESULTS = trans['show_partial_results']
             if 'enable_furigana' in trans:
@@ -159,10 +176,12 @@ def update_config(config_data):
             if 'type' in ld:
                 config.LANGUAGE_DETECTOR_TYPE = ld['type']
         
-        return True
+        return True, 'msg.configUpdated', '配置已更新'
+    except json.JSONDecodeError:
+        return False, 'msg.invalidExtraBodyJson', 'OpenAI 兼容 extra_body 不是合法的 JSON 对象'
     except Exception as e:
         print(f'Error updating config: {e}')
-        return False
+        return False, 'msg.configUpdateFailed', '配置更新失败'
 
 
 def run_service_async():
@@ -203,14 +222,14 @@ def get_config():
 @app.route('/api/env', methods=['GET'])
 def get_env_status():
     """获取环境变量状态（不返回敏感信息）"""
-    openai_api_key_set = bool(os.getenv('OPENAI_API_KEY'))
-    openrouter_api_key_set = bool(os.getenv('OPENROUTER_API_KEY'))
+    llm_api_key_set = bool(
+        os.getenv('LLM_API_KEY')
+        or os.getenv('OPENAI_API_KEY')
+        or os.getenv('OPENROUTER_API_KEY')
+    )
     return jsonify({
-        'openrouter': {
-            'api_key_set': openai_api_key_set or openrouter_api_key_set,
-        },
-        'openai': {
-            'api_key_set': openai_api_key_set,
+        'llm': {
+            'api_key_set': llm_api_key_set,
         },
     })
 
@@ -220,7 +239,8 @@ def update_config_api():
     """更新配置"""
     try:
         config_data = request.json
-        if update_config(config_data):
+        success, message_id, message = update_config(config_data)
+        if success:
             # 如果服务正在运行，通知主服务线程在下一次可行时重载翻译器实例（无需重启识别线程）
             try:
                 if service_status.get('running') and service_loop is not None:
@@ -230,9 +250,10 @@ def update_config_api():
             except Exception as e:
                 print(f'Error notifying service to reload translator: {e}')
 
-            return jsonify({'success': True, 'message_id': 'msg.configUpdated', 'message': '配置已更新'})
+            return jsonify({'success': True, 'message_id': message_id, 'message': message})
         else:
-            return jsonify({'success': False, 'message_id': 'msg.configUpdateFailed', 'message': '配置更新失败'}), 500
+            status_code = 400 if message_id == 'msg.invalidExtraBodyJson' else 500
+            return jsonify({'success': False, 'message_id': message_id, 'message': message}), status_code
     except Exception as e:
         print(f'Error updating config: {e}')
         return jsonify({'success': False, 'message_id': 'msg.configUpdateFailed', 'message': '配置更新失败'}), 500
@@ -343,8 +364,8 @@ def start_service():
         if 'deepl' in api_keys and api_keys['deepl']:
             os.environ['DEEPL_API_KEY'] = api_keys['deepl']
         
-        if 'openrouter' in api_keys and api_keys['openrouter']:
-            os.environ['OPENROUTER_API_KEY'] = api_keys['openrouter']
+        if 'llm' in api_keys and api_keys['llm']:
+            os.environ['LLM_API_KEY'] = api_keys['llm']
         
         if 'soniox' in api_keys and api_keys['soniox']:
             os.environ['SONIOX_API_KEY'] = api_keys['soniox']
@@ -441,6 +462,7 @@ def get_defaults():
             'enable_translation': True,
             'source_language': 'auto',
             'target_language': 'ja',
+            'secondary_target_language': None,
             'fallback_language': 'en',
             'api_type': 'deepl',
             'show_partial_results': False,

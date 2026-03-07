@@ -1,8 +1,8 @@
 """
-OpenRouter translation API implementation using hosted large language models.
-使用 OpenAI 兼容接口
+LLM translation API implementation using an OpenAI-compatible interface.
 支持普通翻译和流式翻译两种模式
 """
+import json
 from typing import Optional, List, Dict
 
 from .base_translation_api import BaseTranslationAPI
@@ -11,15 +11,32 @@ from openai_compat_client import OpenAICompatClientBase
 
 class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
     """
-    Translation API that routes requests through OpenRouter.
+    Generic LLM translation API based on an OpenAI-compatible endpoint.
     Supports both standard and streaming-optimized translation modes.
     """
 
     SUPPORTS_CONTEXT = True
-    
-    # OpenAI 兼容端点（优先 OPENAI_BASE_URL）
-    BASE_URL = config.OPENAI_COMPAT_BASE_URL
 
+    LANGUAGE_NAME_MAP = {
+        'zh': 'Chinese',
+        'zh-cn': 'Simplified Chinese',
+        'zh-tw': 'Traditional Chinese',
+        'zh-hans': 'Simplified Chinese',
+        'zh-hant': 'Traditional Chinese',
+        'en': 'English',
+        'en-us': 'American English',
+        'en-gb': 'British English',
+        'ja': 'Japanese',
+        'ko': 'Korean',
+        'es': 'Spanish',
+        'fr': 'French',
+        'de': 'German',
+        'ru': 'Russian',
+        'ar': 'Arabic',
+        'pt': 'Portuguese',
+        'it': 'Italian',
+    }
+    
     def __init__(
         self,
         model: Optional[str] = None,
@@ -29,7 +46,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         streaming_mode: bool = False,
     ) -> None:
         """
-        初始化 OpenRouter API 客户端
+        初始化 LLM 翻译客户端
         
         Args:
             model: 使用的模型名称
@@ -38,13 +55,21 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             max_retries: 最大重试次数
             streaming_mode: 是否使用流式翻译模式（支持 previous_translation 和 is_partial）
         """
-        self.model = model or config.OPENAI_COMPAT_MODEL
+        self.model = model or config.LLM_MODEL
         self.temperature = temperature
         self.timeout = timeout
         self.max_retries = max_retries
         self.streaming_mode = streaming_mode
         
-        super().__init__(base_url=self.BASE_URL, model=self.model)
+        super().__init__(base_url=config.LLM_BASE_URL, model=self.model)
+
+    @classmethod
+    def _describe_language(cls, language_code: str) -> str:
+        normalized = (language_code or '').strip().lower()
+        if not normalized or normalized == 'auto':
+            return 'auto-detected source language'
+        language_name = cls.LANGUAGE_NAME_MAP.get(normalized, normalized.upper())
+        return f"{language_name} ({language_code})"
 
     def translate(
         self,
@@ -101,15 +126,14 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         else:
             context_block = "None."
         
-        source_descriptor = (
-            source_language
-            if source_language and source_language.lower() != "auto"
-            else "auto-detect the source language"
-        )
+        source_descriptor = self._describe_language(source_language)
+        target_descriptor = self._describe_language(target_language)
 
         system_prompt = (
-            "You are a helpful translation assistant. Always respond with a concise, light, and friendly tone. "
-            "Return only the translated text with no additional commentary."
+            "You are a strict translation assistant. "
+            f"Your output must be entirely in {target_descriptor}. "
+            "Do not answer in the source language. Do not explain anything. "
+            "Return only the translated text."
         )
 
         user_message = (
@@ -122,9 +146,11 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             "2. Preserve the original meaning, named entities, and essential formatting.\n"
             "3. Prefer natural phrasing that reads well for the target audience.\n"
             "4. Fix any obvious recognition errors in the source text.\n"
-            "5. Maintain consistency with the previous translations shown above.\n\n"
+            "5. Maintain consistency with the previous translations shown above.\n"
+            f"6. The response must be written in {target_descriptor} only.\n"
+            "7. If the draft in your head is not in the requested target language, rewrite it before answering.\n\n"
             "Task:\n"
-            f"Translate the text below inside <text> and </text> from **{source_descriptor}** to **{target_language}**.\n\n"
+            f"Translate the text below inside <text> and </text> from **{source_descriptor}** to **{target_descriptor}**.\n\n"
             "Text To Translate:\n"
             f"<text>{text}</text>"
         )
@@ -148,14 +174,17 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         """流式翻译模式（支持 partial 和 previous_translation）"""
         previous_translation = kwargs.get('previous_translation')
         is_partial = kwargs.get('is_partial', False)
+        source_descriptor = self._describe_language(source_language)
+        target_descriptor = self._describe_language(target_language)
 
         system_prompt = (
-            "You are a skilled bilingual translator assisting with VRChat conversations. "
-            f"Translate all provided source text into {target_language} while preserving intent, tone, and register. "
+            "You are a strict streaming translator assisting with VRChat conversations. "
+            f"Translate all provided source text from {source_descriptor} into {target_descriptor}. "
+            f"Your output must stay entirely in {target_descriptor}. "
             "Keep the style casual and friendly unless instructed otherwise. "
             "When a previous translation draft is supplied, behave like a streaming translator: reuse as much wording as possible and only make the smallest edits needed for accuracy and fluency. "
             "Maintain consistency with the previous translations in the conversation history. "
-            "Output only the translation without commentary."
+            "Never answer in the source language. Output only the translation without commentary."
         )
 
         user_sections = []
@@ -183,6 +212,8 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         else:
             user_sections.append("This is the final delivery for this utterance. Ensure the translation reads smoothly.")
 
+        user_sections.append(f"Mandatory output language: {target_descriptor}.")
+        user_sections.append("If any wording is not in the requested target language, rewrite it before responding.")
         user_sections.append("Return only the translation text.")
 
         messages = [
@@ -192,19 +223,46 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
 
         return self._call_api(messages)
 
+    @classmethod
+    def _merge_dicts(cls, base: Dict, override: Dict) -> Dict:
+        merged = dict(base)
+        for key, value in override.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = cls._merge_dicts(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+
+    @classmethod
+    def _build_configured_extra_body(cls) -> Dict:
+        raw_extra_body = (getattr(config, 'OPENAI_COMPAT_EXTRA_BODY_JSON', '') or '').strip()
+        if not raw_extra_body:
+            return {}
+        try:
+            custom_extra_body = json.loads(raw_extra_body)
+            if isinstance(custom_extra_body, dict):
+                return custom_extra_body
+            print('[LLM] Warning: OPENAI_COMPAT_EXTRA_BODY_JSON 不是 JSON 对象，已忽略')
+        except Exception as e:
+            print(f'[LLM] Warning: 解析 OPENAI_COMPAT_EXTRA_BODY_JSON 失败，已忽略: {e}')
+        return {}
+
     def _call_api(self, messages: List[Dict[str, str]]) -> str:
-        """调用 OpenRouter API"""
+        """调用 LLM API"""
         try:
             self._maybe_rotate_key()
-            # print(f"[OpenRouter] sending request: base_url={self.base_url}, model={self.model}, api_key_set={bool(self.api_key)}")
+            # print(f"[LLM] sending request: base_url={self.base_url}, model={self.model}, api_key_set={bool(self.api_key)}")
             request_kwargs: Dict[str, object] = {
                 "model": self.model,
                 "messages": messages,
                 "temperature": self.temperature,
                 "timeout": self.timeout,
             }
+            extra_body = self._build_configured_extra_body()
             if self._is_openrouter_base_url():
-                request_kwargs["extra_body"] = {"provider": {"sort": "latency"}}
+                extra_body = self._merge_dicts(extra_body, {"provider": {"sort": "latency"}})
+            if extra_body:
+                request_kwargs["extra_body"] = extra_body
             completion = self.client.chat.completions.create(**request_kwargs)
             
             if completion.choices and completion.choices[0].message.content:
@@ -214,15 +272,15 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             
         except Exception as e:
             error_msg = str(e)
-            print(f"[OpenRouter] API 调用错误: {error_msg}")
+            print(f"[LLM] API 调用错误: {error_msg}")
             return f"[ERROR] {error_msg}"
 
 
 
-# 为了向后兼容，保留 OpenRouterStreamingAPI 作为别名
+# 为了向后兼容，保留 OpenRouterStreamingAPI 这个别名类
 class OpenRouterStreamingAPI(OpenRouterAPI):
     """
-    Streaming-optimized translation API (alias for OpenRouterAPI with streaming_mode=True).
+    Streaming-optimized LLM translation API (alias for OpenRouterAPI with streaming_mode=True).
     保留此类以向后兼容。
     """
     
