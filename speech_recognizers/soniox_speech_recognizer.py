@@ -7,6 +7,8 @@ import threading
 import time
 from contextlib import suppress
 from typing import Any, Dict, List, Optional
+import config as app_config
+from resource_path import get_resource_path, get_user_data_path, ensure_dir
 
 try:
     from websockets.sync.client import connect as ws_connect
@@ -148,8 +150,59 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
         if self._enable_language_identification:
             config["enable_language_identification"] = True
         
+        # Context handling:
+        # 1. If user provided `context` via constructor, honor it (dict or list).
+        # 2. Otherwise, if hot words are enabled in config, load terms from
+        #    hot_words/ and hot_words_private/ text files and pass them as
+        #    context {"terms": [...]} to Soniox.
+        context_payload: Optional[Dict[str, Any]] = None
         if self._context:
-            config["context"] = self._context
+            if isinstance(self._context, dict):
+                # Allow either {'context': {...}} or a direct dict with keys like 'terms'/'text'
+                if "context" in self._context and isinstance(self._context["context"], dict):
+                    context_payload = self._context["context"]
+                else:
+                    context_payload = self._context
+            elif isinstance(self._context, list):
+                context_payload = {"terms": self._context}
+
+        # Try loading hot words from resource files when no explicit context provided
+        if context_payload is None and getattr(app_config, "ENABLE_HOT_WORDS", False):
+            terms: List[str] = []
+            try:
+                hot_dir = get_resource_path(app_config.HOT_WORDS_DIR)
+                hot_private_dir = get_user_data_path(app_config.HOT_WORDS_PRIVATE_DIR)
+                # Ensure private dir exists (may be created by user code elsewhere)
+                ensure_dir(hot_private_dir)
+
+                for dirpath in (hot_dir, hot_private_dir):
+                    if not os.path.isdir(dirpath):
+                        continue
+                    for fname in sorted(os.listdir(dirpath)):
+                        if not fname.lower().endswith(".txt"):
+                            continue
+                        fpath = os.path.join(dirpath, fname)
+                        try:
+                            with open(fpath, "r", encoding="utf-8") as fh:
+                                for line in fh:
+                                    w = line.strip()
+                                    if not w or w.startswith("#"):
+                                        continue
+                                    if w not in terms:
+                                        terms.append(w)
+                        except Exception:
+                            # ignore read errors per-file
+                            continue
+
+                if terms:
+                    # limit to reasonable size (align with HotWordsManager limits)
+                    context_payload = {"terms": terms[:500]}
+            except Exception:
+                # Fail silently; do not prevent recognizer from starting
+                context_payload = None
+
+        if context_payload:
+            config["context"] = context_payload
         
         # 合并额外参数
         config.update(self._extra_kwargs)

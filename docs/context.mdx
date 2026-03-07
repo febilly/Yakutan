@@ -1,0 +1,145 @@
+﻿# Context
+URL: /stt/concepts/context
+
+Learn how to use custom context to enhance trancription accuracy.
+
+## Overview
+
+Soniox Speech-to-Text AI lets you improve both **transcription** and
+**translation** accuracy by providing **context** with each session.
+
+Context helps the model **understand your domain**, **recognize important terms**,
+and apply **custom vocabulary** and **translation preferences**.
+
+Think of it as giving the model **your world** —
+what the conversation is about, which words are important, and how certain terms should be translated.
+
+***
+
+## Context sections
+
+You provide context through the `context` object that can include up to **four sections**,
+each improving accuracy in different ways:
+
+| Section             | Type                  | Description                                                    |
+| ------------------- | --------------------- | -------------------------------------------------------------- |
+| `general`           | array of JSON objects | Structured key-value information (domain, topic, intent, etc.) |
+| `text`              | string                | Longer free-form background text or related documents          |
+| `terms`             | array of strings      | Domain-specific or uncommon words                              |
+| `translation_terms` | array of JSON objects | Custom translations for ambiguous terms                        |
+
+All sections are optional — include only what's relevant for your use case.
+
+### General
+
+General information provides **baseline context** which guides the AI model.
+It helps the model adapt its vocabulary to the correct domain, improving **transcription** and
+**translation** quality and clarifying ambiguous words.
+
+It consists of structured **key-value pairs** describing the conversation **domain**, **topic**, **intent**, and other
+relevant metadata such as participant's names, organization, setting, location, etc.
+
+#### Example
+
+```json
+{
+  "context": {
+    "general": [
+      { "key": "domain",       "value": "Healthcare" },
+      { "key": "topic",        "value": "Diabetes management consultation" },
+      { "key": "doctor",       "value": "Dr. Martha Smith" },
+      { "key": "patient",      "value": "Mr. David Miller" },
+      { "key": "organization", "value": "St John's Hospital" }
+    ]
+  }
+}
+```
+
+### Text
+
+Provide longer unstructured text that expands on general information — examples include:
+
+* History of prior interactions with a customer.
+* Reference documents.
+* Background summaries.
+* Meeting notes.
+
+#### Example
+
+```json
+{
+  "context": {
+    "text": "The customer, Maria Lopez, contacted BrightWay Insurance to update
+    her auto policy after purchasing a new vehicle. Agent Daniel Kim reviewed the
+    changes, explained the premium adjustment, and offered a bundling discount.
+    Maria agreed to update the policy and scheduled a follow-up to consider
+    additional options."
+  }
+}
+```
+
+### Transcription terms
+
+Improve transcription accuracy of important or uncommon words and phrases
+that you expect in the audio — such as:
+
+* Domain or industry-specific terminology.
+* Brand or product names.
+* Rare, uncommon, or invented words.
+
+#### Example
+
+```json
+{
+  "context": {
+    "terms": [
+      "Celebrex", 
+      "Zyrtec", 
+      "Xanax",
+      "Prilosec", 
+      "Amoxicillin Clavulanate Potassium"
+    ]
+  }
+}
+```
+
+### Translation terms
+
+Control how specific words or phrases are translated — useful for:
+
+* Technical terminology.
+* Entity names.
+* Words with ambiguous domain-specific translations.
+* Idioms and figurative speech with non-literal meaning.
+
+#### Example for English → Spanish translation
+
+```json
+{
+  "context": {
+    "translation_terms": [
+      { "source": "Mr. Smith", "target": "Sr. Smith" },
+      { "source": "MRI",       "target": "RM" },
+      { "source": "St John's", "target": "St John's" },
+      { "source": "stroke",    "target": "ictus" }
+    ]
+  }
+}
+```
+
+***
+
+## Tips
+
+* Provide domain and topic in the `general` section for best accuracy.
+* Keep `general` short — ideally no more than **10** key-value pairs.
+* Use `terms` to ensure consistent spelling and casing of difficult entity names.
+* Use `translation_terms` to preserve terms like names or brands unchanged, e.g., `"St John's"` → `"St John's"`.
+
+***
+
+## Context size limit
+
+* Maximum **8,000 tokens** (\~10,000 characters).
+* Supports large blocks of text: glossaries, scripts, domain summaries.
+* If you exceed the limit, the API will return an error → trim or summarize first.
