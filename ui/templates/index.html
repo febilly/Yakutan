@@ -14,6 +14,7 @@
             <h1 data-i18n="header.title">🎤 Yakutan 控制面板</h1>
             <div class="header-right">
                 <div class="language-selector-wrapper">
+                    <span class="header-language-hint">Language</span>
                     <select id="language-selector" class="language-selector"></select>
                 </div>
                 <div class="status-indicator">
@@ -78,80 +79,49 @@
                     </div>
 
                     <div id="translation-options">
-                        <div class="form-group">
-                            <label for="target-language" data-i18n="label.targetLanguage">目标语言</label>
-                            <div class="language-input-group">
-                                <input type="text" id="target-language" class="form-control language-code-input"
-                                    placeholder="ja" onblur="onSettingChange()">
-                                <select id="target-language-select" class="form-control language-select"
-                                    onchange="applyLanguageSelection('target-language')">
-                                    <option value="" data-i18n="select.quickSelect">-- 快速选择 --</option>
-                                    <option value="zh-CN" data-i18n="lang.zhCN">简体中文 (zh-CN)</option>
-                                    <option value="zh-TW" data-i18n="lang.zhTW">繁体中文 (zh-TW)</option>
-                                    <option value="en" data-i18n="lang.en">英语 (en)</option>
-                                    <option value="en-GB" data-i18n="lang.enGB">英语（英式） (en-GB)</option>
-                                    <option value="ja" data-i18n="lang.ja">日语 (ja)</option>
-                                    <option value="ko" data-i18n="lang.ko">韩语 (ko)</option>
-                                    <option value="es" data-i18n="lang.es">西班牙语 (es)</option>
-                                    <option value="fr" data-i18n="lang.fr">法语 (fr)</option>
-                                    <option value="de" data-i18n="lang.de">德语 (de)</option>
-                                    <option value="ru" data-i18n="lang.ru">俄语 (ru)</option>
-                                    <option value="ar" data-i18n="lang.ar">阿拉伯语 (ar)</option>
-                                    <option value="pt" data-i18n="lang.pt">葡萄牙语 (pt)</option>
-                                    <option value="it" data-i18n="lang.it">意大利语 (it)</option>
-                                </select>
+                        <div class="language-settings-grid">
+                            <div class="form-group language-setting-item">
+                                <label for="target-language" data-i18n="label.targetLanguage">目标语言</label>
+                                <div class="language-combo" data-input-id="target-language">
+                                    <input type="text" id="target-language" class="form-control language-combo-input"
+                                        placeholder="ja" autocomplete="off" spellcheck="false"
+                                        onchange="onSettingChange()" onblur="onSettingChange()">
+                                    <button type="button" class="language-combo-toggle" aria-label="Select language">
+                                        <span class="language-combo-toggle-icon"></span>
+                                    </button>
+                                    <div class="language-combo-menu"></div>
+                                </div>
+                                <small class="form-text" data-i18n="hint.targetLanguage">点击右侧箭头选择语言，也可自行输入语言代码</small>
                             </div>
-                            <small class="form-text" data-i18n="hint.targetLanguage">可直接输入语言代码，或从下拉列表快速选择</small>
-                        </div>
 
-                        <div class="form-group">
-                            <label for="fallback-language"
-                                data-i18n="label.fallbackLanguage">备用语言（当源语言与目标语言相同时使用）</label>
-                            <div class="language-input-group">
-                                <input type="text" id="fallback-language" class="form-control language-code-input"
-                                    placeholder="en" onblur="onSettingChange()">
-                                <select id="fallback-language-select" class="form-control language-select"
-                                    onchange="applyLanguageSelection('fallback-language')">
-                                    <option value="" data-i18n="select.quickSelect">-- 快速选择 --</option>
-                                    <option value="" data-i18n="select.disabled">禁用</option>
-                                    <option value="zh-CN" data-i18n="lang.zhCN">简体中文 (zh-CN)</option>
-                                    <option value="zh-TW" data-i18n="lang.zhTW">繁体中文 (zh-TW)</option>
-                                    <option value="en" data-i18n="lang.en">英语 (en)</option>
-                                    <option value="en-GB" data-i18n="lang.enGB">英语（英式） (en-GB)</option>
-                                    <option value="ja" data-i18n="lang.ja">日语 (ja)</option>
-                                    <option value="ko" data-i18n="lang.ko">韩语 (ko)</option>
-                                    <option value="es" data-i18n="lang.es">西班牙语 (es)</option>
-                                    <option value="fr" data-i18n="lang.fr">法语 (fr)</option>
-                                    <option value="de" data-i18n="lang.de">德语 (de)</option>
-                                    <option value="ru" data-i18n="lang.ru">俄语 (ru)</option>
-                                    <option value="ar" data-i18n="lang.ar">阿拉伯语 (ar)</option>
-                                    <option value="pt" data-i18n="lang.pt">葡萄牙语 (pt)</option>
-                                    <option value="it" data-i18n="lang.it">意大利语 (it)</option>
-                                </select>
+                            <div class="form-group language-setting-item">
+                                <label for="secondary-target-language" data-i18n="label.secondaryTargetLanguage">第二输出语言</label>
+                                <div class="language-combo" data-input-id="secondary-target-language">
+                                    <input type="text" id="secondary-target-language" class="form-control language-combo-input"
+                                        placeholder="en" autocomplete="off" spellcheck="false"
+                                        onchange="onSettingChange()" onblur="onSettingChange()">
+                                    <button type="button" class="language-combo-toggle" aria-label="Select language">
+                                        <span class="language-combo-toggle-icon"></span>
+                                    </button>
+                                    <div class="language-combo-menu"></div>
+                                </div>
+                                <small class="form-text" data-i18n="hint.secondaryTargetLanguage">可选第二输出语言，启用后会并行输出两行译文</small>
                             </div>
-                            <small class="form-text" data-i18n="hint.fallbackLanguage">可直接输入语言代码，留空则禁用备用语言</small>
-                        </div>
-                    </div>
 
-                    <!-- 假名和拼音选项（并排显示，始终可见） -->
-                    <div class="switch-row">
-                        <div class="form-group" id="furigana-option">
-                            <label class="switch-label">
-                                <span data-i18n="label.enableFurigana">日语添加假名</span>
-                                <label class="switch">
-                                    <input type="checkbox" id="enable-furigana" onchange="onSettingChange()">
-                                    <span class="slider"></span>
-                                </label>
-                            </label>
-                        </div>
-                        <div class="form-group" id="pinyin-option">
-                            <label class="switch-label">
-                                <span data-i18n="label.enablePinyin">中文添加拼音</span>
-                                <label class="switch">
-                                    <input type="checkbox" id="enable-pinyin" onchange="onSettingChange()">
-                                    <span class="slider"></span>
-                                </label>
-                            </label>
+                            <div class="form-group language-setting-item">
+                                <label for="fallback-language"
+                                    data-i18n="label.fallbackLanguage">备用语言</label>
+                                <div class="language-combo" data-input-id="fallback-language">
+                                    <input type="text" id="fallback-language" class="form-control language-combo-input"
+                                        placeholder="en" autocomplete="off" spellcheck="false"
+                                        onchange="onSettingChange()" onblur="onSettingChange()">
+                                    <button type="button" class="language-combo-toggle" aria-label="Select language">
+                                        <span class="language-combo-toggle-icon"></span>
+                                    </button>
+                                    <div class="language-combo-menu"></div>
+                                </div>
+                                <small class="form-text" data-i18n="hint.fallbackLanguage">留空则禁用备用语言；当源语言与目标语言相同时会改用这里</small>
+                            </div>
                         </div>
                     </div>
 
@@ -180,11 +150,17 @@
                                 <option value="google_dictionary" data-i18n="api.googleDict">Google
                                     Dictionary（免费，更快，请注意网络连通性）</option>
                                 <option value="google_web" data-i18n="api.googleWeb">Google Web（免费，备用，请注意网络连通性）</option>
-                                <option value="openrouter" data-i18n="api.openrouter">OpenRouter（LLM）</option>
-                                <option value="openrouter_streaming_deepl_hybrid" data-i18n="api.openrouterStreamingDeeplHybrid">OpenRouter 流式 + DeepL 静音终译（混合）</option>
+                                <option value="openrouter" data-i18n="api.openrouter">LLM（自定义兼容接口）</option>
+                                <!--
+                                注意：此选项目前只是在界面中隐藏，相关前后端逻辑仍保留。
+                                以后若修改 LLM / AI 相关逻辑、配置项、校验或文案，请同步更新下面这段注释内容，避免这里过时。
+                                <option value="openrouter_streaming_deepl_hybrid" data-i18n="api.openrouterStreamingDeeplHybrid">LLM 流式 + DeepL 静音终译（混合）</option>
+                                -->
                             </select>
                             <small id="translation-api-warning" class="form-text"
                                 style="color: #e74c3c; display: none;"></small>
+                            <small id="qwen-mt-sensitive-words-hint" class="form-text" data-i18n="hint.sensitiveWordsRisk"
+                                style="display: none;">请注意敏感词问题，必要时请切换到 DeepL 或 Google 翻译</small>
                         </div>
 
                         <div class="form-group" id="openrouter-streaming-mode-group" style="display: none;">
@@ -196,6 +172,50 @@
                                 </label>
                             </label>
                             <small class="form-text" data-i18n="hint.streamingMode">启用后支持翻译部分结果（实时翻译未完成的句子）</small>
+                        </div>
+
+                        <div class="subsection llm-settings-wrapper" id="llm-settings-wrapper" style="display: none;">
+                            <div class="collapsible-header llm-settings-header" onclick="toggleCollapsible('llm-settings')">
+                                <h3 data-i18n="section.llmSettings">LLM 设置</h3>
+                                <span class="collapse-icon collapsed" id="llm-settings-icon">▶</span>
+                            </div>
+                            <div class="collapsible-content collapsed" id="llm-settings">
+                                <div class="form-group">
+                                    <label data-i18n="label.llmTemplate">模板</label>
+                                    <div class="template-button-row">
+                                        <button type="button" class="btn btn-subtle btn-small" onclick="applyLLMTemplate('dashscope-qwen35')"
+                                            data-i18n="btn.llmTemplateDashscopeQwen">阿里 Qwen3.5-Plus</button>
+                                        <button type="button" class="btn btn-subtle btn-small" onclick="applyLLMTemplate('openrouter')"
+                                            data-i18n="btn.llmTemplateOpenRouter">OpenRouter</button>
+                                    </div>
+                                    <small class="form-text" data-i18n="hint.llmTemplate">模板会直接填写下方配置；阿里模板会把当前 DashScope Key 复制到 LLM Key。</small>
+                                    <small class="form-text" data-i18n="hint.sensitiveWordsRisk">请注意敏感词问题，必要时请切换到 DeepL 或 Google 翻译</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="llm-base-url" data-i18n="label.llmBaseUrl">LLM 地址</label>
+                                    <input type="text" id="llm-base-url" class="form-control" placeholder="https://..."
+                                        onblur="onSettingChange()">
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="llm-model" data-i18n="label.llmModel">LLM 模型名</label>
+                                    <input type="text" id="llm-model" class="form-control" placeholder="qwen3.5-plus"
+                                        onblur="onSettingChange()">
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="llm-api-key" data-i18n="label.llmKey">LLM API Key</label>
+                                    <input type="password" id="llm-api-key" class="form-control" placeholder="sk-...">
+                                    <small class="form-text" data-i18n="hint.llmKey">仅在选择 LLM 翻译时使用。</small>
+                                </div>
+
+                                <div class="form-group" id="openai-compat-extra-body-group">
+                                    <label for="openai-compat-extra-body-json" data-i18n="label.openaiCompatExtraBodyJson">自定义 extra_body（可选）</label>
+                                    <input type="text" id="openai-compat-extra-body-json" class="form-control" placeholder='{"enable_thinking": false}' onblur="onSettingChange()">
+                                    <small class="form-text" data-i18n="hint.openaiCompatExtraBodyJson">仅对 LLM 翻译生效，不影响 Qwen-MT。留空则不发送 extra_body。</small>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="form-group">
@@ -262,20 +282,7 @@
                         </div>
 
                         <div class="api-key-group">
-                            <label for="openrouter-api-key" data-i18n="label.openrouterKey">OpenRouter API Key
-                                (可选，用于LLM翻译)</label>
-                            <input type="password" id="openrouter-api-key" class="form-control" placeholder="sk-or-...">
-                            <small class="form-text" id="openrouter-env-hint" style="display: none;">
-                                <span data-i18n="hint.openrouterEnvLocked">已从环境变量读取，输入框已锁定</span>
-                            </small>
-                            <small class="form-text">
-                                <a href="https://openrouter.ai/" target="_blank" data-i18n="link.getApiKey">获取API Key
-                                    →</a>
-                            </small>
-                        </div>
-
-                        <div class="api-key-group">
-                            <label for="doubao-api-key" data-i18n="label.doubaoKey">火山引擎 豆包语音识别 API Key</label>
+                            <label for="doubao-api-key" data-i18n="label.doubaoKey">豆包录音文件 API Key（可选）</label>
                             <input type="password" id="doubao-api-key" class="form-control" placeholder="API Key">
                             <small class="form-text">
                                 <span data-i18n="hint.doubaoKey">用于豆包录音文件识别后端。</span>
@@ -288,7 +295,7 @@
                         </div>
 
                         <div class="api-key-group">
-                            <label for="soniox-api-key" data-i18n="label.sonioxKey">Soniox API Key (可选，用于多语言识别)</label>
+                            <label for="soniox-api-key" data-i18n="label.sonioxKey">Soniox API Key（可选）</label>
                             <input type="password" id="soniox-api-key" class="form-control" placeholder="...">
                             <small class="form-text">
                                 <span data-i18n="hint.sonioxKey">支持60+语言的语音识别。</span>
@@ -343,11 +350,35 @@
                             </div>
                         </div>
 
-                        <div class="form-group">
-                            <label for="mute-delay" data-i18n="label.muteDelay">静音延迟（秒）</label>
-                            <input type="number" id="mute-delay" class="form-control" min="0" max="5" step="0.1"
-                                value="0.2" onchange="onSettingChange()">
-                            <small class="form-text" data-i18n="hint.muteDelay">静音后延迟停止识别的时间，防止漏掉最后一个字</small>
+                    </div>
+                </section>
+
+                <!-- 文本后处理（折叠） -->
+                <section class="card">
+                    <div class="collapsible-header" onclick="toggleCollapsible('text-post-processing')">
+                        <h2 data-i18n="section.textPostProcessing">文本后处理</h2>
+                        <span class="collapse-icon collapsed" id="text-post-processing-icon">▶</span>
+                    </div>
+                    <div class="collapsible-content collapsed" id="text-post-processing">
+                        <div class="switch-row">
+                            <div class="form-group" id="furigana-option">
+                                <label class="switch-label">
+                                    <span data-i18n="label.enableFurigana">日语添加假名</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="enable-furigana" onchange="onSettingChange()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                            </div>
+                            <div class="form-group" id="pinyin-option">
+                                <label class="switch-label">
+                                    <span data-i18n="label.enablePinyin">中文添加拼音</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="enable-pinyin" onchange="onSettingChange()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -370,6 +401,16 @@
                                     </label>
                                 </label>
                                 <small class="form-text" data-i18n="hint.showOriginalAndLangTag">关闭后只显示译文</small>
+                            </div>
+                        </div>
+
+                        <div class="subsection">
+                            <h3 data-i18n="subsection.micControl">麦克风控制</h3>
+                            <div class="form-group">
+                                <label for="mute-delay" data-i18n="label.muteDelay">静音延迟（秒）</label>
+                                <input type="number" id="mute-delay" class="form-control" min="0" max="5" step="0.1"
+                                    value="0.2" onchange="onSettingChange()">
+                                <small class="form-text" data-i18n="hint.muteDelay">静音后延迟停止识别的时间，防止漏掉最后一个字</small>
                             </div>
                         </div>
 

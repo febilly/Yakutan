@@ -16,6 +16,7 @@ const DEFAULT_LANGUAGE = 'zh-CN';
 
 // 本地存储键名
 const LANGUAGE_STORAGE_KEY = 'ui_language';
+const LANGUAGE_USER_SELECTED_KEY = 'ui_language_user_selected';
 
 // 当前语言
 let currentLanguage = DEFAULT_LANGUAGE;
@@ -44,14 +45,17 @@ const translations = {
         'label.showPartialResults': '输出中间结果',
         'hint.partialResults': '不推荐在开启翻译时使用',
         'label.targetLanguage': '目标语言',
-        'hint.targetLanguage': '可直接输入语言代码，或从下拉列表快速选择',
-        'label.fallbackLanguage': '备用语言（当源语言与目标语言相同时使用）',
-        'hint.fallbackLanguage': '可直接输入语言代码，留空则禁用备用语言',
+        'hint.targetLanguage': '点击右侧箭头选择语言，也可自行输入语言代码',
+        'label.secondaryTargetLanguage': '第二输出语言',
+        'hint.secondaryTargetLanguage': '可选；启用后会并行输出两行译文',
+        'label.fallbackLanguage': '备用语言',
+        'hint.fallbackLanguage': '留空则禁用；当源语言与目标语言相同时改用这里',
         'label.enableFurigana': '日语添加假名',
         'hint.enableFurigana': '为日语文本的汉字标注假名读音',
         'label.enablePinyin': '中文添加拼音',
         'hint.enablePinyin': '为中文标注拼音（带声调）',
         'select.quickSelect': '-- 快速选择 --',
+        'select.none': '无',
         'select.disabled': '禁用',
 
         // 语言选项
@@ -76,10 +80,22 @@ const translations = {
         'api.deepl': 'DeepL（高质量）',
         'api.googleDict': 'Google Dictionary（免费，更快，请注意网络连通性）',
         'api.googleWeb': 'Google Web（免费，备用，请注意网络连通性）',
-        'api.openrouter': 'OpenRouter（LLM）',
-            'api.openrouterStreamingDeeplHybrid': 'OpenRouter 流式 + DeepL 静音终译（混合）',
+        'api.openrouter': 'LLM（自定义兼容接口，可选流式翻译）',
+            'api.openrouterStreamingDeeplHybrid': 'LLM 流式 + DeepL 静音终译（混合）',
         'label.streamingMode': '流式翻译模式',
         'hint.streamingMode': '启用后支持翻译部分结果（实时翻译未完成的句子）',
+        'hint.sensitiveWordsRisk': '请注意敏感词问题，必要时请切换到 DeepL 或 Google 翻译',
+        'section.llmSettings': 'LLM 设置',
+        'label.llmTemplate': '模板',
+        'btn.llmTemplateDashscopeQwen': '阿里 Qwen3.5-Plus',
+        'btn.llmTemplateOpenRouter': 'OpenRouter',
+        'hint.llmTemplate': '模板会直接填写下方配置；阿里模板会把当前 DashScope Key 复制到 LLM Key。',
+        'label.llmBaseUrl': 'LLM 地址',
+        'label.llmModel': 'LLM 模型名',
+        'label.llmKey': 'LLM API Key',
+        'hint.llmKey': '仅在选择 LLM 翻译时使用。',
+        'label.openaiCompatExtraBodyJson': '自定义 extra_body（可选）',
+        'hint.openaiCompatExtraBodyJson': '仅对 LLM 翻译生效，不影响 Qwen-MT。留空则不发送 extra_body。',
         'label.reverseTranslation': '启用反向翻译',
         'hint.reverseTranslation': '总是使用 Google Dictionary API，请注意网络连通性',
 
@@ -93,10 +109,10 @@ const translations = {
         'link.getIntlKey': '获取国际版API Key',
         'label.deeplKey': 'DeepL API Key (可选，用于翻译)',
         'link.getApiKey': '获取API Key →',
-        'label.openrouterKey': 'OpenRouter API Key (可选，用于LLM翻译)',
-        'hint.openrouterEnvLocked': '已从环境变量读取，输入框已锁定',
+        'label.openrouterKey': 'LLM API Key（可选）',
+        'hint.openrouterEnvLocked': '已从环境变量读取',
         'placeholder.openrouterEnvConfigured': '已在环境变量配置',
-        'label.doubaoKey': '豆包录音文件 API Key',
+        'label.doubaoKey': '豆包录音文件 API Key（可选）',
         'hint.doubaoKey': '用于豆包录音文件识别后端。',
 
         // 语音识别设置
@@ -107,7 +123,7 @@ const translations = {
         'asr.dashscopeDisabled': 'Fun-ASR（国际版不可用）',
         'asr.doubaoFile': '豆包录音文件识别（关麦后返回）',
         'asr.soniox': 'Soniox（多语言，需要API Key）',
-        'label.sonioxKey': 'Soniox API Key (可选，用于多语言识别)',
+        'label.sonioxKey': 'Soniox API Key（可选）',
         'hint.sonioxKey': '支持60+语言的语音识别。',
         'label.pauseOnMute': '游戏静音时暂停转录',
         'hint.pauseOnMute': '第一次解除静音后开始转录',
@@ -117,8 +133,10 @@ const translations = {
         'hint.muteDelay': '静音后延迟停止识别的时间，防止漏掉最后一个字',
 
         // 高级设置
+        'section.textPostProcessing': '文本后处理',
         'section.advancedSettings': '高级设置',
         'subsection.display': '显示设置',
+        'subsection.micControl': '麦克风控制',
         'label.showOriginalAndLangTag': '显示原文及语言标识',
         'hint.showOriginalAndLangTag': '关闭后只显示译文',
         'subsection.vad': 'VAD（语音活动检测）设置 - 仅Qwen后端',
@@ -173,6 +191,7 @@ const translations = {
         // 前端消息
         'msg.configSaved': '配置保存成功！',
         'msg.saveConfigFailed': '保存配置失败',
+        'msg.invalidExtraBodyJson': 'extra_body 必须是合法的 JSON 对象',
         'msg.dashscopeRequired': '错误：必须配置阿里云 DashScope API Key 才能启动服务！',
         'msg.dashscopeValidationFailed': 'DashScope API Key 验证失败: ',
         'msg.syncConfigFailed': '同步配置失败，无法启动服务',
@@ -187,6 +206,9 @@ const translations = {
         'msg.confirmReset': '确定要恢复默认设置吗？（API Keys将被保留）',
         'msg.apiKeyRequired': '使用 {api} 需要配置 API Key，请先在"API Keys 配置"中填写',
         'msg.autoSwitchToGoogle': '未检测到所选翻译接口的 API Key，已自动切换为 Google Dictionary。',
+        'msg.llmFieldRequired': '{field} 未填写，请先补全 LLM 设置。',
+        'msg.llmTemplateDashscopeCopied': '已将当前 DashScope Key 复制到 LLM Key。',
+        'msg.llmTemplateDashscopeKeyMissing': '未检测到 DashScope Key；已套用模板其它字段，请手动填写 LLM Key。',
         'msg.sonioxKeyRequired': 'Soniox 后端需要配置 API Key',
         'msg.doubaoKeyRequired': '豆包录音文件后端需要配置 API Key',
         'msg.doubaoKeyFormat': '豆包 API Key 无效',
@@ -217,14 +239,17 @@ const translations = {
         'label.showPartialResults': 'Show Partial Results',
         'hint.partialResults': 'Not recommended when translation is enabled',
         'label.targetLanguage': 'Target Language',
-        'hint.targetLanguage': 'Enter language code directly or select from the dropdown',
-        'label.fallbackLanguage': 'Fallback Language (used when source equals target)',
-        'hint.fallbackLanguage': 'Enter language code directly, leave empty to disable',
+        'hint.targetLanguage': 'Use the arrow on the right to choose a language, or enter the language code manually',
+        'label.secondaryTargetLanguage': 'Second Output',
+        'hint.secondaryTargetLanguage': 'Optional. When enabled, two translated lines are sent in parallel',
+        'label.fallbackLanguage': 'Fallback',
+        'hint.fallbackLanguage': 'Leave empty to disable it; used when the source already matches the target',
         'label.enableFurigana': 'Add furigana to Japanese text',
         'hint.enableFurigana': 'Add hiragana readings to Japanese kanji',
         'label.enablePinyin': 'Add pinyin to Chinese text',
         'hint.enablePinyin': 'Add pinyin with tones to Chinese characters',
         'select.quickSelect': '-- Quick Select --',
+        'select.none': 'None',
         'select.disabled': 'Disabled',
 
         // Language options
@@ -249,10 +274,22 @@ const translations = {
         'api.deepl': 'DeepL (High Quality)',
         'api.googleDict': 'Google Dictionary (Free, Faster, check network connectivity)',
         'api.googleWeb': 'Google Web (Free, Backup, check network connectivity)',
-        'api.openrouter': 'OpenRouter (LLM)',
-            'api.openrouterStreamingDeeplHybrid': 'OpenRouter Streaming + DeepL Mute Finalization (Hybrid)',
+        'api.openrouter': 'LLM (Custom Compatible API, Optional Streaming)',
+            'api.openrouterStreamingDeeplHybrid': 'LLM Streaming + DeepL Mute Finalization (Hybrid)',
         'label.streamingMode': 'Streaming Translation Mode',
         'hint.streamingMode': 'Enable to translate partial results in real-time',
+        'hint.sensitiveWordsRisk': 'Please watch for sensitive-word filtering issues. Switch to DeepL or Google Translate when necessary.',
+        'section.llmSettings': 'LLM Settings',
+        'label.llmTemplate': 'Templates',
+        'btn.llmTemplateDashscopeQwen': 'Alibaba Qwen3.5-Plus',
+        'btn.llmTemplateOpenRouter': 'OpenRouter',
+        'hint.llmTemplate': 'Templates fill the fields below directly. The Alibaba template copies the current DashScope key into the LLM key field.',
+        'label.llmBaseUrl': 'LLM Base URL',
+        'label.llmModel': 'LLM Model',
+        'label.llmKey': 'LLM API Key',
+        'hint.llmKey': 'Used only when LLM translation is selected.',
+        'label.openaiCompatExtraBodyJson': 'Custom extra_body (Optional)',
+        'hint.openaiCompatExtraBodyJson': 'Only applies to LLM translation. Does not affect Qwen-MT. Leave empty to avoid sending extra_body.',
         'label.reverseTranslation': 'Enable Reverse Translation',
         'hint.reverseTranslation': 'Always uses Google Dictionary API, check network connectivity',
 
@@ -266,10 +303,10 @@ const translations = {
         'link.getIntlKey': 'Get International API Key',
         'label.deeplKey': 'DeepL API Key (optional, for translation)',
         'link.getApiKey': 'Get API Key →',
-        'label.openrouterKey': 'OpenRouter API Key (optional, for LLM translation)',
-        'hint.openrouterEnvLocked': 'Loaded from environment variable; input is locked',
+        'label.openrouterKey': 'LLM API Key (optional)',
+        'hint.openrouterEnvLocked': 'Loaded from environment variable',
         'placeholder.openrouterEnvConfigured': 'Configured via environment variable',
-        'label.doubaoKey': 'Doubao File ASR API Key',
+        'label.doubaoKey': 'Doubao File API Key (optional)',
         'hint.doubaoKey': 'Used by Doubao file transcription backend.',
 
         // Speech recognition settings
@@ -280,7 +317,7 @@ const translations = {
         'asr.dashscopeDisabled': 'Fun-ASR (Not available for International)',
         'asr.doubaoFile': 'Doubao File ASR (returns after mute)',
         'asr.soniox': 'Soniox (Multilingual, requires API Key)',
-        'label.sonioxKey': 'Soniox API Key (optional, for multilingual recognition)',
+        'label.sonioxKey': 'Soniox API Key (optional)',
         'hint.sonioxKey': 'Supports 60+ languages for speech recognition.',
         'label.pauseOnMute': 'Pause transcription when muted in game',
         'hint.pauseOnMute': 'Starts transcription after first unmute',
@@ -290,8 +327,10 @@ const translations = {
         'hint.muteDelay': 'Delay before stopping recognition after mute, prevents missing last word',
 
         // Advanced settings
+        'section.textPostProcessing': 'Text Post-Processing',
         'section.advancedSettings': 'Advanced Settings',
         'subsection.display': 'Display',
+        'subsection.micControl': 'Microphone Control',
         'label.showOriginalAndLangTag': 'Show original text and language tag',
         'hint.showOriginalAndLangTag': 'When off, show translation only',
         'subsection.vad': 'VAD (Voice Activity Detection) Settings - Qwen backend only',
@@ -346,6 +385,7 @@ const translations = {
         // Frontend messages
         'msg.configSaved': 'Configuration saved successfully!',
         'msg.saveConfigFailed': 'Failed to save configuration',
+        'msg.invalidExtraBodyJson': 'extra_body must be a valid JSON object',
         'msg.dashscopeRequired': 'Error: Alibaba Cloud DashScope API Key is required to start the service!',
         'msg.dashscopeValidationFailed': 'DashScope API Key validation failed: ',
         'msg.syncConfigFailed': 'Failed to sync configuration, cannot start service',
@@ -360,6 +400,9 @@ const translations = {
         'msg.confirmReset': 'Are you sure you want to reset to defaults? (API Keys will be preserved)',
         'msg.apiKeyRequired': 'API Key is required for {api}, please fill it in "API Keys Configuration" first',
         'msg.autoSwitchToGoogle': 'API Key for selected translation API not found, automatically switched to Google Dictionary.',
+        'msg.llmFieldRequired': '{field} is required. Please complete the LLM settings first.',
+        'msg.llmTemplateDashscopeCopied': 'Copied the current DashScope key into the LLM key field.',
+        'msg.llmTemplateDashscopeKeyMissing': 'DashScope key not found. Other template fields were filled; please enter the LLM key manually.',
         'msg.sonioxKeyRequired': 'Soniox backend requires API Key',
         'msg.doubaoKeyRequired': 'Doubao file backend requires API Key',
         'msg.doubaoKeyFormat': 'Invalid Doubao API Key',
@@ -387,14 +430,17 @@ const translations = {
         'label.showPartialResults': '途中結果を表示',
         'hint.partialResults': '翻訳有効時は非推奨です',
         'label.targetLanguage': '翻訳先言語',
-        'hint.targetLanguage': '言語コードを直接入力するか、ドロップダウンから選択してください',
-        'label.fallbackLanguage': 'フォールバック言語（原文と言語が同じ場合に使用）',
-        'hint.fallbackLanguage': '言語コードを直接入力。空欄で無効化されます',
+        'hint.targetLanguage': '右側の矢印から言語を選ぶか、言語コードを直接入力してください',
+        'label.secondaryTargetLanguage': '第2出力言語',
+        'hint.secondaryTargetLanguage': '任意です。有効化すると2行の訳文を並行出力します',
+        'label.fallbackLanguage': 'フォールバック言語',
+        'hint.fallbackLanguage': '空欄で無効化します。原文と言語が同じ場合はここを使います',
         'label.enableFurigana': '日本語にふりがなを追加',
         'hint.enableFurigana': '日本語テキストの漢字に読み仮名を付与します',
         'label.enablePinyin': '中国語にピンインを追加',
         'hint.enablePinyin': '中国語に声調付きピンインを付与します',
         'select.quickSelect': '-- クイック選択 --',
+        'select.none': 'なし',
         'select.disabled': '無効',
 
         'lang.zhCN': '簡体字中国語 (zh-CN)',
@@ -417,10 +463,22 @@ const translations = {
         'api.deepl': 'DeepL（高品質）',
         'api.googleDict': 'Google Dictionary（無料・高速、ネットワーク接続に注意）',
         'api.googleWeb': 'Google Web（無料・予備、ネットワーク接続に注意）',
-        'api.openrouter': 'OpenRouter（LLM）',
-        'api.openrouterStreamingDeeplHybrid': 'OpenRouter ストリーミング + DeepL ミュート終訳（ハイブリッド）',
+        'api.openrouter': 'LLM（カスタム互換 API、ストリーミング任意）',
+        'api.openrouterStreamingDeeplHybrid': 'LLM ストリーミング + DeepL ミュート終訳（ハイブリッド）',
         'label.streamingMode': 'ストリーミング翻訳モード',
         'hint.streamingMode': '有効化すると途中結果をリアルタイム翻訳できます',
+        'hint.sensitiveWordsRisk': 'センシティブワードの影響に注意し、必要に応じて DeepL または Google 翻訳へ切り替えてください',
+        'section.llmSettings': 'LLM 設定',
+        'label.llmTemplate': 'テンプレート',
+        'btn.llmTemplateDashscopeQwen': 'Alibaba Qwen3.5-Plus',
+        'btn.llmTemplateOpenRouter': 'OpenRouter',
+        'hint.llmTemplate': 'テンプレートは下の項目を直接入力します。Alibaba テンプレートは現在の DashScope Key を LLM Key にコピーします。',
+        'label.llmBaseUrl': 'LLM アドレス',
+        'label.llmModel': 'LLM モデル名',
+        'label.llmKey': 'LLM API Key',
+        'hint.llmKey': 'LLM 翻訳を選択したときのみ使用します。',
+        'label.openaiCompatExtraBodyJson': 'カスタム extra_body（任意）',
+        'hint.openaiCompatExtraBodyJson': 'LLM 翻訳にのみ適用され、Qwen-MT には影響しません。空欄なら extra_body を送信しません。',
         'label.reverseTranslation': '逆翻訳を有効化',
         'hint.reverseTranslation': '常に Google Dictionary API を使用します。ネットワーク接続に注意してください',
 
@@ -433,10 +491,10 @@ const translations = {
         'link.getIntlKey': '国際版 API Key を取得',
         'label.deeplKey': 'DeepL API Key（任意、翻訳用）',
         'link.getApiKey': 'API Key を取得 →',
-        'label.openrouterKey': 'OpenRouter API Key（任意、LLM 翻訳用）',
-        'hint.openrouterEnvLocked': '環境変数から読み込み済みのため、入力欄はロックされています',
+        'label.openrouterKey': 'LLM API Key（任意）',
+        'hint.openrouterEnvLocked': '環境変数から読み込み済み',
         'placeholder.openrouterEnvConfigured': '環境変数で設定済み',
-        'label.doubaoKey': 'Doubao 録音ファイル API Key',
+        'label.doubaoKey': 'Doubao 録音ファイル API Key（任意）',
         'hint.doubaoKey': 'Doubao 録音ファイル認識バックエンド用。',
 
         'section.asrSettings': '音声認識設定',
@@ -446,7 +504,7 @@ const translations = {
         'asr.dashscopeDisabled': 'Fun-ASR（国際版では利用不可）',
         'asr.doubaoFile': 'Doubao 録音ファイル認識（ミュート後に返却）',
         'asr.soniox': 'Soniox（多言語、API Key が必要）',
-        'label.sonioxKey': 'Soniox API Key（任意、多言語認識用）',
+        'label.sonioxKey': 'Soniox API Key（任意）',
         'hint.sonioxKey': '60 以上の言語の音声認識に対応しています。',
         'label.pauseOnMute': 'ゲームでミュート中は文字起こしを停止',
         'hint.pauseOnMute': '最初にミュート解除した後に文字起こしを開始します',
@@ -455,8 +513,10 @@ const translations = {
         'label.muteDelay': 'ミュート遅延（秒）',
         'hint.muteDelay': 'ミュート後に認識停止まで待機し、最後の語句の欠落を防ぎます',
 
+        'section.textPostProcessing': 'テキスト後処理',
         'section.advancedSettings': '詳細設定',
         'subsection.display': '表示設定',
+        'subsection.micControl': 'マイク制御',
         'label.showOriginalAndLangTag': '原文と言語タグを表示',
         'hint.showOriginalAndLangTag': 'オフ時は翻訳文のみ表示します',
         'subsection.vad': 'VAD（音声区間検出）設定 - Qwen バックエンドのみ',
@@ -508,6 +568,7 @@ const translations = {
 
         'msg.configSaved': '設定を保存しました！',
         'msg.saveConfigFailed': '設定の保存に失敗しました',
+        'msg.invalidExtraBodyJson': 'extra_body は有効な JSON オブジェクトである必要があります',
         'msg.dashscopeRequired': 'エラー：サービス開始には Alibaba Cloud DashScope API Key が必要です！',
         'msg.dashscopeValidationFailed': 'DashScope API Key の検証に失敗しました: ',
         'msg.syncConfigFailed': '設定の同期に失敗したため、サービスを開始できません',
@@ -522,6 +583,9 @@ const translations = {
         'msg.confirmReset': 'デフォルトに戻しますか？（API Keys は保持されます）',
         'msg.apiKeyRequired': '{api} を使用するには API Key が必要です。先に「API Keys 設定」で入力してください',
         'msg.autoSwitchToGoogle': '選択した翻訳 API の API Key が見つからないため、Google Dictionary に自動切替しました。',
+        'msg.llmFieldRequired': '{field} が未入力です。先に LLM 設定を補完してください。',
+        'msg.llmTemplateDashscopeCopied': '現在の DashScope Key を LLM Key にコピーしました。',
+        'msg.llmTemplateDashscopeKeyMissing': 'DashScope Key が見つかりません。他のテンプレート項目のみ反映したので、LLM Key は手動で入力してください。',
         'msg.sonioxKeyRequired': 'Soniox バックエンドには API Key が必要です',
         'msg.doubaoKeyRequired': 'Doubao 録音ファイルバックエンドには API Key が必要です',
         'msg.doubaoKeyFormat': 'Doubao API Key が無効です',
@@ -548,14 +612,17 @@ const translations = {
         'label.showPartialResults': '중간 결과 표시',
         'hint.partialResults': '번역 사용 시 권장되지 않습니다',
         'label.targetLanguage': '대상 언어',
-        'hint.targetLanguage': '언어 코드를 직접 입력하거나 드롭다운에서 선택하세요',
-        'label.fallbackLanguage': '대체 언어(원문과 대상 언어가 같을 때 사용)',
-        'hint.fallbackLanguage': '언어 코드를 직접 입력하고, 비워 두면 비활성화됩니다',
+        'hint.targetLanguage': '오른쪽 화살표를 눌러 언어를 선택하거나 언어 코드를 직접 입력하세요',
+        'label.secondaryTargetLanguage': '두 번째 출력 언어',
+        'hint.secondaryTargetLanguage': '선택 사항입니다. 활성화하면 두 줄의 번역이 병렬로 출력됩니다',
+        'label.fallbackLanguage': '대체 언어',
+        'hint.fallbackLanguage': '비워 두면 비활성화되며, 원문 언어가 대상 언어와 같을 때 사용됩니다',
         'label.enableFurigana': '일본어 후리가나 추가',
         'hint.enableFurigana': '일본어 한자에 읽는 법(히라가나)을 추가합니다',
         'label.enablePinyin': '중국어 병음 추가',
         'hint.enablePinyin': '중국어에 성조 포함 병음을 추가합니다',
         'select.quickSelect': '-- 빠른 선택 --',
+        'select.none': '없음',
         'select.disabled': '사용 안 함',
 
         'lang.zhCN': '중국어 간체 (zh-CN)',
@@ -578,10 +645,22 @@ const translations = {
         'api.deepl': 'DeepL (고품질)',
         'api.googleDict': 'Google Dictionary (무료, 빠름, 네트워크 연결 확인)',
         'api.googleWeb': 'Google Web (무료, 백업용, 네트워크 연결 확인)',
-        'api.openrouter': 'OpenRouter (LLM)',
-        'api.openrouterStreamingDeeplHybrid': 'OpenRouter 스트리밍 + DeepL 음소거 최종 번역 (하이브리드)',
+        'api.openrouter': 'LLM (사용자 지정 호환 API, 스트리밍 선택 가능)',
+        'api.openrouterStreamingDeeplHybrid': 'LLM 스트리밍 + DeepL 음소거 최종 번역 (하이브리드)',
         'label.streamingMode': '스트리밍 번역 모드',
         'hint.streamingMode': '활성화하면 중간 결과를 실시간으로 번역합니다',
+        'hint.sensitiveWordsRisk': '민감어 필터링 문제에 주의하고, 필요하면 DeepL 또는 Google 번역으로 전환하세요',
+        'section.llmSettings': 'LLM 설정',
+        'label.llmTemplate': '템플릿',
+        'btn.llmTemplateDashscopeQwen': 'Alibaba Qwen3.5-Plus',
+        'btn.llmTemplateOpenRouter': 'OpenRouter',
+        'hint.llmTemplate': '템플릿은 아래 항목을 바로 채웁니다. Alibaba 템플릿은 현재 DashScope Key를 LLM Key로 복사합니다.',
+        'label.llmBaseUrl': 'LLM 주소',
+        'label.llmModel': 'LLM 모델명',
+        'label.llmKey': 'LLM API Key',
+        'hint.llmKey': 'LLM 번역을 선택했을 때만 사용합니다.',
+        'label.openaiCompatExtraBodyJson': '사용자 정의 extra_body(선택)',
+        'hint.openaiCompatExtraBodyJson': 'LLM 번역에만 적용되며 Qwen-MT에는 영향을 주지 않습니다. 비워 두면 extra_body를 보내지 않습니다.',
         'label.reverseTranslation': '역방향 번역 사용',
         'hint.reverseTranslation': '항상 Google Dictionary API를 사용합니다. 네트워크 연결을 확인하세요',
 
@@ -594,10 +673,10 @@ const translations = {
         'link.getIntlKey': '국제판 API Key 받기',
         'label.deeplKey': 'DeepL API Key (선택, 번역용)',
         'link.getApiKey': 'API Key 받기 →',
-        'label.openrouterKey': 'OpenRouter API Key (선택, LLM 번역용)',
-        'hint.openrouterEnvLocked': '환경 변수에서 로드되어 입력란이 잠겨 있습니다',
+        'label.openrouterKey': 'LLM API Key (선택)',
+        'hint.openrouterEnvLocked': '환경 변수에서 로드됨',
         'placeholder.openrouterEnvConfigured': '환경 변수로 설정됨',
-        'label.doubaoKey': 'Doubao 파일 ASR API Key',
+        'label.doubaoKey': 'Doubao 파일 API Key (선택)',
         'hint.doubaoKey': 'Doubao 파일 음성 인식 백엔드용입니다.',
 
         'section.asrSettings': '음성 인식 설정',
@@ -607,7 +686,7 @@ const translations = {
         'asr.dashscopeDisabled': 'Fun-ASR (국제판에서는 사용 불가)',
         'asr.doubaoFile': 'Doubao 파일 ASR (음소거 후 반환)',
         'asr.soniox': 'Soniox (다국어, API Key 필요)',
-        'label.sonioxKey': 'Soniox API Key (선택, 다국어 인식용)',
+        'label.sonioxKey': 'Soniox API Key (선택)',
         'hint.sonioxKey': '60개 이상의 언어 음성 인식을 지원합니다.',
         'label.pauseOnMute': '게임 음소거 시 전사 일시중지',
         'hint.pauseOnMute': '처음 음소거 해제 후 전사가 시작됩니다',
@@ -616,8 +695,10 @@ const translations = {
         'label.muteDelay': '음소거 지연(초)',
         'hint.muteDelay': '음소거 후 인식 중지까지 지연하여 마지막 단어 누락을 방지합니다',
 
+        'section.textPostProcessing': '텍스트 후처리',
         'section.advancedSettings': '고급 설정',
         'subsection.display': '표시 설정',
+        'subsection.micControl': '마이크 제어',
         'label.showOriginalAndLangTag': '원문 및 언어 태그 표시',
         'hint.showOriginalAndLangTag': '끄면 번역문만 표시합니다',
         'subsection.vad': 'VAD(음성 활동 감지) 설정 - Qwen 백엔드 전용',
@@ -669,6 +750,7 @@ const translations = {
 
         'msg.configSaved': '설정이 저장되었습니다!',
         'msg.saveConfigFailed': '설정 저장에 실패했습니다',
+        'msg.invalidExtraBodyJson': 'extra_body는 올바른 JSON 객체여야 합니다',
         'msg.dashscopeRequired': '오류: 서비스를 시작하려면 Alibaba Cloud DashScope API Key가 필요합니다!',
         'msg.dashscopeValidationFailed': 'DashScope API Key 검증 실패: ',
         'msg.syncConfigFailed': '설정 동기화에 실패하여 서비스를 시작할 수 없습니다',
@@ -683,6 +765,9 @@ const translations = {
         'msg.confirmReset': '정말 기본값으로 복원하시겠습니까? (API Keys는 유지됩니다)',
         'msg.apiKeyRequired': '{api}를 사용하려면 API Key가 필요합니다. 먼저 "API Keys 설정"에서 입력하세요',
         'msg.autoSwitchToGoogle': '선택한 번역 API의 API Key를 찾을 수 없어 Google Dictionary로 자동 전환했습니다.',
+        'msg.llmFieldRequired': '{field} 항목이 비어 있습니다. 먼저 LLM 설정을 완성하세요.',
+        'msg.llmTemplateDashscopeCopied': '현재 DashScope Key를 LLM Key로 복사했습니다.',
+        'msg.llmTemplateDashscopeKeyMissing': 'DashScope Key를 찾지 못했습니다. 다른 템플릿 항목만 채웠으니 LLM Key는 직접 입력하세요.',
         'msg.sonioxKeyRequired': 'Soniox 백엔드는 API Key가 필요합니다',
         'msg.doubaoKeyRequired': 'Doubao 파일 백엔드는 API Key가 필요합니다',
         'msg.doubaoKeyFormat': 'Doubao API Key가 올바르지 않습니다',
@@ -703,10 +788,14 @@ function getCurrentLanguage() {
  * 设置当前语言
  * @param {string} lang - 语言代码
  */
-function setLanguage(lang) {
+function setLanguage(lang, options = {}) {
+    const { persist = true, userSelected = true } = options;
     if (SUPPORTED_LANGUAGES[lang]) {
         currentLanguage = lang;
-        localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+        if (persist) {
+            localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+            localStorage.setItem(LANGUAGE_USER_SELECTED_KEY, userSelected ? 'true' : 'false');
+        }
         applyTranslations();
         // 更新页面标题
         document.title = t('page.title');
@@ -716,34 +805,52 @@ function setLanguage(lang) {
     }
 }
 
+function detectSystemLanguage() {
+    const browserLanguages = Array.isArray(navigator.languages) && navigator.languages.length > 0
+        ? navigator.languages
+        : [navigator.language || navigator.userLanguage].filter(Boolean);
+
+    for (const browserLang of browserLanguages) {
+        if (!browserLang) continue;
+
+        if (SUPPORTED_LANGUAGES[browserLang]) {
+            return browserLang;
+        }
+
+        const langPrefix = browserLang.split('-')[0];
+        if (langPrefix === 'zh') {
+            return 'zh-CN';
+        }
+        if (langPrefix === 'en') {
+            return 'en';
+        }
+        if (langPrefix === 'ja') {
+            return 'ja';
+        }
+        if (langPrefix === 'ko') {
+            return 'ko';
+        }
+    }
+
+    return null;
+}
+
 /**
  * 从本地存储加载语言设置
  */
 function loadLanguageFromStorage() {
     const savedLang = localStorage.getItem(LANGUAGE_STORAGE_KEY);
-    if (savedLang && SUPPORTED_LANGUAGES[savedLang]) {
+    const isUserSelected = localStorage.getItem(LANGUAGE_USER_SELECTED_KEY) === 'true';
+    const systemLang = detectSystemLanguage();
+
+    if (isUserSelected && savedLang && SUPPORTED_LANGUAGES[savedLang]) {
         currentLanguage = savedLang;
-    } else {
-        // 尝试检测浏览器语言
-        const browserLang = navigator.language || navigator.userLanguage;
-        if (browserLang) {
-            // 先尝试精确匹配
-            if (SUPPORTED_LANGUAGES[browserLang]) {
-                currentLanguage = browserLang;
-            } else {
-                // 尝试匹配语言前缀
-                const langPrefix = browserLang.split('-')[0];
-                if (langPrefix === 'zh') {
-                    currentLanguage = 'zh-CN';
-                } else if (langPrefix === 'en') {
-                    currentLanguage = 'en';
-                } else if (langPrefix === 'ja') {
-                    currentLanguage = 'ja';
-                } else if (langPrefix === 'ko') {
-                    currentLanguage = 'ko';
-                }
-            }
-        }
+    } else if (systemLang && SUPPORTED_LANGUAGES[systemLang]) {
+        currentLanguage = systemLang;
+        localStorage.setItem(LANGUAGE_STORAGE_KEY, systemLang);
+        localStorage.setItem(LANGUAGE_USER_SELECTED_KEY, 'false');
+    } else if (savedLang && SUPPORTED_LANGUAGES[savedLang]) {
+        currentLanguage = savedLang;
     }
 }
 
@@ -833,7 +940,7 @@ function initLanguageSelector() {
 
     // 添加变更事件
     selector.addEventListener('change', (e) => {
-        setLanguage(e.target.value);
+        setLanguage(e.target.value, { persist: true, userSelected: true });
     });
 }
 
