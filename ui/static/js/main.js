@@ -501,14 +501,17 @@ function applyAsrBackendLocks() {
     const asrBackendSelect = document.getElementById('asr-backend');
     const micControlToggle = document.getElementById('enable-mic-control');
     const partialResultsToggle = document.getElementById('show-partial-results');
+    const enableTranslationToggle = document.getElementById('enable-translation');
     const translationApiSelect = document.getElementById('translation-api-type');
     const streamingModeToggle = document.getElementById('openrouter-streaming-mode');
-    if (!asrBackendSelect || !micControlToggle || !partialResultsToggle || !translationApiSelect || !streamingModeToggle) {
+    if (!asrBackendSelect || !micControlToggle || !partialResultsToggle || !enableTranslationToggle || !translationApiSelect || !streamingModeToggle) {
         return;
     }
 
     const isDoubaoFile = asrBackendSelect.value === 'doubao_file';
-    const isStreamingTranslation = translationApiSelect.value === 'openrouter' && streamingModeToggle.checked;
+    const isStreamingTranslation = enableTranslationToggle.checked
+        && translationApiSelect.value === 'openrouter'
+        && streamingModeToggle.checked;
 
     if (isDoubaoFile) {
         micControlToggle.disabled = true;
