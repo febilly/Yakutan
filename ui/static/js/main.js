@@ -24,13 +24,17 @@ const LANGUAGE_OPTIONS = [
     { code: 'en-GB', labelKey: 'lang.enGB' },
     { code: 'ja', labelKey: 'lang.ja' },
     { code: 'ko', labelKey: 'lang.ko' },
+    { code: 'ar', labelKey: 'lang.ar' },
+    { code: 'de', labelKey: 'lang.de' },
     { code: 'es', labelKey: 'lang.es' },
     { code: 'fr', labelKey: 'lang.fr' },
-    { code: 'de', labelKey: 'lang.de' },
-    { code: 'ru', labelKey: 'lang.ru' },
-    { code: 'ar', labelKey: 'lang.ar' },
-    { code: 'pt', labelKey: 'lang.pt' },
+    { code: 'id', labelKey: 'lang.id' },
     { code: 'it', labelKey: 'lang.it' },
+    { code: 'pt', labelKey: 'lang.pt' },
+    { code: 'ru', labelKey: 'lang.ru' },
+    { code: 'th', labelKey: 'lang.th' },
+    { code: 'tl', labelKey: 'lang.tl' },
+    { code: 'tr', labelKey: 'lang.tr' },
 ];
 
 function shouldShowLLMSettings(apiType) {
