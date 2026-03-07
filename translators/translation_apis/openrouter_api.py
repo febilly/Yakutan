@@ -31,10 +31,15 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         'es': 'Spanish',
         'fr': 'French',
         'de': 'German',
+        'id': 'Indonesian',
         'ru': 'Russian',
         'ar': 'Arabic',
         'pt': 'Portuguese',
+        'th': 'Thai',
+        'tl': 'Tagalog (Philippines)',
         'it': 'Italian',
+        'tr': 'Turkish',
+        'fil': 'Filipino/Tagalog',
     }
     
     def __init__(
