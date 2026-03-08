@@ -109,6 +109,8 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
         else:
             result = combined
 
+        self._recognizer._record_partial_result(result)
+
         event = RecognitionEvent(text=result, is_final=False, raw=message)
         self._user_callback.on_result(event)
 
@@ -124,8 +126,9 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
             else:
                 result = transcript
 
-            event = RecognitionEvent(text=result, is_final=True, raw=message)
-            self._user_callback.on_result(event)
+            if self._recognizer._should_emit_server_final_result():
+                event = RecognitionEvent(text=result, is_final=True, raw=message)
+                self._user_callback.on_result(event)
         if item_id:
             self._items.pop(item_id, None)
 
@@ -162,6 +165,11 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         self._last_first_text_delay: Optional[int] = None
         self._last_first_audio_delay: Optional[int] = None
         self._paused: bool = False
+        self._last_partial_text: str = ""
+        self._pause_started_at: Optional[float] = None
+        self._pause_finalize_timer: Optional[threading.Timer] = None
+        self._pause_sequence: int = 0
+        self._suppressed_server_final_sequence: Optional[int] = None
         self._keepalive_thread: Optional[threading.Thread] = None
         self._keepalive_stop_event = threading.Event()
         self._connection_closed: bool = False  # 标记连接是否已关闭
@@ -178,6 +186,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         )
         self._input_audio_format = options.pop("input_audio_format", "pcm")
         self._sample_rate = options.pop("sample_rate", 16000)
+        self._pause_finalize_timeout_ms = max(0, int(options.pop("pause_finalize_timeout_ms", 500)))
         self._language = options.pop("language", None)
         self._corpus_text = options.pop("corpus_text", None)
         self._enable_input_audio_transcription = options.pop("enable_input_audio_transcription", True)
@@ -221,6 +230,10 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._last_first_text_delay = None
             self._last_first_audio_delay = None
             self._paused = False
+            self._last_partial_text = ""
+            self._pause_started_at = None
+            self._pause_sequence = 0
+            self._suppressed_server_final_sequence = None
 
         conversation = self._conversation
         assert conversation is not None  # for type checkers
@@ -259,6 +272,8 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         # 标记服务不应该运行（禁用自动重连）
         with self._lock:
             self._should_run = False
+
+        self._cancel_pause_finalize_timer()
         
         # 停止心跳线程
         self._stop_keepalive()
@@ -273,6 +288,10 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             conversation.close()
         with self._lock:
             self._paused = False
+            self._last_partial_text = ""
+            self._pause_started_at = None
+            self._pause_sequence = 0
+            self._suppressed_server_final_sequence = None
 
     def send_audio_frame(self, data: bytes) -> None:
         if not data:
@@ -311,11 +330,21 @@ class QwenSpeechRecognizer(SpeechRecognizer):
 
     def pause(self) -> None:
         conversation: Optional[OmniRealtimeConversation] = None
+        pause_sequence: Optional[int] = None
         with self._lock:
             if self._paused:
                 return
             self._paused = True
+            self._pause_started_at = time.monotonic()
+            self._pause_sequence += 1
+            pause_sequence = self._pause_sequence
+            self._suppressed_server_final_sequence = None
             conversation = self._conversation
+
+        self._cancel_pause_finalize_timer()
+        if pause_sequence is not None:
+            self._schedule_pause_finalize_timer(pause_sequence)
+
         if conversation is not None:
             # VAD和手动commit不能同时使用
             if self._enable_turn_detection:
@@ -339,10 +368,12 @@ class QwenSpeechRecognizer(SpeechRecognizer):
 
     def resume(self) -> None:
         should_reconnect = False
+        self._cancel_pause_finalize_timer()
         with self._lock:
             if not self._paused:
                 return  # 已经在运行
             self._paused = False
+            self._pause_started_at = None
             # 检查连接是否已关闭
             if self._connection_closed and self._should_run:
                 should_reconnect = True
@@ -373,6 +404,79 @@ class QwenSpeechRecognizer(SpeechRecognizer):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+    def _record_partial_result(self, text: str) -> None:
+        if not text:
+            return
+        with self._lock:
+            if self._paused and self._suppressed_server_final_sequence == self._pause_sequence:
+                return
+            self._last_partial_text = text
+
+    def _should_emit_server_final_result(self) -> bool:
+        self._cancel_pause_finalize_timer()
+        pause_elapsed_ms: Optional[int] = None
+        with self._lock:
+            pause_started_at = self._pause_started_at
+            self._pause_started_at = None
+            self._last_partial_text = ""
+            if self._suppressed_server_final_sequence == self._pause_sequence:
+                self._suppressed_server_final_sequence = None
+                return False
+        if pause_started_at is not None:
+            pause_elapsed_ms = int(round((time.monotonic() - pause_started_at) * 1000))
+            print(f"[Qwen] pause 到最终结果耗时: {pause_elapsed_ms}ms")
+        return True
+
+    def _schedule_pause_finalize_timer(self, pause_sequence: int) -> None:
+        timeout_seconds = self._pause_finalize_timeout_ms / 1000.0
+        timer = threading.Timer(
+            timeout_seconds,
+            self._emit_pause_finalize_result,
+            args=(pause_sequence,),
+        )
+        timer.daemon = True
+        with self._lock:
+            if not self._paused or pause_sequence != self._pause_sequence:
+                return
+            self._pause_finalize_timer = timer
+        timer.start()
+
+    def _cancel_pause_finalize_timer(self) -> None:
+        with self._lock:
+            timer = self._pause_finalize_timer
+            self._pause_finalize_timer = None
+        if timer is not None:
+            timer.cancel()
+
+    def _emit_pause_finalize_result(self, pause_sequence: int) -> None:
+        callback: Optional[SpeechRecognitionCallback] = None
+        text = ""
+        with self._lock:
+            if self._pause_finalize_timer is not None and pause_sequence == self._pause_sequence:
+                self._pause_finalize_timer = None
+            if not self._paused or pause_sequence != self._pause_sequence:
+                return
+            if self._suppressed_server_final_sequence == pause_sequence:
+                return
+            if not self._last_partial_text or self._callback is None:
+                return
+            text = self._last_partial_text
+            self._last_partial_text = ""
+            self._pause_started_at = None
+            self._suppressed_server_final_sequence = pause_sequence
+            callback = self._callback
+
+        event = RecognitionEvent(
+            text=text,
+            is_final=True,
+            raw={
+                "type": "conversation.item.input_audio_transcription.completed",
+                "synthetic": True,
+                "reason": "pause_finalize_timeout",
+            },
+        )
+        callback.on_result(event)
+
     def _create_adapter(self) -> _QwenOmniCallbackAdapter:
         if self._callback is None:
             raise RuntimeError("Callback not configured; call set_callback first.")
