@@ -27,3 +27,4 @@ dist/
 *.app
 
 logs/
+debug_audio/

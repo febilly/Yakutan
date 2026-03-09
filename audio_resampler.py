@@ -1,16 +1,24 @@
 """
-有状态的实时音频重采样器，替代 Python 3.13 中已移除的 audioop.ratecv。
+有状态的实时音频重采样器。
 
-使用 numpy 线性插值，支持跨 chunk 边界的连续重采样。
+基于第三方库 soxr 的流式重采样实现，适用于实时音频输入。
 """
 
 import numpy as np
+
+try:
+    import soxr  # pyright: ignore[reportMissingImports]
+except ImportError as exc:  # pragma: no cover - 运行时依赖保护
+    soxr = None
+    _SOXR_IMPORT_ERROR = exc
+else:
+    _SOXR_IMPORT_ERROR = None
 
 
 class AudioResampler:
     """有状态的 PCM 音频重采样器。
 
-    保持跨音频块的插值连续性，适用于实时流式场景。
+    使用 `soxr.ResampleStream` 保持跨音频块的连续性，适用于实时流式场景。
 
     Parameters
     ----------
@@ -25,7 +33,7 @@ class AudioResampler:
     """
 
     _DTYPE_MAP = {1: np.int8, 2: np.int16, 4: np.int32}
-    _CLIP_MAP = {1: (-128, 127), 2: (-32768, 32767), 4: (-2147483648, 2147483647)}
+    _SOXR_DTYPE_MAP = {2: 'int16', 4: 'int32'}
 
     def __init__(
         self,
@@ -36,14 +44,24 @@ class AudioResampler:
     ):
         if sample_width not in self._DTYPE_MAP:
             raise ValueError(f"不支持的 sample_width: {sample_width}，仅支持 1/2/4")
+        if sample_width not in self._SOXR_DTYPE_MAP:
+            raise ValueError(f"soxr 不支持 sample_width={sample_width}，当前仅支持 2/4")
+        if soxr is None:
+            raise RuntimeError(
+                '缺少 soxr 依赖，请先安装 requirements.txt 中的 soxr'
+            ) from _SOXR_IMPORT_ERROR
         self.input_rate = int(input_rate)
         self.output_rate = int(output_rate)
         self.channels = int(channels)
         self.sample_width = int(sample_width)
         self._dtype = self._DTYPE_MAP[self.sample_width]
-        self._clip_min, self._clip_max = self._CLIP_MAP[self.sample_width]
-        self._frac_pos: float = 0.0      # 上一 chunk 结束后的残余分数位置
-        self._last_frame: np.ndarray | None = None  # 上一 chunk 最后一帧（用于边界插值）
+        self._stream = soxr.ResampleStream(
+            self.input_rate,
+            self.output_rate,
+            self.channels,
+            dtype=self._SOXR_DTYPE_MAP[self.sample_width],
+            quality='QQ',
+        )
 
     @property
     def needs_resample(self) -> bool:
@@ -52,8 +70,7 @@ class AudioResampler:
 
     def reset(self) -> None:
         """重置内部状态（切换音频源/重新初始化时调用）。"""
-        self._frac_pos = 0.0
-        self._last_frame = None
+        self._stream.clear()
 
     def resample(self, data: bytes) -> bytes:
         """对一段 PCM 数据进行重采样。
@@ -71,48 +88,15 @@ class AudioResampler:
         if not self.needs_resample or len(data) == 0:
             return data
 
-        # --- 解码 PCM ---
-        samples = np.frombuffer(data, dtype=self._dtype).astype(np.float64)
+        samples = np.frombuffer(data, dtype=self._dtype)
         num_frames = len(samples) // self.channels
         if num_frames == 0:
             return data
-        samples = samples[: num_frames * self.channels].reshape(num_frames, self.channels)
-
-        # --- 构造带边界上下文的扩展数组 ---
-        if self._last_frame is not None:
-            extended = np.vstack([self._last_frame, samples])
-            pos_offset = 1.0
+        frame_samples = samples[: num_frames * self.channels]
+        if self.channels == 1:
+            input_chunk = frame_samples
         else:
-            extended = samples
-            pos_offset = 0.0
+            input_chunk = frame_samples.reshape(num_frames, self.channels)
 
-        # --- 计算输出位置 ---
-        step = self.input_rate / self.output_rate   # 每个输出采样对应的输入采样步长
-        first_pos = self._frac_pos + pos_offset     # 扩展数组中的起始位置
-        last_valid = num_frames - 1 + pos_offset    # 扩展数组中最后一个有效输入位置
-
-        num_output = max(0, int((last_valid - first_pos) / step) + 1)
-        if num_output == 0:
-            self._last_frame = samples[-1:].copy()
-            self._frac_pos = self._frac_pos + num_frames  # 未产出但消费了输入
-            return b""
-
-        positions = first_pos + np.arange(num_output, dtype=np.float64) * step
-        positions = np.clip(positions, 0, len(extended) - 1)
-
-        # --- 线性插值（每个声道独立） ---
-        x = np.arange(len(extended), dtype=np.float64)
-        output = np.empty((num_output, self.channels), dtype=np.float64)
-        for c in range(self.channels):
-            output[:, c] = np.interp(positions, x, extended[:, c])
-
-        # --- 裁剪并转回整型 ---
-        np.clip(output, self._clip_min, self._clip_max, out=output)
-        result = output.astype(self._dtype)
-
-        # --- 更新状态 ---
-        self._last_frame = samples[-1:].copy()
-        next_pos = positions[-1] + step             # 下一个输出的位置（扩展数组坐标系）
-        self._frac_pos = next_pos - pos_offset - num_frames  # 相对于下一 chunk 起始的残余
-
-        return result.tobytes()
+        result = self._stream.resample_chunk(input_chunk, last=False)
+        return np.ascontiguousarray(result, dtype=self._dtype).tobytes()

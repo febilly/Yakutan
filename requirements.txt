@@ -6,6 +6,7 @@ dashscope>=1.24.0,<1.25.0
 
 # 音频处理库
 pyaudio>=0.2.13
+soxr>=1.0.0
 
 # OSC 通信库（用于 VRChat 通信）
 python-osc>=1.8.0

@@ -6,6 +6,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
+import numpy as np
 import pyaudio
 
 from dotenv import load_dotenv
@@ -27,6 +28,7 @@ from speech_recognizers.recognizer_factory import (
 
 # 导入配置
 import config
+from audio_debug_recorder import WaveDebugRecorder
 from audio_resampler import AudioResampler
 
 # 加载 .env 文件中的环境变量
@@ -316,7 +318,10 @@ mic = None
 stream = None
 input_sample_rate = config.SAMPLE_RATE  # 实际采集采样率（可能与 config.SAMPLE_RATE 不同）
 input_block_size = config.BLOCK_SIZE   # 实际采集每次 read 的帧数
+capture_channels = config.CHANNELS  # 实际采集声道数（可能与送往识别器的声道数不同）
 _resampler: 'AudioResampler | None' = None  # 实时重采样器
+_debug_pre_audio_recorder: 'WaveDebugRecorder | None' = None  # 重采样前调试音频录制器
+_debug_audio_recorder: 'WaveDebugRecorder | None' = None  # 调试音频录制器
 executor = ThreadPoolExecutor(max_workers=config.MAX_WORKERS)
 stop_event = None  # 将在 main() 函数中创建，避免绑定到错误的事件循环
 recognition_active = False  # 标记识别是否正在运行
@@ -806,19 +811,47 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
 async def init_audio_stream():
     """异步初始化音频流"""
-    global mic, stream, input_sample_rate, input_block_size, _resampler
+    global mic, stream, input_sample_rate, input_block_size, capture_channels, _resampler
+    global _debug_pre_audio_recorder, _debug_audio_recorder
     loop = asyncio.get_event_loop()
     
     def _init():
-        global mic, stream, input_sample_rate, input_block_size, _resampler
+        global mic, stream, input_sample_rate, input_block_size, capture_channels, _resampler
+        global _debug_pre_audio_recorder, _debug_audio_recorder
         mic = pyaudio.PyAudio()
         device_index = getattr(config, 'MIC_DEVICE_INDEX', None)
         target_rate = int(config.SAMPLE_RATE)
+        target_channels = int(config.CHANNELS)
 
-        def _open_with(rate: int, frames_per_buffer: int, idx: Optional[int]):
+        def _get_device_info(idx: Optional[int]) -> Optional[dict]:
+            try:
+                return mic.get_device_info_by_index(int(idx)) if idx is not None else mic.get_default_input_device_info()
+            except Exception:
+                return None
+
+        def _resolve_capture_channels(idx: Optional[int]) -> int:
+            requested_channels = target_channels
+            info = _get_device_info(idx)
+            if not info:
+                return requested_channels
+
+            max_in = int(info.get('maxInputChannels', 0) or 0)
+            device_name = str(info.get('name', '') or '')
+            normalized_name = device_name.lower()
+            is_virtual_mixer = 'voicemeeter' in normalized_name or 'vb-audio' in normalized_name
+
+            if requested_channels == 1 and is_virtual_mixer and max_in >= 2:
+                print(f'[Audio] 检测到虚拟混音输入 {device_name}，将按 2 声道采集后在程序内转换为单声道')
+                return 2
+
+            if max_in > 0:
+                return max(1, min(requested_channels, max_in))
+            return requested_channels
+
+        def _open_with(rate: int, frames_per_buffer: int, idx: Optional[int], channels: int):
             kwargs = dict(
                 format=pyaudio.paInt16,
-                channels=config.CHANNELS,
+                channels=int(channels),
                 rate=int(rate),
                 input=True,
                 frames_per_buffer=int(frames_per_buffer),
@@ -828,13 +861,11 @@ async def init_audio_stream():
             return mic.open(**kwargs)
 
         def _get_device_default_rate(idx: Optional[int]) -> Optional[int]:
-            try:
-                info = mic.get_device_info_by_index(int(idx)) if idx is not None else mic.get_default_input_device_info()
+            info = _get_device_info(idx)
+            if info:
                 r = info.get('defaultSampleRate')
                 if r:
                     return int(round(float(r)))
-            except Exception:
-                return None
             return None
 
         def _init_resampler(in_rate: int, out_rate: int):
@@ -844,18 +875,68 @@ async def init_audio_stream():
                 _resampler = AudioResampler(
                     input_rate=in_rate,
                     output_rate=out_rate,
-                    channels=int(config.CHANNELS),
+                    channels=target_channels,
                     sample_width=2,
                 )
             else:
                 _resampler = None
 
+        def _init_debug_audio_recorders(in_rate: int, out_rate: int):
+            """初始化调试音频录制器。"""
+            global _debug_pre_audio_recorder, _debug_audio_recorder
+
+            if _debug_pre_audio_recorder is not None:
+                _debug_pre_audio_recorder.close()
+                _debug_pre_audio_recorder = None
+
+            if _debug_audio_recorder is not None:
+                _debug_audio_recorder.close()
+                _debug_audio_recorder = None
+
+            output_dir = getattr(config, 'DEBUG_AUDIO_OUTPUT_DIR', 'debug_audio')
+
+            if getattr(config, 'SAVE_PRE_RESAMPLE_AUDIO', False):
+                try:
+                    _debug_pre_audio_recorder = WaveDebugRecorder(
+                        output_dir=output_dir,
+                        input_rate=in_rate,
+                        sample_rate=in_rate,
+                        channels=int(capture_channels),
+                        sample_width=2,
+                        file_prefix='pre_resample',
+                    )
+                    print(f'[Audio] 正在录制重采样前的音频: {_debug_pre_audio_recorder.file_path}')
+                except Exception as e:
+                    _debug_pre_audio_recorder = None
+                    print(f'[Audio] 无法初始化重采样前调试录音: {e}')
+
+            if getattr(config, 'SAVE_POST_RESAMPLE_AUDIO', False):
+                try:
+                    _debug_audio_recorder = WaveDebugRecorder(
+                        output_dir=output_dir,
+                        input_rate=in_rate,
+                        sample_rate=out_rate,
+                        channels=target_channels,
+                        sample_width=2,
+                        file_prefix='post_resample',
+                    )
+                    print(f'[Audio] 正在录制重采样后的音频: {_debug_audio_recorder.file_path}')
+                except Exception as e:
+                    _debug_audio_recorder = None
+                    print(f'[Audio] 无法初始化重采样后调试录音: {e}')
+
         # 先尝试按 16k（ASR 期望）打开；失败则按设备默认采样率打开并重采样
         try:
             input_sample_rate = target_rate
             input_block_size = int(config.BLOCK_SIZE)
+            capture_channels = _resolve_capture_channels(int(device_index) if device_index is not None else None)
             _init_resampler(target_rate, target_rate)
-            stream = _open_with(target_rate, input_block_size, int(device_index) if device_index is not None else None)
+            stream = _open_with(
+                target_rate,
+                input_block_size,
+                int(device_index) if device_index is not None else None,
+                capture_channels,
+            )
         except Exception as e_open_16k:
             device_rate = _get_device_default_rate(int(device_index) if device_index is not None else None)
 
@@ -866,16 +947,23 @@ async def init_audio_stream():
                 try:
                     input_sample_rate = int(device_rate)
                     input_block_size = int(scaled_block)
+                    capture_channels = _resolve_capture_channels(int(device_index) if device_index is not None else None)
                     _init_resampler(input_sample_rate, target_rate)
-                    stream = _open_with(input_sample_rate, input_block_size, int(device_index) if device_index is not None else None)
-                    print(f"[Audio] 设备不支持 {target_rate}Hz，已使用 {input_sample_rate}Hz 采集并实时重采样")
+                    stream = _open_with(
+                        input_sample_rate,
+                        input_block_size,
+                        int(device_index) if device_index is not None else None,
+                        capture_channels,
+                    )
+                    print(f"[Audio] 设备不支持 {target_rate}Hz，已使用 {input_sample_rate}Hz / {capture_channels}ch 采集并实时重采样")
                 except Exception as e_open_device_rate:
                     # 最后回退系统默认
                     try:
                         input_sample_rate = target_rate
                         input_block_size = int(config.BLOCK_SIZE)
+                        capture_channels = _resolve_capture_channels(None)
                         _init_resampler(target_rate, target_rate)
-                        stream = _open_with(target_rate, input_block_size, None)
+                        stream = _open_with(target_rate, input_block_size, None, capture_channels)
                         print(f"[Audio] 指定麦克风设备不可用，已回退到系统默认：{e_open_device_rate}")
                     except Exception:
                         raise
@@ -884,11 +972,18 @@ async def init_audio_stream():
                 try:
                     input_sample_rate = target_rate
                     input_block_size = int(config.BLOCK_SIZE)
+                    capture_channels = _resolve_capture_channels(None)
                     _init_resampler(target_rate, target_rate)
-                    stream = _open_with(target_rate, input_block_size, None)
+                    stream = _open_with(target_rate, input_block_size, None, capture_channels)
                     print(f"[Audio] 指定麦克风设备不可用，已回退到系统默认：{e_open_16k}")
                 except Exception:
                     raise
+
+        print(f'[Audio] 实际采集格式: {input_sample_rate}Hz / {capture_channels}ch / 16-bit')
+        if capture_channels != target_channels:
+            print(f'[Audio] 发送给识别器前将转换为: {target_rate}Hz / {target_channels}ch / 16-bit')
+
+        _init_debug_audio_recorders(input_sample_rate, target_rate)
         return stream
     
     return await loop.run_in_executor(executor, _init)
@@ -896,16 +991,26 @@ async def init_audio_stream():
 
 async def close_audio_stream():
     """异步关闭音频流"""
-    global mic, stream
+    global mic, stream, _debug_pre_audio_recorder, _debug_audio_recorder
     loop = asyncio.get_event_loop()
     
     def _close():
-        global mic, stream
+        global mic, stream, _debug_pre_audio_recorder, _debug_audio_recorder
         if stream:
             stream.stop_stream()
             stream.close()
         if mic:
             mic.terminate()
+        if _debug_pre_audio_recorder:
+            saved_file = _debug_pre_audio_recorder.file_path
+            _debug_pre_audio_recorder.close()
+            print(f'[Audio] 重采样前的音频已保存到: {saved_file}')
+            _debug_pre_audio_recorder = None
+        if _debug_audio_recorder:
+            saved_file = _debug_audio_recorder.file_path
+            _debug_audio_recorder.close()
+            print(f'[Audio] 重采样后的音频已保存到: {saved_file}')
+            _debug_audio_recorder = None
         stream = None
         mic = None
     
@@ -914,7 +1019,7 @@ async def close_audio_stream():
 
 async def read_audio_data():
     """异步读取音频数据"""
-    global stream, _resampler
+    global stream, _resampler, capture_channels, _debug_pre_audio_recorder, _debug_audio_recorder
     if not stream:
         return None
     
@@ -925,9 +1030,24 @@ async def read_audio_data():
             data = stream.read(input_block_size, exception_on_overflow=False)
             if not data:
                 return None
-            if _resampler is not None:
-                return _resampler.resample(data)
-            return data
+            if _debug_pre_audio_recorder is not None:
+                _debug_pre_audio_recorder.write(data)
+
+            capture_data = data
+            if capture_channels != int(config.CHANNELS):
+                samples = np.frombuffer(data, dtype=np.int16)
+                num_frames = len(samples) // int(capture_channels)
+                if num_frames <= 0:
+                    return b''
+                frames = samples[: num_frames * int(capture_channels)].reshape(num_frames, int(capture_channels)).astype(np.int32)
+                mono = np.rint(np.mean(frames, axis=1))
+                mono = np.clip(mono, -32768, 32767).astype(np.int16)
+                capture_data = mono.tobytes()
+
+            processed_data = _resampler.resample(capture_data) if _resampler is not None else capture_data
+            if _debug_audio_recorder is not None and processed_data:
+                _debug_audio_recorder.write(processed_data)
+            return processed_data
         except Exception as e:
             print(f'Error reading audio data: {e}')
             return None
@@ -952,8 +1072,11 @@ async def audio_capture_task(recognizer: SpeechRecognizer):
         while not stop_event.is_set():
             # 始终读取音频数据,避免缓冲区积压
             data = await read_audio_data()
-            if not data:
+            if data is None:
                 break
+            if not data:
+                await asyncio.sleep(0.001)
+                continue
             
             # 只有在识别激活时才发送音频数据,否则丢弃
             if recognition_active:

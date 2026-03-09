@@ -6,6 +6,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _get_env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {'', '0', 'false', 'no', 'off'}
+
 # ============================================================================
 # 语音识别后端配置
 # ============================================================================
@@ -71,6 +78,15 @@ DTYPE = 'int16'  # 数据类型
 BITS = 16  # 每个采样的位数
 FORMAT_PCM = 'pcm'  # 音频数据格式
 BLOCK_SIZE = 1600  # 每个缓冲区的帧数
+
+# 是否将重采样后的音频保存到本地 WAV（调试用）
+SAVE_POST_RESAMPLE_AUDIO = _get_env_bool('SAVE_POST_RESAMPLE_AUDIO', False)
+
+# 是否将重采样前的原始采集音频保存到本地 WAV（调试用）
+SAVE_PRE_RESAMPLE_AUDIO = _get_env_bool('SAVE_PRE_RESAMPLE_AUDIO', False)
+
+# 调试音频输出目录（相对路径时相对于项目根目录）
+DEBUG_AUDIO_OUTPUT_DIR = os.getenv('DEBUG_AUDIO_OUTPUT_DIR', 'debug_audio').strip() or 'debug_audio'
 
 # ============================================================================
 # 翻译语言配置
