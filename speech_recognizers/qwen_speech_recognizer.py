@@ -55,8 +55,8 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
 
     def on_close(self, code, msg) -> None:  # type: ignore[override]
         print(f"[WebSocket] Connection closed: code={code}, msg={msg}")
-        self._user_callback.on_session_stopped()
-        self._recognizer._notify_closed()
+        if self._recognizer._notify_closed(self):
+            self._user_callback.on_session_stopped()
 
     def on_event(self, message: Dict[str, Any]) -> None:  # type: ignore[override]
         if not isinstance(message, dict):
@@ -72,6 +72,8 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
             self._handle_transcription_completed(message)
         elif event_type == "conversation.item.input_audio_transcription.failed":
             self._handle_transcription_failed(message)
+        elif event_type == "session.finished":
+            self._recognizer._handle_session_finished(self)
         elif event_type == "response.done":
             self._recognizer._update_metrics(self._conversation)
         elif event_type == "error":
@@ -170,6 +172,10 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         self._pause_finalize_timer: Optional[threading.Timer] = None
         self._pause_sequence: int = 0
         self._suppressed_server_final_sequence: Optional[int] = None
+        self._closing_conversations: Dict[
+            _QwenOmniCallbackAdapter,
+            OmniRealtimeConversation,
+        ] = {}
         self._keepalive_thread: Optional[threading.Thread] = None
         self._keepalive_stop_event = threading.Event()
         self._connection_closed: bool = False  # 标记连接是否已关闭
@@ -277,15 +283,21 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         
         # 停止心跳线程
         self._stop_keepalive()
+
+        with self._lock:
+            closing_conversations = list(self._closing_conversations.values())
+            self._closing_conversations.clear()
         
         conversation = self._teardown_conversation(close=False)
-        if conversation is None:
-            return
-        if not self._enable_turn_detection:
+        if conversation is not None and not self._enable_turn_detection:
             with suppress(Exception):
                 conversation.commit()
-        with suppress(Exception):
-            conversation.close()
+        if conversation is not None:
+            with suppress(Exception):
+                conversation.close()
+        for closing_conversation in closing_conversations:
+            with suppress(Exception):
+                closing_conversation.close()
         with self._lock:
             self._paused = False
             self._last_partial_text = ""
@@ -330,41 +342,32 @@ class QwenSpeechRecognizer(SpeechRecognizer):
 
     def pause(self) -> None:
         conversation: Optional[OmniRealtimeConversation] = None
-        pause_sequence: Optional[int] = None
+        adapter: Optional[_QwenOmniCallbackAdapter] = None
         with self._lock:
             if self._paused:
                 return
             self._paused = True
             self._pause_started_at = time.monotonic()
             self._pause_sequence += 1
-            pause_sequence = self._pause_sequence
             self._suppressed_server_final_sequence = None
             conversation = self._conversation
+            adapter = self._adapter
+            if conversation is not None and adapter is not None:
+                self._closing_conversations[adapter] = conversation
+                self._conversation = None
+                self._adapter = None
+                self._connection_closed = True
 
         self._cancel_pause_finalize_timer()
-        if pause_sequence is not None:
-            self._schedule_pause_finalize_timer(pause_sequence)
 
         if conversation is not None:
-            # VAD和手动commit不能同时使用
-            if self._enable_turn_detection:
-                # 启用VAD时，发送静音音频触发断句
-                # 静音时长应比VAD的静音检测时长稍长，确保触发断句
+            try:
+                self._stop_keepalive()
+                self._finish_conversation(conversation)
+            except Exception as e:
+                print(f"[WebSocket] Error finishing session on pause: {e}")
                 with suppress(Exception):
-                    silence_duration_ms = self._turn_detection_silence_duration_ms or 800
-                    # 多加200ms确保触发
-                    silence_duration_ms += 200
-                    sample_rate = self._sample_rate or 16000
-                    # 计算需要的静音帧数
-                    silence_frames = int(sample_rate * silence_duration_ms / 1000)
-                    # 生成静音数据（16位PCM，单声道）
-                    silence_data = b'\x00' * (silence_frames * 2)
-                    audio_b64 = base64.b64encode(silence_data).decode("ascii")
-                    conversation.append_audio(audio_b64)
-            else:
-                # 禁用VAD时，手动调用commit触发断句
-                with suppress(Exception):
-                    conversation.commit()
+                    conversation.close()
 
     def resume(self) -> None:
         should_reconnect = False
@@ -427,55 +430,12 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             print(f"[Qwen] pause 到最终结果耗时: {pause_elapsed_ms}ms")
         return True
 
-    def _schedule_pause_finalize_timer(self, pause_sequence: int) -> None:
-        timeout_seconds = self._pause_finalize_timeout_ms / 1000.0
-        timer = threading.Timer(
-            timeout_seconds,
-            self._emit_pause_finalize_result,
-            args=(pause_sequence,),
-        )
-        timer.daemon = True
-        with self._lock:
-            if not self._paused or pause_sequence != self._pause_sequence:
-                return
-            self._pause_finalize_timer = timer
-        timer.start()
-
     def _cancel_pause_finalize_timer(self) -> None:
         with self._lock:
             timer = self._pause_finalize_timer
             self._pause_finalize_timer = None
         if timer is not None:
             timer.cancel()
-
-    def _emit_pause_finalize_result(self, pause_sequence: int) -> None:
-        callback: Optional[SpeechRecognitionCallback] = None
-        text = ""
-        with self._lock:
-            if self._pause_finalize_timer is not None and pause_sequence == self._pause_sequence:
-                self._pause_finalize_timer = None
-            if not self._paused or pause_sequence != self._pause_sequence:
-                return
-            if self._suppressed_server_final_sequence == pause_sequence:
-                return
-            if not self._last_partial_text or self._callback is None:
-                return
-            text = self._last_partial_text
-            self._last_partial_text = ""
-            self._pause_started_at = None
-            self._suppressed_server_final_sequence = pause_sequence
-            callback = self._callback
-
-        event = RecognitionEvent(
-            text=text,
-            is_final=True,
-            raw={
-                "type": "conversation.item.input_audio_transcription.completed",
-                "synthetic": True,
-                "reason": "pause_finalize_timeout",
-            },
-        )
-        callback.on_result(event)
 
     def _create_adapter(self) -> _QwenOmniCallbackAdapter:
         if self._callback is None:
@@ -501,6 +461,9 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         if self._corpus_text:
             params["corpus_text"] = self._corpus_text
         return TranscriptionParams(**params)
+
+    def _finish_conversation(self, conversation: OmniRealtimeConversation) -> None:
+        conversation.end_session()
 
     def _teardown_conversation(self, *, close: bool) -> Optional[OmniRealtimeConversation]:
         # 先停止心跳
@@ -547,13 +510,29 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         with self._lock:
             self._session_id = session_id
 
-    def _notify_closed(self) -> None:
+    def _handle_session_finished(self, adapter: _QwenOmniCallbackAdapter) -> None:
+        conversation: Optional[OmniRealtimeConversation] = None
         with self._lock:
+            conversation = self._closing_conversations.pop(adapter, None)
+            if conversation is None and self._adapter is adapter:
+                conversation = self._conversation
+        if conversation is not None:
+            with suppress(Exception):
+                conversation.close()
+
+    def _notify_closed(self, adapter: Optional[_QwenOmniCallbackAdapter] = None) -> bool:
+        with self._lock:
+            if adapter is not None and adapter in self._closing_conversations:
+                self._closing_conversations.pop(adapter, None)
+                return False
+            if adapter is not None and self._adapter is not adapter:
+                return False
             self._connection_closed = True  # 标记连接已关闭
             self._conversation = None
             self._adapter = None
             # 注意：不要重置 _paused，因为可能需要保持暂停状态
             # 也不要重置 _should_run，因为可能需要自动重连
+        return True
 
     def _reconnect(self) -> None:
         """重新建立WebSocket连接"""
@@ -634,6 +613,8 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._keepalive_thread = None
         
         if thread is not None and thread.is_alive():
+            if thread is threading.current_thread():
+                return
             thread.join(timeout=2.0)
 
     def _keepalive_worker(self) -> None:
