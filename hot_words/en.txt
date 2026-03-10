@@ -1,12 +1,8 @@
-CS
 CompSci
 ChatGPT
 Claude
 Gemini
 Deepseek
-DeepL
-LLM
-Context
 VRChat
 VRC
 Avatar
@@ -38,14 +34,8 @@ Rindo
 Rusk
 Karin
 Deltaflair
-GG
 emo
 MMD
-Australia
-token bucket
-rate limit
-Google Translate
 DeepL
 VAD
-Shader
 ASR
