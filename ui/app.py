@@ -264,6 +264,65 @@ def get_status():
     """获取服务状态"""
     return jsonify(service_status)
 
+@app.route('/api/subtitles', methods=['GET'])
+def get_subtitles():
+    """获取最新的一条字幕状态"""
+    try:
+        import sys
+        if 'main' in sys.modules:
+            import main as m
+            if hasattr(m, 'subtitles_state'):
+                state = m.subtitles_state.copy()
+                state['running'] = service_status['running']
+                state['show_reverse_translation'] = bool(getattr(config, 'ENABLE_REVERSE_TRANSLATION', False))
+                return jsonify(state)
+    except Exception:
+        pass
+    
+    return jsonify({
+        "original": "",
+        "translated": "",
+        "reverse_translated": "",
+        "ongoing": False,
+        "show_reverse_translation": bool(getattr(config, 'ENABLE_REVERSE_TRANSLATION', False)),
+        "running": service_status['running']
+    })
+
+@app.route('/panel', methods=['GET'])
+def panel():
+    """渲染迷你面板"""
+    return render_template('panel.html')
+
+@app.route('/api/open-panel', methods=['POST'])
+def open_panel():
+    """打开迷你面板窗口"""
+    try:
+        # 接收大面板传来的 API Keys 并写入环境变量
+        data = request.json or {}
+        api_keys = data.get('api_keys', {})
+        floating_mode = bool(data.get('floating_mode', False))
+        if api_keys.get('dashscope'):
+            os.environ['DASHSCOPE_API_KEY'] = api_keys['dashscope']
+        if api_keys.get('deepl'):
+            os.environ['DEEPL_API_KEY'] = api_keys['deepl']
+        if api_keys.get('llm'):
+            os.environ['LLM_API_KEY'] = api_keys['llm']
+        if api_keys.get('soniox'):
+            os.environ['SONIOX_API_KEY'] = api_keys['soniox']
+        if api_keys.get('doubao'):
+            os.environ['DOUBAO_API_KEY'] = api_keys['doubao']
+
+        import subprocess
+        python_exe = sys.executable
+        # script is at project root
+        panel_script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "panel_app.py")
+        initial_mode = "reverse-on" if getattr(config, 'ENABLE_REVERSE_TRANSLATION', False) else "reverse-off"
+        floating_mode_arg = "floating-on" if floating_mode else "floating-off"
+        subprocess.Popen([python_exe, panel_script, "http://127.0.0.1:5001/panel", initial_mode, floating_mode_arg])
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/audio/input-devices', methods=['GET'])
 def list_input_devices():

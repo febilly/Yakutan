@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yakutan Mini Panel</title>
+    <style>
+        :root {
+            --bg: #1e1e24;
+            --surface: #2b2b36;
+            --primary: #4e8cff;
+            --text-main: #f0f0f5;
+            --text-muted: #9ba1b0;
+            --success: #4ea86e;
+            --danger: #d46359;
+            --border: #3d3d4e;
+        }
+
+        body {
+            margin: 0;
+            padding: 8px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+
+        .container {
+            flex: 1;
+            display: flex;
+            padding: 0;
+            gap: 8px;
+            align-items: stretch;
+            min-width: 0;
+            max-width: 100%;
+        }
+
+        .text-container {
+            flex: 1 1 0%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 4px;
+            min-width: 0;
+            background-color: var(--surface);
+            padding: 4px 8px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .text-container.with-reverse {
+            justify-content: flex-start;
+            padding-top: 6px;
+            padding-bottom: 6px;
+        }
+
+        .text-line {
+            font-size: 1.05rem;
+            line-height: 1.4;
+            min-height: 22px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-align: left;
+        }
+
+        .text-line.hidden {
+            display: none;
+        }
+
+        .text-line.ongoing {
+            color: var(--text-muted);
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn {
+            width: 50px;
+            height: 50px;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: white;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            flex-shrink: 0;
+            align-self: center;
+            line-height: 1;
+        }
+
+        .btn svg {
+            display: block;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn-success {
+            background-color: var(--success);
+        }
+
+        .btn-danger {
+            background-color: var(--danger);
+        }
+
+        .btn-disabled {
+            background-color: var(--border);
+            color: var(--text-muted);
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        .resize-handle {
+            position: fixed;
+            background: transparent;
+            z-index: 9999;
+        }
+
+        .resize-handle.left {
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 6px;
+            cursor: ew-resize;
+        }
+
+        .resize-handle.right {
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 6px;
+            cursor: ew-resize;
+        }
+
+        .resize-handle.bottom {
+            left: 0;
+            right: 0;
+            bottom: 0;
+            height: 6px;
+            cursor: ns-resize;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="text-container">
+            <!-- 识别文本 -->
+            <div id="speech-text" class="text-line"></div>
+            <!-- 翻译文本 -->
+            <div id="trans-text" class="text-line"></div>
+            <!-- 反向翻译文本 -->
+            <div id="reverse-trans-text" class="text-line hidden"></div>
+        </div>
+        <div class="controls">
+            <button id="toggle-btn" class="btn btn-disabled" onclick="toggleService()"><svg width="20" height="20"
+                    viewBox="0 0 20 20" fill="white">
+                    <circle cx="10" cy="10" r="2" opacity="0.6" />
+                </svg></button>
+        </div>
+    </div>
+
+    <script>
+        let isRunning = false;
+        let lastShowReverseTranslation = null;
+
+        function initResizeHandles() {
+            if (!(window.pywebview && window.pywebview.api && window.pywebview.api.set_bounds)) {
+                return;
+            }
+
+            if (document.querySelector('.resize-handle')) {
+                return;
+            }
+
+            let resizing = false;
+            let resizeDir = null;
+            let startX = 0;
+            let startY = 0;
+            let startWidth = 0;
+            let startHeight = 0;
+            let startWinX = 0;
+            let startWinY = 0;
+            const minWidth = 400;
+
+            function getMinHeight() {
+                const textContainer = document.querySelector('.text-container');
+                return textContainer && textContainer.classList.contains('with-reverse') ? 120 : 100;
+            }
+
+            function stopResize() {
+                if (!resizing) {
+                    return;
+                }
+
+                resizing = false;
+                resizeDir = null;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                document.removeEventListener('mousemove', doResize);
+                document.removeEventListener('mouseup', stopResize);
+            }
+
+            function doResize(event) {
+                if (!resizing) {
+                    return;
+                }
+
+                let newWidth = startWidth;
+                let newHeight = startHeight;
+                let newX = startWinX;
+                let newY = startWinY;
+                const minHeight = getMinHeight();
+
+                if (resizeDir === 'left') {
+                    const rightEdge = startWinX + startWidth;
+                    newX = event.screenX;
+                    newWidth = Math.max(minWidth, rightEdge - newX);
+                    if (newWidth === minWidth) {
+                        newX = rightEdge - minWidth;
+                    }
+                } else if (resizeDir === 'right') {
+                    newWidth = Math.max(minWidth, startWidth + (event.clientX - startX));
+                } else if (resizeDir === 'bottom') {
+                    newHeight = Math.max(minHeight, startHeight + (event.clientY - startY));
+                }
+
+                if (window.pywebview && window.pywebview.api && window.pywebview.api.set_bounds) {
+                    window.pywebview.api.set_bounds(
+                        Math.round(newX),
+                        Math.round(newY),
+                        Math.round(newWidth),
+                        Math.round(newHeight)
+                    );
+                }
+            }
+
+            function startResize(direction, event) {
+                event.preventDefault();
+                event.stopPropagation();
+                resizing = true;
+                resizeDir = direction;
+                startX = event.clientX;
+                startY = event.clientY;
+                startWidth = window.innerWidth;
+                startHeight = window.innerHeight;
+                startWinX = window.screenX;
+                startWinY = window.screenY;
+                document.body.style.cursor = direction === 'bottom' ? 'ns-resize' : 'ew-resize';
+                document.body.style.userSelect = 'none';
+                document.addEventListener('mousemove', doResize);
+                document.addEventListener('mouseup', stopResize);
+            }
+
+            ['left', 'right', 'bottom'].forEach((direction) => {
+                const handle = document.createElement('div');
+                handle.className = `resize-handle ${direction}`;
+                handle.addEventListener('mousedown', (event) => startResize(direction, event));
+                document.body.appendChild(handle);
+            });
+        }
+
+        async function applyReverseTranslationMode(showReverseTranslation) {
+            const textContainer = document.querySelector('.text-container');
+            const elReverse = document.getElementById('reverse-trans-text');
+
+            textContainer.classList.toggle('with-reverse', showReverseTranslation);
+            elReverse.classList.toggle('hidden', !showReverseTranslation);
+            if (!showReverseTranslation && elReverse.textContent !== '') {
+                elReverse.textContent = '';
+            }
+            lastShowReverseTranslation = showReverseTranslation;
+        }
+
+        async function fetchState() {
+            try {
+                const statusRes = await fetch('/api/status');
+                const statusData = await statusRes.json();
+                const subRes = await fetch('/api/subtitles');
+                const subData = await subRes.json();
+
+                isRunning = statusData.running;
+                const btn = document.getElementById('toggle-btn');
+                await applyReverseTranslationMode(!!subData.show_reverse_translation);
+
+                if (isRunning) {
+                    btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" fill="white"><rect x="3" y="3" width="14" height="14" rx="2"/></svg>';
+                    btn.className = 'btn btn-danger';
+                } else {
+                    btn.innerHTML = '<svg width="22" height="22" viewBox="0 0 20 20" fill="white"><polygon points="5,2 18,10 5,18"/></svg>';
+                    btn.className = 'btn btn-success';
+                }
+
+                const elOrig = document.getElementById('speech-text');
+                const elTrans = document.getElementById('trans-text');
+                const elReverse = document.getElementById('reverse-trans-text');
+
+                if (isRunning) {
+                    // If text changes, we want to update and keep it scrolled to right 
+                    // (so if it overflows, the rightmost latest text is visible)
+                    if (elOrig.textContent !== subData.original) {
+                        elOrig.textContent = subData.original || '';
+                        elOrig.scrollLeft = elOrig.scrollWidth;
+                    }
+                    if (elTrans.textContent !== subData.translated) {
+                        elTrans.textContent = subData.translated || '';
+                        elTrans.scrollLeft = elTrans.scrollWidth;
+                    }
+                    if (subData.show_reverse_translation && elReverse.textContent !== (subData.reverse_translated || '')) {
+                        elReverse.textContent = subData.reverse_translated || '';
+                        elReverse.scrollLeft = elReverse.scrollWidth;
+                    }
+
+                    if (subData.ongoing) {
+                        elOrig.classList.add('ongoing');
+                        elTrans.classList.add('ongoing');
+                        elReverse.classList.add('ongoing');
+                    } else {
+                        elOrig.classList.remove('ongoing');
+                        elTrans.classList.remove('ongoing');
+                        elReverse.classList.remove('ongoing');
+                    }
+                } else {
+                    if (elOrig.textContent !== '' || elTrans.textContent !== '' || elReverse.textContent !== '') {
+                        elOrig.textContent = '';
+                        elTrans.textContent = '';
+                        elReverse.textContent = '';
+                    }
+                    elOrig.classList.remove('ongoing');
+                    elTrans.classList.remove('ongoing');
+                    elReverse.classList.remove('ongoing');
+                }
+            } catch (err) {
+                console.error("Failed to fetch state:", err);
+            }
+        }
+
+        async function toggleService() {
+            const btn = document.getElementById('toggle-btn');
+            btn.className = 'btn btn-disabled';
+            btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" fill="white"><circle cx="10" cy="10" r="2" opacity="0.6"/></svg>';
+
+            if (isRunning) {
+                await fetch('/api/service/stop', { method: 'POST' });
+            } else {
+                // API keys 和配置已由大面板在打开小面板时同步到后端，这里直接启动即可
+                await fetch('/api/service/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_keys: {} })
+                });
+            }
+            // Trigger an immediate fetch to update UI quickly
+            setTimeout(fetchState, 500);
+        }
+
+        initResizeHandles();
+        setInterval(fetchState, 300);
+        fetchState();
+    </script>
+</body>
+
+</html>

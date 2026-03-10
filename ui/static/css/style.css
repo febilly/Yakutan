@@ -173,10 +173,24 @@ main {
 .control-buttons-left {
     display: flex;
     gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
 }
 
 .control-buttons-right {
     margin-left: auto;
+}
+
+.panel-mode-toggle {
+    display: flex;
+    align-items: center;
+    margin-left: 8px;
+}
+
+.compact-switch-label {
+    justify-content: flex-start;
+    gap: 10px;
+    white-space: nowrap;
 }
 
 .btn {
@@ -666,6 +680,7 @@ footer a:hover {
     .control-buttons-left {
         flex-direction: column;
         width: 100%;
+        align-items: stretch;
     }
     
     .control-buttons-right {
@@ -674,6 +689,16 @@ footer a:hover {
     }
     
     .control-buttons .btn {
+        width: 100%;
+    }
+
+    .panel-mode-toggle {
+        margin-left: 0;
+        width: 100%;
+    }
+
+    .compact-switch-label {
+        justify-content: space-between;
         width: 100%;
     }
     

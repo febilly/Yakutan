@@ -39,6 +39,18 @@
                                 data-i18n="btn.startService">启动服务</button>
                             <button id="stop-btn" class="btn btn-danger" onclick="stopService()" disabled
                                 data-i18n="btn.stopService">停止服务</button>
+                            <button id="panel-btn" class="btn btn-primary" onclick="openMiniPanel()"
+                                data-i18n="btn.openPanel"
+                                style="background-color: #5aa1d9; border-color: #5aa1d9; color: white;">小面板</button>
+                            <div class="panel-mode-toggle">
+                                <label class="switch-label compact-switch-label">
+                                    <span data-i18n="label.floatingPanelMode">悬浮窗模式</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="panel-floating-mode" onchange="onPanelFloatingModeChange()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                            </div>
                         </div>
                         <div class="control-buttons-right">
                             <button id="reset-btn" class="btn btn-warning" onclick="resetToDefaults()"
@@ -95,22 +107,23 @@
                             </div>
 
                             <div class="form-group language-setting-item">
-                                <label for="secondary-target-language" data-i18n="label.secondaryTargetLanguage">第二输出语言</label>
+                                <label for="secondary-target-language"
+                                    data-i18n="label.secondaryTargetLanguage">第二输出语言</label>
                                 <div class="language-combo" data-input-id="secondary-target-language">
-                                    <input type="text" id="secondary-target-language" class="form-control language-combo-input"
-                                        placeholder="en" autocomplete="off" spellcheck="false"
-                                        onchange="onSettingChange()" onblur="onSettingChange()">
+                                    <input type="text" id="secondary-target-language"
+                                        class="form-control language-combo-input" placeholder="en" autocomplete="off"
+                                        spellcheck="false" onchange="onSettingChange()" onblur="onSettingChange()">
                                     <button type="button" class="language-combo-toggle" aria-label="Select language">
                                         <span class="language-combo-toggle-icon"></span>
                                     </button>
                                     <div class="language-combo-menu"></div>
                                 </div>
-                                <small class="form-text" data-i18n="hint.secondaryTargetLanguage">可选第二输出语言，启用后会并行输出两行译文</small>
+                                <small class="form-text"
+                                    data-i18n="hint.secondaryTargetLanguage">可选第二输出语言，启用后会并行输出两行译文</small>
                             </div>
 
                             <div class="form-group language-setting-item">
-                                <label for="fallback-language"
-                                    data-i18n="label.fallbackLanguage">备用语言</label>
+                                <label for="fallback-language" data-i18n="label.fallbackLanguage">备用语言</label>
                                 <div class="language-combo" data-input-id="fallback-language">
                                     <input type="text" id="fallback-language" class="form-control language-combo-input"
                                         placeholder="en" autocomplete="off" spellcheck="false"
@@ -120,7 +133,8 @@
                                     </button>
                                     <div class="language-combo-menu"></div>
                                 </div>
-                                <small class="form-text" data-i18n="hint.fallbackLanguage">留空则禁用备用语言；当源语言与目标语言相同时会改用这里</small>
+                                <small class="form-text"
+                                    data-i18n="hint.fallbackLanguage">留空则禁用备用语言；当源语言与目标语言相同时会改用这里</small>
                             </div>
                         </div>
                     </div>
@@ -159,8 +173,9 @@
                             </select>
                             <small id="translation-api-warning" class="form-text"
                                 style="color: #e74c3c; display: none;"></small>
-                            <small id="qwen-mt-sensitive-words-hint" class="form-text" data-i18n="hint.sensitiveWordsRisk"
-                                style="display: none;">请注意敏感词问题，必要时请切换到 DeepL 或 Google 翻译</small>
+                            <small id="qwen-mt-sensitive-words-hint" class="form-text"
+                                data-i18n="hint.sensitiveWordsRisk" style="display: none;">请注意敏感词问题，必要时请切换到 DeepL 或
+                                Google 翻译</small>
                         </div>
 
                         <div class="form-group" id="openrouter-streaming-mode-group" style="display: none;">
@@ -175,7 +190,8 @@
                         </div>
 
                         <div class="subsection llm-settings-wrapper" id="llm-settings-wrapper" style="display: none;">
-                            <div class="collapsible-header llm-settings-header" onclick="toggleCollapsible('llm-settings')">
+                            <div class="collapsible-header llm-settings-header"
+                                onclick="toggleCollapsible('llm-settings')">
                                 <h3 data-i18n="section.llmSettings">LLM 设置</h3>
                                 <span class="collapse-icon collapsed" id="llm-settings-icon">▶</span>
                             </div>
@@ -183,13 +199,17 @@
                                 <div class="form-group">
                                     <label data-i18n="label.llmTemplate">模板</label>
                                     <div class="template-button-row">
-                                        <button type="button" class="btn btn-subtle btn-small" onclick="applyLLMTemplate('dashscope-qwen35')"
+                                        <button type="button" class="btn btn-subtle btn-small"
+                                            onclick="applyLLMTemplate('dashscope-qwen35')"
                                             data-i18n="btn.llmTemplateDashscopeQwen">阿里 Qwen3.5-Plus</button>
-                                        <button type="button" class="btn btn-subtle btn-small" onclick="applyLLMTemplate('openrouter')"
+                                        <button type="button" class="btn btn-subtle btn-small"
+                                            onclick="applyLLMTemplate('openrouter')"
                                             data-i18n="btn.llmTemplateOpenRouter">OpenRouter</button>
                                     </div>
-                                    <small class="form-text" data-i18n="hint.llmTemplate">模板会直接填写下方配置；阿里模板会把当前 DashScope Key 复制到 LLM Key。</small>
-                                    <small class="form-text" data-i18n="hint.sensitiveWordsRisk">请注意敏感词问题，必要时请切换到 DeepL 或 Google 翻译</small>
+                                    <small class="form-text" data-i18n="hint.llmTemplate">模板会直接填写下方配置；阿里模板会把当前 DashScope
+                                        Key 复制到 LLM Key。</small>
+                                    <small class="form-text" data-i18n="hint.sensitiveWordsRisk">请注意敏感词问题，必要时请切换到 DeepL
+                                        或 Google 翻译</small>
                                 </div>
 
                                 <div class="form-group">
@@ -211,9 +231,12 @@
                                 </div>
 
                                 <div class="form-group" id="openai-compat-extra-body-group">
-                                    <label for="openai-compat-extra-body-json" data-i18n="label.openaiCompatExtraBodyJson">自定义 extra_body（可选）</label>
-                                    <input type="text" id="openai-compat-extra-body-json" class="form-control" placeholder='{"enable_thinking": false}' onblur="onSettingChange()">
-                                    <small class="form-text" data-i18n="hint.openaiCompatExtraBodyJson">仅对 LLM 翻译生效，不影响 Qwen-MT。留空则不发送 extra_body。</small>
+                                    <label for="openai-compat-extra-body-json"
+                                        data-i18n="label.openaiCompatExtraBodyJson">自定义 extra_body（可选）</label>
+                                    <input type="text" id="openai-compat-extra-body-json" class="form-control"
+                                        placeholder='{"enable_thinking": false}' onblur="onSettingChange()">
+                                    <small class="form-text" data-i18n="hint.openaiCompatExtraBodyJson">仅对 LLM 翻译生效，不影响
+                                        Qwen-MT。留空则不发送 extra_body。</small>
                                 </div>
                             </div>
                         </div>
@@ -288,7 +311,8 @@
                                 <span data-i18n="hint.doubaoKey">用于豆包录音文件识别后端。</span>
                             </small>
                             <small class="form-text">
-                                <a href="https://console.volcengine.com/speech/new/setting/apikeys" target="_blank" data-i18n="link.getApiKey">获取API Key
+                                <a href="https://console.volcengine.com/speech/new/setting/apikeys" target="_blank"
+                                    data-i18n="link.getApiKey">获取API Key
                                     →</a>
                             </small>
 
@@ -319,7 +343,8 @@
                                 data-restart-required="true">
                                 <option value="qwen" data-i18n="asr.qwen">Qwen3 ASR（中文最准）</option>
                                 <option value="dashscope" data-i18n="asr.dashscope">Fun-ASR（备用）</option>
-                                <option value="doubao_file" data-i18n="asr.doubaoFile">豆包录音文件识别（必须使用切换麦，每次闭麦后进行识别）</option>
+                                <option value="doubao_file" data-i18n="asr.doubaoFile">豆包录音文件识别（必须使用切换麦，每次闭麦后进行识别）
+                                </option>
                                 <option value="soniox" data-i18n="asr.soniox">Soniox（支持多语混讲）</option>
                             </select>
                         </div>
@@ -396,7 +421,8 @@
                                 <label class="switch-label">
                                     <span data-i18n="label.showOriginalAndLangTag">显示原文及语言标识</span>
                                     <label class="switch">
-                                        <input type="checkbox" id="show-original-and-lang-tag" onchange="onSettingChange(this)">
+                                        <input type="checkbox" id="show-original-and-lang-tag"
+                                            onchange="onSettingChange(this)">
                                         <span class="slider"></span>
                                     </label>
                                 </label>

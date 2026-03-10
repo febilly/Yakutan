@@ -34,3 +34,4 @@ flask>=3.0.0
 flask-cors>=4.0.0
 
 vrchat_oscquery @ git+https://github.com/theepicsnail/vrchat_oscquery@main
+pywebview

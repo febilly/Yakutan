@@ -6,6 +6,7 @@ let autoSaveTimer = null;
 
 // 配置键名
 const CONFIG_STORAGE_KEY = 'vrchat_translator_config';
+const PANEL_FLOATING_MODE_STORAGE_KEY = 'panel_floating_mode';
 
 // 待显示的警告消息（用于自动切换翻译API）
 let pendingWarningMessage = null;
@@ -105,6 +106,33 @@ function persistSecretInputValue(inputId) {
     } else {
         localStorage.removeItem(keyName);
     }
+}
+
+function loadPanelFloatingModeSetting() {
+    const toggle = document.getElementById('panel-floating-mode');
+    if (!toggle) return;
+
+    toggle.checked = localStorage.getItem(PANEL_FLOATING_MODE_STORAGE_KEY) === 'true';
+}
+
+function savePanelFloatingModeSetting() {
+    const toggle = document.getElementById('panel-floating-mode');
+    if (!toggle) return;
+
+    localStorage.setItem(PANEL_FLOATING_MODE_STORAGE_KEY, toggle.checked.toString());
+}
+
+function onPanelFloatingModeChange() {
+    savePanelFloatingModeSetting();
+}
+
+function resetPanelFloatingModeSetting() {
+    const toggle = document.getElementById('panel-floating-mode');
+    if (toggle) {
+        toggle.checked = false;
+    }
+
+    localStorage.removeItem(PANEL_FLOATING_MODE_STORAGE_KEY);
 }
 
 function applyLLMTemplate(templateName) {
@@ -303,6 +331,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     loadConfigFromLocalStorage();
+    loadPanelFloatingModeSetting();
     loadAPIKeys();
     applyAsrBackendLocks();
     loadEnvStatus();
@@ -879,8 +908,8 @@ function onSettingChange(changedElement = null) {
         const status = await statusResponse.json();
         if (status.running) {
             try {
-            // 优先使用传入的变更元素；否则退回到当前活动元素
-            const el = changedElement || document.activeElement;
+                // 优先使用传入的变更元素；否则退回到当前活动元素
+                const el = changedElement || document.activeElement;
 
                 // 检查元素是否有 data-restart-required 属性
                 const needRestart = el && el.getAttribute('data-restart-required') === 'true';
@@ -1253,6 +1282,7 @@ async function resetToDefaults() {
     try {
         // 使用前端默认配置
         loadDefaultConfig();
+        resetPanelFloatingModeSetting();
 
         // 根据翻译开关显示/隐藏翻译选项
         toggleTranslationOptions();
@@ -1320,5 +1350,40 @@ function toggleCollapsible(id) {
         icon.textContent = '▶';
     } else {
         icon.textContent = '▼';
+    }
+}
+
+// 打开状态小面板
+async function openMiniPanel() {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+
+    try {
+        // 先将当前配置同步到后端
+        await saveConfig(true);
+
+        // 收集 API Keys 一并发送给后端，让后端写入环境变量
+        const apiKeys = {
+            dashscope: document.getElementById('dashscope-api-key').value.trim(),
+            deepl: document.getElementById('deepl-api-key').value.trim(),
+            llm: document.getElementById('llm-api-key').value.trim(),
+            doubao: document.getElementById('doubao-api-key').value.trim(),
+            soniox: document.getElementById('soniox-api-key').value.trim(),
+        };
+        const floatingMode = document.getElementById('panel-floating-mode')?.checked ?? false;
+
+        const response = await fetch('/api/open-panel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_keys: apiKeys, floating_mode: floatingMode }),
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            showMessage(t('msg.panelOpened') || '小面板已打开', 'success');
+        } else {
+            showMessage((t('msg.panelFailed') || '无法打开小面板: ') + result.error, 'error');
+        }
+    } catch (error) {
+        showMessage('请求失败: ' + error, 'error');
     }
 }

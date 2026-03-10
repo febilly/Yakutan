@@ -38,6 +38,8 @@ const translations = {
         'hint.autoSave': '所有配置将自动保存在浏览器本地',
         'btn.starting': '启动中...',
         'btn.stopping': '停止中...',
+        'btn.openPanel': '小面板',
+        'label.floatingPanelMode': '悬浮窗模式',
 
         // 基本设置
         'section.basicSettings': '基本设置',
@@ -205,6 +207,8 @@ const translations = {
         'msg.serviceStopSuccess': '服务停止成功',
         'msg.serviceStopFailed': '服务停止失败: ',
         'msg.stopServiceFailed': '停止服务失败',
+        'msg.panelOpened': '小面板已打开',
+        'msg.panelFailed': '无法打开小面板: ',
         'msg.defaultsRestored': '已恢复默认设置',
         'msg.restoreDefaultsFailed': '恢复默认设置失败',
         'msg.confirmReset': '确定要恢复默认设置吗？（API Keys将被保留）',
@@ -236,6 +240,8 @@ const translations = {
         'hint.autoSave': 'All settings are automatically saved in the browser',
         'btn.starting': 'Starting...',
         'btn.stopping': 'Stopping...',
+        'btn.openPanel': 'Mini Panel',
+        'label.floatingPanelMode': 'Floating Panel Mode',
 
         // Basic settings
         'section.basicSettings': 'Basic Settings',
@@ -403,6 +409,8 @@ const translations = {
         'msg.serviceStopSuccess': 'Service stopped successfully',
         'msg.serviceStopFailed': 'Service stop failed: ',
         'msg.stopServiceFailed': 'Failed to stop service',
+        'msg.panelOpened': 'Mini Panel opened',
+        'msg.panelFailed': 'Failed to open Mini Panel: ',
         'msg.defaultsRestored': 'Defaults restored',
         'msg.restoreDefaultsFailed': 'Failed to restore defaults',
         'msg.confirmReset': 'Are you sure you want to reset to defaults? (API Keys will be preserved)',
@@ -432,6 +440,8 @@ const translations = {
         'hint.autoSave': 'すべての設定はブラウザに自動保存されます',
         'btn.starting': '開始中...',
         'btn.stopping': '停止中...',
+        'btn.openPanel': 'ミニパネル',
+        'label.floatingPanelMode': 'フローティングウィンドウ',
 
         'section.basicSettings': '基本設定',
         'label.enableTranslation': '翻訳を有効化',
@@ -590,6 +600,8 @@ const translations = {
         'msg.serviceStopSuccess': 'サービスを停止しました',
         'msg.serviceStopFailed': 'サービス停止に失敗しました: ',
         'msg.stopServiceFailed': 'サービス停止に失敗しました',
+        'msg.panelOpened': 'ミニパネルを開きました',
+        'msg.panelFailed': 'ミニパネルを開けません: ',
         'msg.defaultsRestored': 'デフォルトを復元しました',
         'msg.restoreDefaultsFailed': 'デフォルト復元に失敗しました',
         'msg.confirmReset': 'デフォルトに戻しますか？（API Keys は保持されます）',
@@ -618,6 +630,8 @@ const translations = {
         'hint.autoSave': '모든 설정은 브라우저에 자동 저장됩니다',
         'btn.starting': '시작 중...',
         'btn.stopping': '중지 중...',
+        'btn.openPanel': '미니 패널',
+        'label.floatingPanelMode': '플로팅 창 모드',
 
         'section.basicSettings': '기본 설정',
         'label.enableTranslation': '번역 사용',
@@ -776,6 +790,8 @@ const translations = {
         'msg.serviceStopSuccess': '서비스가 중지되었습니다',
         'msg.serviceStopFailed': '서비스 중지 실패: ',
         'msg.stopServiceFailed': '서비스 중지에 실패했습니다',
+        'msg.panelOpened': '미니 패널이 열렸습니다',
+        'msg.panelFailed': '미니 패널을 열 수 없습니다: ',
         'msg.defaultsRestored': '기본값이 복원되었습니다',
         'msg.restoreDefaultsFailed': '기본값 복원에 실패했습니다',
         'msg.confirmReset': '정말 기본값으로 복원하시겠습니까? (API Keys는 유지됩니다)',

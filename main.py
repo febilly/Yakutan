@@ -314,6 +314,7 @@ def add_pinyin_if_needed(text: str, language: str) -> str:
 
 
 # ============ 全局变量 ============
+RECOGNIZER_CHANNELS = 1
 mic = None
 stream = None
 input_sample_rate = config.SAMPLE_RATE  # 实际采集采样率（可能与 config.SAMPLE_RATE 不同）
@@ -334,6 +335,19 @@ vocabulary_id = None  # 热词表 ID
 recognition_callback = None  # 识别回调实例（用于静音触发状态联动）
 PAUSE_RESUME_BACKENDS = {'qwen', 'soniox', 'doubao_file'}
 
+# 字幕状态（供控制面板轮询）
+subtitles_state = {
+    "original": "",
+    "translated": "",
+    "reverse_translated": "",
+    "ongoing": False
+}
+
+def update_subtitles(original: str, translated: str, ongoing: bool, reverse_translated: str = ""):
+    subtitles_state["original"] = original
+    subtitles_state["translated"] = translated
+    subtitles_state["reverse_translated"] = reverse_translated
+    subtitles_state["ongoing"] = ongoing
 
 def is_doubao_file_backend() -> bool:
     return CURRENT_ASR_BACKEND == 'doubao_file'
@@ -590,6 +604,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
             display_translation = get_display_translation_text(translated_text, actual_target)
             translation_display = build_streaming_output_line(display_translation)
+            current_original_display = subtitles_state.get("original", "") or f"{segment.strip()}……"
 
             if use_secondary_output and actual_secondary_target is not None:
                 secondary_display_translation = get_display_translation_text(
@@ -604,11 +619,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             else:
                 show_tag = getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True)
                 if show_tag:
-                    segment_display = f"{segment.strip()}……"
                     # 构建显示文本：使用检测到的实际语言
                     source_lang = self._normalize_lang(detected_lang)
                     target_lang = self._normalize_lang(actual_target)
-                    display_text = f"[{source_lang}→{target_lang}] {translation_display} ({segment_display})"
+                    display_text = f"[{source_lang}→{target_lang}] {translation_display} ({current_original_display})"
                     # 如果消息过长，尝试去掉原文部分
                     if len(display_text) > 144:
                         display_text = f"[{source_lang}→{target_lang}] {translation_display}"
@@ -617,6 +631,23 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             
             # 发送 OSC
             await osc_manager.send_text(display_text, ongoing=True)
+
+            current_reverse_trans = subtitles_state.get("reverse_translated", "")
+
+            if use_secondary_output and actual_secondary_target is not None:
+                update_subtitles(
+                    current_original_display,
+                    f"{translation_display}\n{secondary_translation_display}",
+                    True,
+                    current_reverse_trans,
+                )
+            else:
+                update_subtitles(
+                    current_original_display,
+                    translation_display,
+                    True,
+                    current_reverse_trans,
+                )
             
         except Exception as e:
             # logger.error(f"流式翻译错误: {e}")
@@ -645,6 +676,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         if is_ongoing:
             print(f'部分：{text}', end='\r')
             display_text = text
+            # 无论是否使用流式翻译，都在产生最终结果前保留上一句的翻译在屏幕上
+            current_trans = subtitles_state.get("translated", "")
+            current_reverse_trans = subtitles_state.get("reverse_translated", "")
+            update_subtitles(text, current_trans, True, current_reverse_trans)
             
             # 如果启用了流式翻译且当前 API 支持
             if config.ENABLE_TRANSLATION and getattr(config, 'TRANSLATE_PARTIAL_RESULTS', False):
@@ -674,6 +709,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 display_text = add_furigana_if_needed(text, source_lang)
                 display_text = add_pinyin_if_needed(display_text, source_lang)
                 print(f'识别：{display_text}')
+                update_subtitles(display_text, "", is_ongoing, "")
             else:
                 # 启用翻译，执行翻译逻辑
                 source_lang_info = language_detector.detect(text)
@@ -789,6 +825,17 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         if display_text is None:
             return
 
+        if is_translated:
+            if use_secondary_output and secondary_display_translated_text is not None:
+                update_subtitles(
+                    display_source_text,
+                    f"{display_translated_text}\n{secondary_display_translated_text}",
+                    is_ongoing,
+                    "",
+                )
+            else:
+                update_subtitles(display_source_text, str(display_translated_text), is_ongoing, "")
+
         should_send = (not is_ongoing) or should_output_partial_results()
 
         if self.loop:
@@ -806,7 +853,17 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             print('[OSC] Warning: Event loop not set, cannot send OSC message.')
 
         if is_translated and config.ENABLE_REVERSE_TRANSLATION:
-            reverse_translation(translated_text, actual_target, normalized_source)
+            reverse_translated_text = reverse_translation(translated_text, actual_target, normalized_source)
+            if reverse_translated_text is not None:
+                current_original = subtitles_state.get("original", "")
+                current_translated = subtitles_state.get("translated", "")
+                current_ongoing = subtitles_state.get("ongoing", False)
+                update_subtitles(
+                    current_original,
+                    current_translated,
+                    current_ongoing,
+                    str(reverse_translated_text),
+                )
 
 
 async def init_audio_stream():
@@ -821,7 +878,7 @@ async def init_audio_stream():
         mic = pyaudio.PyAudio()
         device_index = getattr(config, 'MIC_DEVICE_INDEX', None)
         target_rate = int(config.SAMPLE_RATE)
-        target_channels = int(config.CHANNELS)
+        target_channels = RECOGNIZER_CHANNELS
 
         def _get_device_info(idx: Optional[int]) -> Optional[dict]:
             try:
@@ -1034,7 +1091,7 @@ async def read_audio_data():
                 _debug_pre_audio_recorder.write(data)
 
             capture_data = data
-            if capture_channels != int(config.CHANNELS):
+            if capture_channels != RECOGNIZER_CHANNELS:
                 samples = np.frombuffer(data, dtype=np.int16)
                 num_frames = len(samples) // int(capture_channels)
                 if num_frames <= 0:
@@ -1224,6 +1281,9 @@ def handle_mute_change_sync(is_muted):
 async def main(keep_oscquery_alive: bool = False):
     """主异步函数"""
     global recognition_instance, recognition_active, vocabulary_id, CURRENT_ASR_BACKEND, recognition_started, executor, stop_event, main_loop, recognition_callback
+
+    # 启动时清空翻译屏幕残留
+    update_subtitles("", "", False)
 
     main_loop = asyncio.get_running_loop()
     

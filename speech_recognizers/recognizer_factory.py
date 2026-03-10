@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 import dashscope
 import config
 
-from .base_speech_recognizer import SpeechRecognitionCallback, SpeechRecognizer
+from .base_speech_recognizer import MonoAudioSpeechRecognizer, SpeechRecognitionCallback, SpeechRecognizer
 from .dashscope_speech_recognizer import DashscopeSpeechRecognizer
 from .doubao_file_speech_recognizer import DoubaoFileSpeechRecognizer
 
@@ -121,6 +121,14 @@ def create_recognizer(
         ValueError: 当后端不支持时
         RuntimeError: 当依赖缺失时
     """
+    requested_input_channels = (
+        extra_kwargs.pop('input_channels', None)
+        or extra_kwargs.pop('num_channels', None)
+        or extra_kwargs.pop('channels', None)
+        or 1
+    )
+    input_channels = max(1, int(requested_input_channels))
+
     if backend == 'qwen':
         if QwenSpeechRecognizer is None:
             raise RuntimeError('QwenSpeechRecognizer 不可用，请安装相关依赖')
@@ -150,12 +158,13 @@ def create_recognizer(
         
         # 热词语料
         if corpus_text:
-            recognition_kwargs['corpus_text'] = f"这是一段发生在在线多人社交游戏VRChat内的对话。以下是可能出现的词汇:\n{corpus_text}"
+            recognition_kwargs['corpus_text'] = f"{corpus_text}"
         
         # 合并额外参数
         recognition_kwargs.update(extra_kwargs)
-        
-        return QwenSpeechRecognizer(callback=callback, **recognition_kwargs)
+
+        recognizer = QwenSpeechRecognizer(callback=callback, **recognition_kwargs)
+        return MonoAudioSpeechRecognizer(recognizer, input_channels=input_channels)
     
     elif backend == 'dashscope':
         recognition_kwargs = {
@@ -171,8 +180,9 @@ def create_recognizer(
         
         # 合并额外参数
         recognition_kwargs.update(extra_kwargs)
-        
-        return DashscopeSpeechRecognizer(callback=callback, **recognition_kwargs)
+
+        recognizer = DashscopeSpeechRecognizer(callback=callback, **recognition_kwargs)
+        return MonoAudioSpeechRecognizer(recognizer, input_channels=input_channels)
     
     elif backend == 'soniox':
         if SonioxSpeechRecognizer is None or not WEBSOCKETS_AVAILABLE:
@@ -196,8 +206,11 @@ def create_recognizer(
         
         # 合并额外参数
         recognition_kwargs.update(extra_kwargs)
-        
-        return SonioxSpeechRecognizer(callback=callback, **recognition_kwargs)
+
+        recognition_kwargs['num_channels'] = 1
+
+        recognizer = SonioxSpeechRecognizer(callback=callback, **recognition_kwargs)
+        return MonoAudioSpeechRecognizer(recognizer, input_channels=input_channels)
 
     elif backend == 'doubao_file':
         doubao_api_key, doubao_app_id, doubao_access_key = _resolve_doubao_credentials()
@@ -220,7 +233,10 @@ def create_recognizer(
 
         recognition_kwargs.update(extra_kwargs)
 
-        return DoubaoFileSpeechRecognizer(callback=callback, **recognition_kwargs)
+        recognition_kwargs['channels'] = 1
+
+        recognizer = DoubaoFileSpeechRecognizer(callback=callback, **recognition_kwargs)
+        return MonoAudioSpeechRecognizer(recognizer, input_channels=input_channels)
     
     else:
         raise ValueError(f'不支持的识别后端: {backend}')
