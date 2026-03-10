@@ -18,28 +18,28 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
     SUPPORTS_CONTEXT = True
 
     LANGUAGE_NAME_MAP = {
-        'zh': 'Chinese',
-        'zh-cn': 'Simplified Chinese',
-        'zh-tw': 'Traditional Chinese',
-        'zh-hans': 'Simplified Chinese',
-        'zh-hant': 'Traditional Chinese',
-        'en': 'English',
-        'en-us': 'American English',
-        'en-gb': 'British English',
-        'ja': 'Japanese',
-        'ko': 'Korean',
-        'es': 'Spanish',
-        'fr': 'French',
-        'de': 'German',
-        'id': 'Indonesian',
-        'ru': 'Russian',
-        'ar': 'Arabic',
-        'pt': 'Portuguese',
-        'th': 'Thai',
-        'tl': 'Tagalog (Philippines)',
-        'it': 'Italian',
-        'tr': 'Turkish',
-        'fil': 'Filipino/Tagalog',
+        'zh': 'CHINESE',
+        'zh-cn': 'SIMPLIFIED CHINESE',
+        'zh-tw': 'TRADITIONAL CHINESE',
+        'zh-hans': 'SIMPLIFIED CHINESE',
+        'zh-hant': 'TRADITIONAL CHINESE',
+        'en': 'ENGLISH',
+        'en-us': 'AMERICAN ENGLISH',
+        'en-gb': 'BRITISH ENGLISH',
+        'ja': 'JAPANESE',
+        'ko': 'KOREAN',
+        'es': 'SPANISH',
+        'fr': 'FRENCH',
+        'de': 'GERMAN',
+        'id': 'INDONESIAN',
+        'ru': 'RUSSIAN',
+        'ar': 'ARABIC',
+        'pt': 'PORTUGUESE',
+        'th': 'THAI',
+        'tl': 'TAGALOG (Philippines)',
+        'it': 'ITALIAN',
+        'tr': 'TURKISH',
+        'fil': 'FILIPINO/TAGALOG',
     }
     
     def __init__(
@@ -131,13 +131,12 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         else:
             context_block = "None."
         
-        source_descriptor = self._describe_language(source_language)
         target_descriptor = self._describe_language(target_language)
 
         system_prompt = (
             "You are a strict translation assistant. "
-            f"Your output must be entirely in {target_descriptor}. "
-            "Do not answer in the source language. Do not explain anything. "
+            f"Your output must be entirely in **{target_descriptor}**. "
+            "Do not explain anything. "
             "Return only the translated text."
         )
 
@@ -152,10 +151,10 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             "3. Prefer natural phrasing that reads well for the target audience.\n"
             "4. Fix any obvious recognition errors in the source text.\n"
             "5. Maintain consistency with the previous translations shown above.\n"
-            f"6. The response must be written in {target_descriptor} only.\n"
+            f"6. The response must be written in **{target_descriptor}** only.\n"
             "7. If the draft in your head is not in the requested target language, rewrite it before answering.\n\n"
             "Task:\n"
-            f"Translate the text below inside <text> and </text> from **{source_descriptor}** to **{target_descriptor}**.\n\n"
+            f"Translate the text below inside <text> and </text> into **{target_descriptor}**.\n\n"
             "Text To Translate:\n"
             f"<text>{text}</text>"
         )
@@ -179,17 +178,16 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         """流式翻译模式（支持 partial 和 previous_translation）"""
         previous_translation = kwargs.get('previous_translation')
         is_partial = kwargs.get('is_partial', False)
-        source_descriptor = self._describe_language(source_language)
         target_descriptor = self._describe_language(target_language)
 
         system_prompt = (
             "You are a strict streaming translator assisting with VRChat conversations. "
-            f"Translate all provided source text from {source_descriptor} into {target_descriptor}. "
-            f"Your output must stay entirely in {target_descriptor}. "
+            f"Translate all provided text into **{target_descriptor}**. "
+            f"Your output must stay entirely in **{target_descriptor}**. "
             "Keep the style casual and friendly unless instructed otherwise. "
             "When a previous translation draft is supplied, behave like a streaming translator: reuse as much wording as possible and only make the smallest edits needed for accuracy and fluency. "
             "Maintain consistency with the previous translations in the conversation history. "
-            "Never answer in the source language. Output only the translation without commentary."
+            "Output only the translation without commentary."
         )
 
         user_sections = []
@@ -217,7 +215,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         else:
             user_sections.append("This is the final delivery for this utterance. Ensure the translation reads smoothly.")
 
-        user_sections.append(f"Mandatory output language: {target_descriptor}.")
+        user_sections.append(f"Mandatory output language: **{target_descriptor}**.")
         user_sections.append("If any wording is not in the requested target language, rewrite it before responding.")
         user_sections.append("Return only the translation text.")
 
