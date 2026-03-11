@@ -10,6 +10,9 @@ if TYPE_CHECKING:
     from .translation_apis.base_translation_api import BaseTranslationAPI
 
 
+CONTEXT_MARKER = "🔤"
+
+
 class TranslationHistoryEntry:
     """翻译历史条目"""
     def __init__(self, source_text: str, translated_text: str, target_language: str):
@@ -197,12 +200,8 @@ class ContextAwareTranslator:
                     )
             else:
                 # API 不支持原生上下文，使用标记法模拟
-                if self.context_aware and len(self.contexts) > 0:
-                    previous_caption = self._get_previous_caption()
-                    # 使用 <[text]> 标记当前文本
-                    input_text = f"{previous_caption}<=={text}==>"
-                else:
-                    input_text = text
+                previous_caption = self._get_previous_caption() if self.context_aware and len(self.contexts) > 0 else ""
+                input_text = f"{previous_caption}\n{CONTEXT_MARKER}{text}{CONTEXT_MARKER}"
                 
                 # 调用翻译 API（不传入 context 参数）
                 translated_text = self.translation_api.translate(
@@ -213,14 +212,14 @@ class ContextAwareTranslator:
                 )
                 
                 # 提取当前句子的翻译（如果有标记）
-                if self.context_aware and '<==' in translated_text:
+                if CONTEXT_MARKER in translated_text:
                     try:
-                        # 尝试提取 <==...==> 之间的内容
-                        start_idx = translated_text.rfind('<==')
-                        end_idx = translated_text.rfind('==>')
+                        # 尝试提取最后一对 🔤 之间的内容
+                        end_idx = translated_text.rfind(CONTEXT_MARKER)
+                        start_idx = translated_text.rfind(CONTEXT_MARKER, 0, end_idx)
                         if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
                             # 提取标记内的翻译
-                            extracted = translated_text[start_idx + 3:end_idx]
+                            extracted = translated_text[start_idx + len(CONTEXT_MARKER):end_idx]
                             # 清理翻译结果
                             translated_text = extracted.strip()
                     except Exception:
@@ -228,7 +227,7 @@ class ContextAwareTranslator:
                         pass
                 
                 # 清理结果中的标记符号
-                translated_text = translated_text.replace('<==', '').replace('==>', '')
+                translated_text = translated_text.replace(CONTEXT_MARKER, '').strip()
             
             translated_text = translated_text.strip()
             
