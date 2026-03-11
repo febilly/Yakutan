@@ -405,6 +405,17 @@
                                 </label>
                             </div>
                         </div>
+                        <div class="form-group">
+                            <label class="switch-label">
+                                <span data-i18n="label.showOriginalAndLangTag">显示原文及语言标识</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="show-original-and-lang-tag"
+                                        onchange="onSettingChange(this)">
+                                    <span class="slider"></span>
+                                </label>
+                            </label>
+                            <small class="form-text" data-i18n="hint.showOriginalAndLangTag">关闭后只显示译文</small>
+                        </div>
                     </div>
                 </section>
 
@@ -418,15 +429,10 @@
                         <div class="subsection">
                             <h3 data-i18n="subsection.display">显示设置</h3>
                             <div class="form-group">
-                                <label class="switch-label">
-                                    <span data-i18n="label.showOriginalAndLangTag">显示原文及语言标识</span>
-                                    <label class="switch">
-                                        <input type="checkbox" id="show-original-and-lang-tag"
-                                            onchange="onSettingChange(this)">
-                                        <span class="slider"></span>
-                                    </label>
-                                </label>
-                                <small class="form-text" data-i18n="hint.showOriginalAndLangTag">关闭后只显示译文</small>
+                                <label for="panel-width" data-i18n="label.panelWidth">小面板宽度（像素）</label>
+                                <input type="number" id="panel-width" class="form-control" min="300" max="2000"
+                                    step="20" value="600" onchange="onSettingChange()">
+                                <small class="form-text" data-i18n="hint.panelWidth">修改后对新打开的小面板生效</small>
                             </div>
                         </div>
 

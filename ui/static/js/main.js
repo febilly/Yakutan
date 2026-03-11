@@ -135,6 +135,16 @@ function resetPanelFloatingModeSetting() {
     localStorage.removeItem(PANEL_FLOATING_MODE_STORAGE_KEY);
 }
 
+function getNormalizedPanelWidth() {
+    const input = document.getElementById('panel-width');
+    if (!input) return 600;
+
+    const rawValue = parseInt(input.value, 10);
+    const normalizedValue = Math.min(2000, Math.max(300, Number.isFinite(rawValue) ? rawValue : 600));
+    input.value = normalizedValue;
+    return normalizedValue;
+}
+
 function applyLLMTemplate(templateName) {
     const baseUrlInput = document.getElementById('llm-base-url');
     const modelInput = document.getElementById('llm-model');
@@ -632,6 +642,11 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('language-detector').value = config.language_detector.type || 'cjke';
             }
 
+            if (config.panel) {
+                document.getElementById('panel-width').value = config.panel.width || 600;
+                getNormalizedPanelWidth();
+            }
+
             console.log('✓ 已从浏览器加载配置');
         } else {
             // 如果没有保存的配置，使用前端默认值
@@ -699,6 +714,9 @@ function loadDefaultConfig() {
     // 语言检测器
     document.getElementById('language-detector').value = 'cjke';
 
+    // 小面板
+    document.getElementById('panel-width').value = 600;
+
     console.log('✓ 已加载前端默认配置');
     updateFuriganaVisibility();
     updateLLMSettingsVisibility();
@@ -745,6 +763,8 @@ async function loadConfigFromServer() {
 
         document.getElementById('language-detector').value = config.language_detector.type;
         document.getElementById('source-language').value = config.translation.source_language;
+        document.getElementById('panel-width').value = (config.panel && config.panel.width) || 600;
+        getNormalizedPanelWidth();
 
         // 保存到本地
         saveConfigToLocalStorage();
@@ -805,6 +825,9 @@ function saveConfigToLocalStorage() {
             },
             language_detector: {
                 type: document.getElementById('language-detector').value,
+            },
+            panel: {
+                width: getNormalizedPanelWidth(),
             }
         };
 
@@ -978,6 +1001,9 @@ async function saveConfig(autoSave = false) {
             },
             language_detector: {
                 type: document.getElementById('language-detector').value,
+            },
+            panel: {
+                width: getNormalizedPanelWidth(),
             }
         };
 

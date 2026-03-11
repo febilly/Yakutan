@@ -227,6 +227,9 @@ KEEPALIVE_INTERVAL = 30  # 设置为0则禁用心跳功能
 # 显示配置
 # ============================================================================
 
+# 小面板默认宽度（像素）
+PANEL_WIDTH = max(300, int(os.getenv('PANEL_WIDTH', '600') or 600))
+
 # 是否显示识别中的部分结果（ongoing）
 SHOW_PARTIAL_RESULTS = False  # True: 显示部分识别结果到聊天框（可能覆盖掉之前的翻译结果）
                                # False: 只显示完整识别结果

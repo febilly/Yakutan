@@ -82,6 +82,9 @@ def get_config_dict():
         'language_detector': {
             'type': config.LANGUAGE_DETECTOR_TYPE,
         },
+        'panel': {
+            'width': getattr(config, 'PANEL_WIDTH', 600),
+        },
         # OSC配置
         'osc': {
             'server_ip': config.OSC_SERVER_IP,
@@ -175,6 +178,11 @@ def update_config(config_data):
             ld = config_data['language_detector']
             if 'type' in ld:
                 config.LANGUAGE_DETECTOR_TYPE = ld['type']
+
+        if 'panel' in config_data:
+            panel = config_data['panel']
+            if 'width' in panel:
+                config.PANEL_WIDTH = max(300, int(panel['width']))
         
         return True, 'msg.configUpdated', '配置已更新'
     except json.JSONDecodeError:
@@ -318,7 +326,8 @@ def open_panel():
         panel_script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "panel_app.py")
         initial_mode = "reverse-on" if getattr(config, 'ENABLE_REVERSE_TRANSLATION', False) else "reverse-off"
         floating_mode_arg = "floating-on" if floating_mode else "floating-off"
-        subprocess.Popen([python_exe, panel_script, "http://127.0.0.1:5001/panel", initial_mode, floating_mode_arg])
+        panel_width_arg = str(max(300, int(getattr(config, 'PANEL_WIDTH', 600))))
+        subprocess.Popen([python_exe, panel_script, "http://127.0.0.1:5001/panel", initial_mode, floating_mode_arg, panel_width_arg])
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -534,6 +543,9 @@ def get_defaults():
         },
         'language_detector': {
             'type': 'cjke',
+        },
+        'panel': {
+            'width': 600,
         },
     })
 

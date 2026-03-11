@@ -371,6 +371,21 @@
             setTimeout(fetchState, 500);
         }
 
+        document.addEventListener('keydown', async (event) => {
+            if (event.key !== 'Escape') {
+                return;
+            }
+
+            event.preventDefault();
+
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.close_window) {
+                await window.pywebview.api.close_window();
+                return;
+            }
+
+            window.close();
+        });
+
         initResizeHandles();
         setInterval(fetchState, 300);
         fetchState();
