@@ -447,11 +447,20 @@
                         <span class="collapse-icon collapsed" id="quick-lang-settings-icon">▶</span>
                     </div>
                     <div class="collapsible-content collapsed" id="quick-lang-settings">
+                        <div class="form-group">
+                            <label class="switch-label">
+                                <span data-i18n="label.enableQuickLangBar">显示快捷切换按钮</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="enable-quick-lang-bar" checked onchange="onEnableQuickLangBarChange()">
+                                    <span class="slider"></span>
+                                </label>
+                            </label>
+                        </div>
                         <small class="form-text" style="margin-bottom: 12px; display: block;"
                             data-i18n="hint.quickLangButtons">设置小面板底部的4个快捷语言切换按钮</small>
                         <div class="language-settings-grid">
                             <div class="form-group language-setting-item">
-                                <label for="quick-lang-1" data-i18n="label.quickLangSlot">按钮 1</label>
+                                <label for="quick-lang-1"><span data-i18n="label.quickLangSlot">按钮</span> 1</label>
                                 <div class="language-combo" data-input-id="quick-lang-1">
                                     <input type="text" id="quick-lang-1" class="form-control language-combo-input"
                                         placeholder="en" autocomplete="off" spellcheck="false"
@@ -463,7 +472,7 @@
                                 </div>
                             </div>
                             <div class="form-group language-setting-item">
-                                <label for="quick-lang-2" data-i18n="label.quickLangSlot">按钮 2</label>
+                                <label for="quick-lang-2"><span data-i18n="label.quickLangSlot">按钮</span> 2</label>
                                 <div class="language-combo" data-input-id="quick-lang-2">
                                     <input type="text" id="quick-lang-2" class="form-control language-combo-input"
                                         placeholder="zh-CN" autocomplete="off" spellcheck="false"
@@ -475,7 +484,7 @@
                                 </div>
                             </div>
                             <div class="form-group language-setting-item">
-                                <label for="quick-lang-3" data-i18n="label.quickLangSlot">按钮 3</label>
+                                <label for="quick-lang-3"><span data-i18n="label.quickLangSlot">按钮</span> 3</label>
                                 <div class="language-combo" data-input-id="quick-lang-3">
                                     <input type="text" id="quick-lang-3" class="form-control language-combo-input"
                                         placeholder="ja" autocomplete="off" spellcheck="false"
@@ -487,7 +496,7 @@
                                 </div>
                             </div>
                             <div class="form-group language-setting-item">
-                                <label for="quick-lang-4" data-i18n="label.quickLangSlot">按钮 4</label>
+                                <label for="quick-lang-4"><span data-i18n="label.quickLangSlot">按钮</span> 4</label>
                                 <div class="language-combo" data-input-id="quick-lang-4">
                                     <input type="text" id="quick-lang-4" class="form-control language-combo-input"
                                         placeholder="ko" autocomplete="off" spellcheck="false"

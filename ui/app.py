@@ -7,6 +7,7 @@ import json
 import threading
 import logging
 from typing import Optional
+from urllib.parse import urlencode
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 import sys
@@ -353,6 +354,7 @@ def open_panel():
         data = request.json or {}
         api_keys = data.get('api_keys', {})
         floating_mode = bool(data.get('floating_mode', False))
+        quick_language_settings = data.get('quick_language_settings') or {}
         if api_keys.get('dashscope'):
             os.environ['DASHSCOPE_API_KEY'] = api_keys['dashscope']
         if api_keys.get('deepl'):
@@ -364,14 +366,34 @@ def open_panel():
         if api_keys.get('doubao'):
             os.environ['DOUBAO_API_KEY'] = api_keys['doubao']
 
+        quick_lang_defaults = ['en', 'zh-CN', 'ja', 'ko']
+        raw_quick_langs = quick_language_settings.get('languages')
+        panel_quick_langs = []
+        for index, fallback in enumerate(quick_lang_defaults):
+            value = fallback
+            if isinstance(raw_quick_langs, list) and index < len(raw_quick_langs):
+                candidate = str(raw_quick_langs[index]).strip()
+                if candidate:
+                    value = candidate
+            panel_quick_langs.append(value)
+
+        raw_quick_lang_enabled = quick_language_settings.get('enabled', True)
+        if isinstance(raw_quick_lang_enabled, str):
+            quick_lang_enabled = raw_quick_lang_enabled.strip().lower() not in {'', '0', 'false', 'no', 'off'}
+        else:
+            quick_lang_enabled = bool(raw_quick_lang_enabled)
+
         import subprocess
         python_exe = sys.executable
         # script is at project root
         panel_script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "panel_app.py")
+        panel_query = [('quick_lang_bar', '1' if quick_lang_enabled else '0')]
+        panel_query.extend(('quick_lang', lang) for lang in panel_quick_langs)
+        panel_url = f"http://127.0.0.1:5001/panel?{urlencode(panel_query)}"
         initial_mode = "reverse-on" if getattr(config, 'ENABLE_REVERSE_TRANSLATION', False) else "reverse-off"
         floating_mode_arg = "floating-on" if floating_mode else "floating-off"
         panel_width_arg = str(max(300, int(getattr(config, 'PANEL_WIDTH', 600))))
-        subprocess.Popen([python_exe, panel_script, "http://127.0.0.1:5001/panel", initial_mode, floating_mode_arg, panel_width_arg])
+        subprocess.Popen([python_exe, panel_script, panel_url, initial_mode, floating_mode_arg, panel_width_arg])
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

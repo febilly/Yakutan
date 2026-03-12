@@ -234,6 +234,7 @@ const translations = {
 
         // 快捷切换按钮
         'section.quickLangButtons': '快捷切换按钮',
+        'label.enableQuickLangBar': '显示快捷切换按钮',
         'hint.quickLangButtons': '设置小面板底部的4个快捷语言切换按钮',
         'label.quickLangSlot': '按钮',
     },
@@ -449,6 +450,7 @@ const translations = {
 
         // Quick language buttons
         'section.quickLangButtons': 'Quick Switch Buttons',
+        'label.enableQuickLangBar': 'Show quick switch buttons',
         'hint.quickLangButtons': 'Configure the 4 quick language switch buttons at the bottom of the mini panel',
         'label.quickLangSlot': 'Button',
     },
@@ -652,6 +654,7 @@ const translations = {
 
         // クイック言語ボタン
         'section.quickLangButtons': 'クイック切替ボタン',
+        'label.enableQuickLangBar': 'クイック切替ボタンを表示',
         'hint.quickLangButtons': 'ミニパネル下部の 4 つの言語クイック切替ボタンを設定します',
         'label.quickLangSlot': 'ボタン',
     },
@@ -855,6 +858,7 @@ const translations = {
 
         // 빠른 언어 버튼
         'section.quickLangButtons': '빠른 전환 버튼',
+        'label.enableQuickLangBar': '빠른 전환 버튼 표시',
         'hint.quickLangButtons': '미니 패널 하단의 4개 언어 빠른 전환 버튼을 설정합니다',
         'label.quickLangSlot': '버튼',
     }

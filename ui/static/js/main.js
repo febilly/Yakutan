@@ -543,10 +543,17 @@ function setupLanguageComboboxes() {
 }
 
 const QUICK_LANG_STORAGE_KEY = 'panel_quick_languages';
+const QUICK_LANG_BAR_ENABLED_KEY = 'panel_quick_lang_bar_enabled';
 const QUICK_LANG_DEFAULTS = ['en', 'zh-CN', 'ja', 'ko'];
 
 function loadQuickLanguageSettings() {
     try {
+        const toggle = document.getElementById('enable-quick-lang-bar');
+        if (toggle) {
+            const storedEnabled = localStorage.getItem(QUICK_LANG_BAR_ENABLED_KEY);
+            toggle.checked = storedEnabled === null ? true : storedEnabled === 'true';
+        }
+
         const stored = localStorage.getItem(QUICK_LANG_STORAGE_KEY);
         let langs = QUICK_LANG_DEFAULTS;
         if (stored) {
@@ -582,13 +589,39 @@ function resetQuickLanguageSettings() {
             input.value = QUICK_LANG_DEFAULTS[i];
         }
     }
+
+    const toggle = document.getElementById('enable-quick-lang-bar');
+    if (toggle) {
+        toggle.checked = true;
+    }
+
     localStorage.setItem(QUICK_LANG_STORAGE_KEY, JSON.stringify(QUICK_LANG_DEFAULTS));
+    localStorage.removeItem(QUICK_LANG_BAR_ENABLED_KEY);
 }
 
 function onQuickLangChange() {
     saveQuickLanguageSettings();
 }
 
+function onEnableQuickLangBarChange() {
+    const toggle = document.getElementById('enable-quick-lang-bar');
+    if (!toggle) return;
+    localStorage.setItem(QUICK_LANG_BAR_ENABLED_KEY, toggle.checked.toString());
+}
+
+function getQuickLanguageSettingsForPanel() {
+    const languages = [];
+    for (let i = 0; i < 4; i++) {
+        const input = document.getElementById(`quick-lang-${i + 1}`);
+        languages.push(input ? input.value.trim() || QUICK_LANG_DEFAULTS[i] : QUICK_LANG_DEFAULTS[i]);
+    }
+
+    const toggle = document.getElementById('enable-quick-lang-bar');
+    return {
+        enabled: toggle ? toggle.checked : true,
+        languages,
+    };
+}
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function () {
     // 先初始化 i18n 系统
@@ -1736,11 +1769,16 @@ async function openMiniPanel() {
             soniox: document.getElementById('soniox-api-key').value.trim(),
         };
         const floatingMode = document.getElementById('panel-floating-mode')?.checked ?? false;
+        const quickLanguageSettings = getQuickLanguageSettingsForPanel();
 
         const response = await fetch('/api/open-panel', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ api_keys: apiKeys, floating_mode: floatingMode }),
+            body: JSON.stringify({
+                api_keys: apiKeys,
+                floating_mode: floatingMode,
+                quick_language_settings: quickLanguageSettings,
+            }),
         });
         const result = await response.json();
 

@@ -516,6 +516,15 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     if segment:
                         return segment
         return None
+
+    @staticmethod
+    def _should_trigger_partial_translation(segment: Optional[str]) -> bool:
+        if not segment:
+            return False
+
+        min_chars = max(0, int(getattr(config, 'MIN_PARTIAL_TRANSLATION_CHARS', 2)))
+        normalized_segment = segment.strip().rstrip("。？！，、.?!,… ")
+        return len(normalized_segment) >= min_chars
     
     def on_session_started(self) -> None:
         logger.info('Speech recognizer session opened.')
@@ -685,7 +694,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             if config.ENABLE_TRANSLATION and getattr(config, 'TRANSLATE_PARTIAL_RESULTS', False):
                 segment = self._extract_streaming_segment(text)
                 if (
-                    segment and
+                    self._should_trigger_partial_translation(segment) and
                     segment != self.last_partial_source_segment and
                     segment != self.pending_partial_segment and
                     self.loop

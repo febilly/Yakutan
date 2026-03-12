@@ -149,6 +149,10 @@ ENABLE_TRANSLATION = True  # True: 识别后翻译文本
 # 'openrouter_streaming_deepl_hybrid' 时自动启用
 TRANSLATE_PARTIAL_RESULTS = False
 
+# 触发流式中间翻译所需的最小文本长度（字符数）
+# 仅影响中间翻译触发，不影响最终整句翻译
+MIN_PARTIAL_TRANSLATION_CHARS = 2
+
 # 混合模式阈值：静音触发终译时，若本句已发送的流式翻译请求次数 <= 此值，优先用 DeepL 终译
 # 否则沿用 LLM 终译，降低译文大幅跳变的概率
 STREAMING_FINAL_DEEPL_MAX_UPDATES = 1
