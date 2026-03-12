@@ -230,7 +230,12 @@ const translations = {
         'msg.doubaoKeyFormat': '豆包 API Key 无效',
 
         // 语言选择器
-        'label.uiLanguage': '界面语言'
+        'label.uiLanguage': '界面语言',
+
+        // 快捷切换按钮
+        'section.quickLangButtons': '快捷切换按钮',
+        'hint.quickLangButtons': '设置小面板底部的4个快捷语言切换按钮',
+        'label.quickLangSlot': '按钮',
     },
 
     'en': {
@@ -440,7 +445,12 @@ const translations = {
         'msg.doubaoKeyFormat': 'Invalid Doubao API Key',
 
         // Language selector
-        'label.uiLanguage': 'UI Language'
+        'label.uiLanguage': 'UI Language',
+
+        // Quick language buttons
+        'section.quickLangButtons': 'Quick Switch Buttons',
+        'hint.quickLangButtons': 'Configure the 4 quick language switch buttons at the bottom of the mini panel',
+        'label.quickLangSlot': 'Button',
     },
 
     'ja': {
@@ -638,7 +648,12 @@ const translations = {
         'msg.doubaoKeyRequired': 'Doubao 録音ファイルバックエンドには API Key が必要です',
         'msg.doubaoKeyFormat': 'Doubao API Key が無効です',
 
-        'label.uiLanguage': '表示言語'
+        'label.uiLanguage': '表示言語',
+
+        // クイック言語ボタン
+        'section.quickLangButtons': 'クイック切替ボタン',
+        'hint.quickLangButtons': 'ミニパネル下部の 4 つの言語クイック切替ボタンを設定します',
+        'label.quickLangSlot': 'ボタン',
     },
 
     'ko': {
@@ -836,7 +851,12 @@ const translations = {
         'msg.doubaoKeyRequired': 'Doubao 파일 백엔드는 API Key가 필요합니다',
         'msg.doubaoKeyFormat': 'Doubao API Key가 올바르지 않습니다',
 
-        'label.uiLanguage': 'UI 언어'
+        'label.uiLanguage': 'UI 언어',
+
+        // 빠른 언어 버튼
+        'section.quickLangButtons': '빠른 전환 버튼',
+        'hint.quickLangButtons': '미니 패널 하단의 4개 언어 빠른 전환 버튼을 설정합니다',
+        'label.quickLangSlot': '버튼',
     }
 };
 

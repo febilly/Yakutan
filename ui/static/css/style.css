@@ -346,6 +346,10 @@ main {
     align-items: start;
 }
 
+#quick-lang-settings .language-settings-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .language-setting-item {
     margin-bottom: 0;
 }
@@ -559,12 +563,13 @@ input:checked + .slider:before {
 
 .collapsible-content {
     max-height: 1500px;
-    overflow: hidden;
+    overflow: visible;
     transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .collapsible-content.collapsed {
     max-height: 0;
+    overflow: hidden;
     transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 

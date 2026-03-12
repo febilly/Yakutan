@@ -473,7 +473,11 @@ function renderLanguageComboMenu(combo) {
             if (input.id === 'target-language') {
                 updateFuriganaVisibility();
             }
-            onSettingChange();
+            if (input.id.startsWith('quick-lang-')) {
+                onQuickLangChange();
+            } else {
+                onSettingChange();
+            }
             input.focus();
         });
 
@@ -538,6 +542,53 @@ function setupLanguageComboboxes() {
     renderLanguageComboMenus();
 }
 
+const QUICK_LANG_STORAGE_KEY = 'panel_quick_languages';
+const QUICK_LANG_DEFAULTS = ['en', 'zh-CN', 'ja', 'ko'];
+
+function loadQuickLanguageSettings() {
+    try {
+        const stored = localStorage.getItem(QUICK_LANG_STORAGE_KEY);
+        let langs = QUICK_LANG_DEFAULTS;
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed) && parsed.length === 4) {
+                langs = parsed;
+            }
+        }
+        for (let i = 0; i < 4; i++) {
+            const input = document.getElementById(`quick-lang-${i + 1}`);
+            if (input) {
+                input.value = langs[i] || QUICK_LANG_DEFAULTS[i];
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to load quick language settings:', e);
+    }
+}
+
+function saveQuickLanguageSettings() {
+    const langs = [];
+    for (let i = 0; i < 4; i++) {
+        const input = document.getElementById(`quick-lang-${i + 1}`);
+        langs.push(input ? input.value.trim() || QUICK_LANG_DEFAULTS[i] : QUICK_LANG_DEFAULTS[i]);
+    }
+    localStorage.setItem(QUICK_LANG_STORAGE_KEY, JSON.stringify(langs));
+}
+
+function resetQuickLanguageSettings() {
+    for (let i = 0; i < 4; i++) {
+        const input = document.getElementById(`quick-lang-${i + 1}`);
+        if (input) {
+            input.value = QUICK_LANG_DEFAULTS[i];
+        }
+    }
+    localStorage.setItem(QUICK_LANG_STORAGE_KEY, JSON.stringify(QUICK_LANG_DEFAULTS));
+}
+
+function onQuickLangChange() {
+    saveQuickLanguageSettings();
+}
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function () {
     // 先初始化 i18n 系统
@@ -560,6 +611,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     loadConfigFromLocalStorage();
     loadPanelFloatingModeSetting();
+    loadQuickLanguageSettings();
     loadAPIKeys();
     applyAsrBackendLocks();
     loadEnvStatus();
@@ -1329,6 +1381,16 @@ async function updateStatus() {
             startBtn.disabled = false;
             stopBtn.disabled = true;
         }
+
+        // 同步小面板对目标语言的更改到大菜单
+        if (status.target_language) {
+            const targetLangInput = document.getElementById('target-language');
+            if (targetLangInput && targetLangInput.value !== status.target_language) {
+                targetLangInput.value = status.target_language;
+                renderLanguageComboMenus();
+                saveConfigToLocalStorage();
+            }
+        }
     } catch (error) {
         console.error('更新状态失败:', error);
     }
@@ -1585,6 +1647,7 @@ async function resetToDefaults() {
         // 使用前端默认配置
         loadDefaultConfig();
         resetPanelFloatingModeSetting();
+        resetQuickLanguageSettings();
 
         // 根据翻译开关显示/隐藏翻译选项
         toggleTranslationOptions();

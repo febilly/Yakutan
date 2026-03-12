@@ -440,6 +440,68 @@
                     </div>
                 </section>
 
+                <!-- 快捷切换按钮（折叠） -->
+                <section class="card" id="quick-lang-settings-section">
+                    <div class="collapsible-header" onclick="toggleCollapsible('quick-lang-settings')">
+                        <h2 data-i18n="section.quickLangButtons">快捷切换按钮</h2>
+                        <span class="collapse-icon collapsed" id="quick-lang-settings-icon">▶</span>
+                    </div>
+                    <div class="collapsible-content collapsed" id="quick-lang-settings">
+                        <small class="form-text" style="margin-bottom: 12px; display: block;"
+                            data-i18n="hint.quickLangButtons">设置小面板底部的4个快捷语言切换按钮</small>
+                        <div class="language-settings-grid">
+                            <div class="form-group language-setting-item">
+                                <label for="quick-lang-1" data-i18n="label.quickLangSlot">按钮 1</label>
+                                <div class="language-combo" data-input-id="quick-lang-1">
+                                    <input type="text" id="quick-lang-1" class="form-control language-combo-input"
+                                        placeholder="en" autocomplete="off" spellcheck="false"
+                                        onchange="onQuickLangChange()" onblur="onQuickLangChange()">
+                                    <button type="button" class="language-combo-toggle" aria-label="Select language">
+                                        <span class="language-combo-toggle-icon"></span>
+                                    </button>
+                                    <div class="language-combo-menu"></div>
+                                </div>
+                            </div>
+                            <div class="form-group language-setting-item">
+                                <label for="quick-lang-2" data-i18n="label.quickLangSlot">按钮 2</label>
+                                <div class="language-combo" data-input-id="quick-lang-2">
+                                    <input type="text" id="quick-lang-2" class="form-control language-combo-input"
+                                        placeholder="zh-CN" autocomplete="off" spellcheck="false"
+                                        onchange="onQuickLangChange()" onblur="onQuickLangChange()">
+                                    <button type="button" class="language-combo-toggle" aria-label="Select language">
+                                        <span class="language-combo-toggle-icon"></span>
+                                    </button>
+                                    <div class="language-combo-menu"></div>
+                                </div>
+                            </div>
+                            <div class="form-group language-setting-item">
+                                <label for="quick-lang-3" data-i18n="label.quickLangSlot">按钮 3</label>
+                                <div class="language-combo" data-input-id="quick-lang-3">
+                                    <input type="text" id="quick-lang-3" class="form-control language-combo-input"
+                                        placeholder="ja" autocomplete="off" spellcheck="false"
+                                        onchange="onQuickLangChange()" onblur="onQuickLangChange()">
+                                    <button type="button" class="language-combo-toggle" aria-label="Select language">
+                                        <span class="language-combo-toggle-icon"></span>
+                                    </button>
+                                    <div class="language-combo-menu"></div>
+                                </div>
+                            </div>
+                            <div class="form-group language-setting-item">
+                                <label for="quick-lang-4" data-i18n="label.quickLangSlot">按钮 4</label>
+                                <div class="language-combo" data-input-id="quick-lang-4">
+                                    <input type="text" id="quick-lang-4" class="form-control language-combo-input"
+                                        placeholder="ko" autocomplete="off" spellcheck="false"
+                                        onchange="onQuickLangChange()" onblur="onQuickLangChange()">
+                                    <button type="button" class="language-combo-toggle" aria-label="Select language">
+                                        <span class="language-combo-toggle-icon"></span>
+                                    </button>
+                                    <div class="language-combo-menu"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- 高级设置（折叠） -->
                 <section class="card">
                     <div class="collapsible-header" onclick="toggleCollapsible('advanced-settings')">

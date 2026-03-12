@@ -39,6 +39,14 @@
             max-width: 100%;
         }
 
+        .main-column {
+            flex: 1 1 0%;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            min-width: 0;
+        }
+
         .text-container {
             flex: 1 1 0%;
             display: flex;
@@ -75,6 +83,46 @@
 
         .text-line.ongoing {
             color: var(--text-muted);
+        }
+
+        /* Quick language switch buttons */
+        .quick-lang-bar {
+            display: flex;
+            gap: 6px;
+            padding: 0 2px;
+            flex-shrink: 0;
+        }
+
+        .quick-lang-btn {
+            flex: 1;
+            height: 22px;
+            border: none;
+            border-radius: 11px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            color: var(--text-muted);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            transition: all 0.18s ease;
+            padding: 0 8px;
+            white-space: nowrap;
+            line-height: 20px;
+            text-align: center;
+        }
+
+        .quick-lang-btn:hover {
+            background: rgba(78, 140, 255, 0.12);
+            color: var(--text-main);
+            border-color: rgba(78, 140, 255, 0.35);
+        }
+
+        .quick-lang-btn.active {
+            background: rgba(78, 140, 255, 0.2);
+            color: #7ab4ff;
+            border-color: rgba(78, 140, 255, 0.45);
+            box-shadow: 0 0 6px rgba(78, 140, 255, 0.15);
         }
 
         .controls {
@@ -161,13 +209,17 @@
 
 <body>
     <div class="container">
-        <div class="text-container">
-            <!-- 识别文本 -->
-            <div id="speech-text" class="text-line"></div>
-            <!-- 翻译文本 -->
-            <div id="trans-text" class="text-line"></div>
-            <!-- 反向翻译文本 -->
-            <div id="reverse-trans-text" class="text-line hidden"></div>
+        <div class="main-column">
+            <div class="text-container">
+                <!-- 识别文本 -->
+                <div id="speech-text" class="text-line"></div>
+                <!-- 翻译文本 -->
+                <div id="trans-text" class="text-line"></div>
+                <!-- 反向翻译文本 -->
+                <div id="reverse-trans-text" class="text-line hidden"></div>
+            </div>
+            <!-- 快速切换目标语言 -->
+            <div class="quick-lang-bar" id="quick-lang-bar"></div>
         </div>
         <div class="controls">
             <button id="toggle-btn" class="btn btn-disabled" onclick="toggleService()"><svg width="20" height="20"
@@ -180,6 +232,95 @@
     <script>
         let isRunning = false;
         let lastShowReverseTranslation = null;
+        let currentTargetLanguage = '';
+        let switchingLanguage = false;
+
+        // 简短显示名映射
+        const LANG_DISPLAY_NAMES = {
+            'en': 'EN',
+            'en-GB': 'GB',
+            'zh-CN': 'ZH',
+            'zh-TW': 'TW',
+            'ja': 'JA',
+            'ko': 'KO',
+            'ar': 'AR',
+            'de': 'DE',
+            'es': 'ES',
+            'fr': 'FR',
+            'id': 'ID',
+            'it': 'IT',
+            'pt': 'PT',
+            'ru': 'RU',
+            'th': 'TH',
+            'tl': 'TL',
+            'tr': 'TR',
+        };
+
+        function getLangDisplayName(code) {
+            return LANG_DISPLAY_NAMES[code] || code.toUpperCase();
+        }
+
+        function getQuickLanguages() {
+            try {
+                const stored = localStorage.getItem('panel_quick_languages');
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    if (Array.isArray(parsed) && parsed.length === 4) {
+                        return parsed;
+                    }
+                }
+            } catch (e) {
+                // ignore
+            }
+            return ['en', 'zh-CN', 'ja', 'ko'];
+        }
+
+        function renderQuickLangButtons() {
+            const bar = document.getElementById('quick-lang-bar');
+            if (!bar) return;
+            const langs = getQuickLanguages();
+            bar.innerHTML = '';
+            langs.forEach((lang) => {
+                const btn = document.createElement('button');
+                btn.className = 'quick-lang-btn';
+                btn.textContent = getLangDisplayName(lang);
+                btn.dataset.lang = lang;
+                if (lang.toLowerCase() === (currentTargetLanguage || '').toLowerCase()) {
+                    btn.classList.add('active');
+                }
+                btn.addEventListener('click', () => switchTargetLanguage(lang));
+                bar.appendChild(btn);
+            });
+        }
+
+        function updateQuickLangActiveState() {
+            const buttons = document.querySelectorAll('.quick-lang-btn');
+            buttons.forEach((btn) => {
+                const isActive = btn.dataset.lang.toLowerCase() === (currentTargetLanguage || '').toLowerCase();
+                btn.classList.toggle('active', isActive);
+            });
+        }
+
+        async function switchTargetLanguage(lang) {
+            if (switchingLanguage) return;
+            switchingLanguage = true;
+            try {
+                const res = await fetch('/api/target-language', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target_language: lang })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    currentTargetLanguage = data.target_language;
+                    updateQuickLangActiveState();
+                }
+            } catch (e) {
+                console.error('Failed to switch target language:', e);
+            } finally {
+                switchingLanguage = false;
+            }
+        }
 
         function initResizeHandles() {
             if (!(window.pywebview && window.pywebview.api && window.pywebview.api.set_bounds)) {
@@ -300,6 +441,12 @@
                 const btn = document.getElementById('toggle-btn');
                 await applyReverseTranslationMode(!!subData.show_reverse_translation);
 
+                // 更新当前目标语言高亮
+                if (subData.target_language && subData.target_language !== currentTargetLanguage) {
+                    currentTargetLanguage = subData.target_language;
+                    updateQuickLangActiveState();
+                }
+
                 if (isRunning) {
                     btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" fill="white"><rect x="3" y="3" width="14" height="14" rx="2"/></svg>';
                     btn.className = 'btn btn-danger';
@@ -386,6 +533,8 @@
             window.close();
         });
 
+        // 初始化
+        renderQuickLangButtons();
         initResizeHandles();
         setInterval(fetchState, 300);
         fetchState();

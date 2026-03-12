@@ -286,7 +286,9 @@ def update_config_api():
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """获取服务状态"""
-    return jsonify(service_status)
+    status = dict(service_status)
+    status['target_language'] = config.TARGET_LANGUAGE
+    return jsonify(status)
 
 @app.route('/api/subtitles', methods=['GET'])
 def get_subtitles():
@@ -299,6 +301,7 @@ def get_subtitles():
                 state = m.subtitles_state.copy()
                 state['running'] = service_status['running']
                 state['show_reverse_translation'] = bool(getattr(config, 'ENABLE_REVERSE_TRANSLATION', False))
+                state['target_language'] = config.TARGET_LANGUAGE
                 return jsonify(state)
     except Exception:
         pass
@@ -309,8 +312,33 @@ def get_subtitles():
         "reverse_translated": "",
         "ongoing": False,
         "show_reverse_translation": bool(getattr(config, 'ENABLE_REVERSE_TRANSLATION', False)),
-        "running": service_status['running']
+        "running": service_status['running'],
+        "target_language": config.TARGET_LANGUAGE
     })
+
+@app.route('/api/target-language', methods=['POST'])
+def set_target_language():
+    """快速切换目标翻译语言（小面板快捷按钮）"""
+    try:
+        data = request.json or {}
+        lang = (data.get('target_language') or '').strip()
+        if not lang:
+            return jsonify({'success': False, 'message': 'target_language is required'}), 400
+
+        config.TARGET_LANGUAGE = lang
+
+        # 如果服务正在运行，热加载翻译器
+        try:
+            if service_status.get('running') and service_loop is not None:
+                import main as main_module
+                service_loop.call_soon_threadsafe(getattr(main_module, 'reinitialize_translator', lambda: None))
+        except Exception as e:
+            print(f'Error notifying service to reload translator: {e}')
+
+        return jsonify({'success': True, 'target_language': lang})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 
 @app.route('/panel', methods=['GET'])
 def panel():
