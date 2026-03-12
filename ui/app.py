@@ -393,7 +393,13 @@ def open_panel():
         initial_mode = "reverse-on" if getattr(config, 'ENABLE_REVERSE_TRANSLATION', False) else "reverse-off"
         floating_mode_arg = "floating-on" if floating_mode else "floating-off"
         panel_width_arg = str(max(300, int(getattr(config, 'PANEL_WIDTH', 600))))
-        subprocess.Popen([python_exe, panel_script, panel_url, initial_mode, floating_mode_arg, panel_width_arg])
+        panel_args = [panel_url, initial_mode, floating_mode_arg, panel_width_arg]
+        if getattr(sys, 'frozen', False):
+            launch_cmd = [python_exe, '--panel-app', *panel_args]
+        else:
+            launch_cmd = [python_exe, panel_script, *panel_args]
+
+        subprocess.Popen(launch_cmd)
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

@@ -49,15 +49,17 @@ class PanelApi:
             self._window.destroy()
 
 
-def main():
-    if len(sys.argv) < 2:
+def main(argv=None):
+    args = argv if argv is not None else sys.argv
+
+    if len(args) < 2:
         url = "http://127.0.0.1:5001/panel"
     else:
-        url = sys.argv[1]
+        url = args[1]
 
-    show_reverse_translation = len(sys.argv) >= 3 and sys.argv[2] == "reverse-on"
-    floating_mode = len(sys.argv) >= 4 and sys.argv[3] == "floating-on"
-    panel_width = _parse_panel_width(sys.argv[4]) if len(sys.argv) >= 5 else DEFAULT_PANEL_WIDTH
+    show_reverse_translation = len(args) >= 3 and args[2] == "reverse-on"
+    floating_mode = len(args) >= 4 and args[3] == "floating-on"
+    panel_width = _parse_panel_width(args[4]) if len(args) >= 5 else DEFAULT_PANEL_WIDTH
     show_quick_lang_bar = _should_show_quick_lang_bar(url)
     content_height = PANEL_CONTENT_HEIGHT_THREE_LINES if show_reverse_translation else PANEL_CONTENT_HEIGHT_TWO_LINES
     if not show_quick_lang_bar:

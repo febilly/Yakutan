@@ -11,7 +11,7 @@ PyInstaller配置文件 - Web UI版本
 
 block_cipher = None
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import importlib.util
 
 # 需要包含的数据文件（资源文件）
@@ -50,7 +50,12 @@ hiddenimports = [
     'websockets',
     'pypinyin',
     'jieba',
+    'panel_app',
+    'webview',
 ]
+
+# pywebview 在 Windows 下会动态加载平台后端，PyInstaller 需显式收集。
+hiddenimports += collect_submodules('webview.platforms')
 
 a = Analysis(
     ['run_ui.py'],  # Web UI入口文件
