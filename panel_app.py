@@ -2,11 +2,13 @@ import sys
 import ctypes
 import webview
 import logging
+from urllib.parse import parse_qs, urlparse
 
 DEFAULT_PANEL_WIDTH = 600
 WINDOW_TITLE_BAR_HEIGHT = 32
 PANEL_CONTENT_HEIGHT_TWO_LINES = 147 - WINDOW_TITLE_BAR_HEIGHT
 PANEL_CONTENT_HEIGHT_THREE_LINES = 170 - WINDOW_TITLE_BAR_HEIGHT
+QUICK_LANG_BAR_HEIGHT = 27
 
 
 def _parse_panel_width(raw_value):
@@ -22,6 +24,17 @@ def _get_dpi_scale_factor():
         return ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100.0
     except Exception:
         return 1.0
+
+
+def _should_show_quick_lang_bar(url):
+    try:
+        params = parse_qs(urlparse(url).query)
+        raw_value = (params.get('quick_lang_bar') or [None])[0]
+        if raw_value is None:
+            return True
+        return raw_value.strip().lower() not in {'', '0', 'false', 'no', 'off'}
+    except Exception:
+        return True
 
 
 class PanelApi:
@@ -45,7 +58,10 @@ def main():
     show_reverse_translation = len(sys.argv) >= 3 and sys.argv[2] == "reverse-on"
     floating_mode = len(sys.argv) >= 4 and sys.argv[3] == "floating-on"
     panel_width = _parse_panel_width(sys.argv[4]) if len(sys.argv) >= 5 else DEFAULT_PANEL_WIDTH
+    show_quick_lang_bar = _should_show_quick_lang_bar(url)
     content_height = PANEL_CONTENT_HEIGHT_THREE_LINES if show_reverse_translation else PANEL_CONTENT_HEIGHT_TWO_LINES
+    if not show_quick_lang_bar:
+        content_height = max(60, content_height - QUICK_LANG_BAR_HEIGHT)
     initial_height = content_height if floating_mode else content_height + WINDOW_TITLE_BAR_HEIGHT
 
     scale = _get_dpi_scale_factor()

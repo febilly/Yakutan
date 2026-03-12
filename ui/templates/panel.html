@@ -234,53 +234,63 @@
         let lastShowReverseTranslation = null;
         let currentTargetLanguage = '';
         let switchingLanguage = false;
-
-        // 简短显示名映射
-        const LANG_DISPLAY_NAMES = {
-            'en': 'EN',
-            'en-GB': 'GB',
-            'zh-CN': 'ZH',
-            'zh-TW': 'TW',
-            'ja': 'JA',
-            'ko': 'KO',
-            'ar': 'AR',
-            'de': 'DE',
-            'es': 'ES',
-            'fr': 'FR',
-            'id': 'ID',
-            'it': 'IT',
-            'pt': 'PT',
-            'ru': 'RU',
-            'th': 'TH',
-            'tl': 'TL',
-            'tr': 'TR',
-        };
+        const QUICK_LANG_DEFAULTS = ['en', 'zh-CN', 'ja', 'ko'];
+        const QUICK_LANG_BAR_HEIGHT = 27;
 
         function getLangDisplayName(code) {
-            return LANG_DISPLAY_NAMES[code] || code.toUpperCase();
+            return code;
         }
 
-        function getQuickLanguages() {
+        function normalizeQuickLanguages(languages) {
+            return QUICK_LANG_DEFAULTS.map((fallback, index) => {
+                const value = Array.isArray(languages) ? languages[index] : null;
+                return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+            });
+        }
+
+        function getInitialQuickLangSettings() {
+            const params = new URLSearchParams(window.location.search);
+            const queryLangs = normalizeQuickLanguages(params.getAll('quick_lang'));
+            const hasQueryLangs = params.getAll('quick_lang').length === 4;
+            let enabled = true;
+
+            if (params.has('quick_lang_bar')) {
+                const rawEnabled = (params.get('quick_lang_bar') || '').trim().toLowerCase();
+                enabled = !['', '0', 'false', 'no', 'off'].includes(rawEnabled);
+            } else {
+                const storedEnabled = localStorage.getItem('panel_quick_lang_bar_enabled');
+                enabled = storedEnabled === null ? true : storedEnabled === 'true';
+            }
+
+            if (hasQueryLangs) {
+                return { enabled, languages: queryLangs };
+            }
+
             try {
                 const stored = localStorage.getItem('panel_quick_languages');
                 if (stored) {
                     const parsed = JSON.parse(stored);
-                    if (Array.isArray(parsed) && parsed.length === 4) {
-                        return parsed;
-                    }
+                    return { enabled, languages: normalizeQuickLanguages(parsed) };
                 }
             } catch (e) {
                 // ignore
             }
-            return ['en', 'zh-CN', 'ja', 'ko'];
+
+            return { enabled, languages: QUICK_LANG_DEFAULTS.slice() };
+        }
+
+        const INITIAL_QUICK_LANG_SETTINGS = getInitialQuickLangSettings();
+
+        function getQuickLanguages() {
+            return INITIAL_QUICK_LANG_SETTINGS.languages;
         }
 
         function renderQuickLangButtons() {
             const bar = document.getElementById('quick-lang-bar');
             if (!bar) return;
-            const enabled = localStorage.getItem('panel_quick_lang_bar_enabled');
-            if (enabled === 'false') {
+            if (!INITIAL_QUICK_LANG_SETTINGS.enabled) {
                 bar.style.display = 'none';
+                bar.innerHTML = '';
                 return;
             }
             bar.style.display = '';
@@ -347,9 +357,15 @@
             let startWinY = 0;
             const minWidth = 400;
 
+            function isQuickLangBarVisible() {
+                const quickLangBar = document.getElementById('quick-lang-bar');
+                return !!quickLangBar && getComputedStyle(quickLangBar).display !== 'none';
+            }
+
             function getMinHeight() {
                 const textContainer = document.querySelector('.text-container');
-                return textContainer && textContainer.classList.contains('with-reverse') ? 120 : 100;
+                const baseHeight = textContainer && textContainer.classList.contains('with-reverse') ? 120 : 100;
+                return isQuickLangBarVisible() ? baseHeight : Math.max(60, baseHeight - QUICK_LANG_BAR_HEIGHT);
             }
 
             function stopResize() {
