@@ -544,6 +544,7 @@ function setupLanguageComboboxes() {
 
 const QUICK_LANG_STORAGE_KEY = 'panel_quick_languages';
 const QUICK_LANG_DEFAULTS = ['en', 'zh-CN', 'ja', 'ko'];
+const QUICK_LANG_BAR_ENABLED_KEY = 'panel_quick_lang_bar_enabled';
 
 function loadQuickLanguageSettings() {
     try {
@@ -564,6 +565,12 @@ function loadQuickLanguageSettings() {
     } catch (e) {
         console.warn('Failed to load quick language settings:', e);
     }
+
+    const toggle = document.getElementById('enable-quick-lang-bar');
+    if (toggle) {
+        const stored = localStorage.getItem(QUICK_LANG_BAR_ENABLED_KEY);
+        toggle.checked = stored === null ? true : stored === 'true';
+    }
 }
 
 function saveQuickLanguageSettings() {
@@ -583,10 +590,22 @@ function resetQuickLanguageSettings() {
         }
     }
     localStorage.setItem(QUICK_LANG_STORAGE_KEY, JSON.stringify(QUICK_LANG_DEFAULTS));
+
+    const toggle = document.getElementById('enable-quick-lang-bar');
+    if (toggle) {
+        toggle.checked = true;
+    }
+    localStorage.removeItem(QUICK_LANG_BAR_ENABLED_KEY);
 }
 
 function onQuickLangChange() {
     saveQuickLanguageSettings();
+}
+
+function onEnableQuickLangBarChange() {
+    const toggle = document.getElementById('enable-quick-lang-bar');
+    if (!toggle) return;
+    localStorage.setItem(QUICK_LANG_BAR_ENABLED_KEY, toggle.checked.toString());
 }
 
 // 页面加载完成后初始化

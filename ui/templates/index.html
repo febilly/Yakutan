@@ -447,6 +447,15 @@
                         <span class="collapse-icon collapsed" id="quick-lang-settings-icon">▶</span>
                     </div>
                     <div class="collapsible-content collapsed" id="quick-lang-settings">
+                        <div class="form-group">
+                            <label class="switch-label">
+                                <span data-i18n="label.enableQuickLangBar">显示快捷切换按钮</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="enable-quick-lang-bar" onchange="onEnableQuickLangBarChange()">
+                                    <span class="slider"></span>
+                                </label>
+                            </label>
+                        </div>
                         <small class="form-text" style="margin-bottom: 12px; display: block;"
                             data-i18n="hint.quickLangButtons">设置小面板底部的4个快捷语言切换按钮</small>
                         <div class="language-settings-grid">

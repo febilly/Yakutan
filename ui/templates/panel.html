@@ -278,6 +278,12 @@
         function renderQuickLangButtons() {
             const bar = document.getElementById('quick-lang-bar');
             if (!bar) return;
+            const enabled = localStorage.getItem('panel_quick_lang_bar_enabled');
+            if (enabled === 'false') {
+                bar.style.display = 'none';
+                return;
+            }
+            bar.style.display = '';
             const langs = getQuickLanguages();
             bar.innerHTML = '';
             langs.forEach((lang) => {
