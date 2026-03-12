@@ -38,6 +38,108 @@ const LANGUAGE_OPTIONS = [
     { code: 'tr', labelKey: 'lang.tr' },
 ];
 
+const LLM_TEMPLATE_CONFIGS = {
+    'dashscope-qwen35': {
+        baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        model: 'qwen3.5-plus',
+        extraBody: '{"enable_thinking": false}',
+        providerLabelKey: 'btn.llmTemplateDashscopeQwen',
+        copyDashscopeKey: true,
+    },
+    openrouter: {
+        baseUrl: 'https://openrouter.ai/api/v1',
+        providerLabelKey: 'btn.llmTemplateOpenRouter',
+    },
+    longcat: {
+        baseUrl: 'https://api.longcat.chat/openai/v1',
+        model: 'LongCat-Flash-Lite',
+        extraBody: '',
+        providerLabelKey: 'btn.llmTemplateLongCat',
+    },
+    mercury2: {
+        baseUrl: 'https://api.inceptionlabs.ai/v1',
+        model: 'mercury-2',
+        extraBody: '',
+        providerLabelKey: 'btn.llmTemplateMercury2',
+    },
+};
+
+let activeLLMTemplate = null;
+
+function detectActiveLLMTemplate() {
+    const baseUrl = (document.getElementById('llm-base-url')?.value || '').trim();
+    const model = (document.getElementById('llm-model')?.value || '').trim();
+
+    for (const [templateName, templateConfig] of Object.entries(LLM_TEMPLATE_CONFIGS)) {
+        if (baseUrl !== templateConfig.baseUrl) {
+            continue;
+        }
+        if (Object.prototype.hasOwnProperty.call(templateConfig, 'model') && model !== templateConfig.model) {
+            continue;
+        }
+        return templateName;
+    }
+
+    return null;
+}
+
+function resolveLLMTemplateKeySource(templateName) {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const useInternationalEndpoint = document.getElementById('use-international-endpoint')?.checked ?? false;
+    const templateConfig = LLM_TEMPLATE_CONFIGS[templateName];
+    if (!templateConfig) return null;
+
+    let url = '';
+    if (templateName === 'dashscope-qwen35') {
+        url = useInternationalEndpoint
+            ? 'https://modelstudio.console.aliyun.com/ap-southeast-1?tab=doc#/api-key'
+            : 'https://bailian.console.aliyun.com/cn-beijing/?tab=model#/api-key';
+    } else if (templateName === 'openrouter') {
+        url = 'https://openrouter.ai/settings/keys';
+    } else if (templateName === 'longcat') {
+        url = 'https://longcat.chat/platform/api_keys';
+    } else if (templateName === 'mercury2') {
+        url = 'https://platform.inceptionlabs.ai/dashboard/api-keys';
+    }
+
+    if (!url) return null;
+
+    return {
+        providerName: t(templateConfig.providerLabelKey),
+        url,
+    };
+}
+
+function updateLLMTemplateKeySourceHint(templateName = activeLLMTemplate) {
+    const container = document.getElementById('llm-template-key-source-hint');
+    const label = document.getElementById('llm-template-key-source-label');
+    const link = document.getElementById('llm-template-key-source-link');
+    const t = window.i18n ? window.i18n.t : (key) => key;
+
+    if (!container || !label || !link) return;
+
+    const source = resolveLLMTemplateKeySource(templateName);
+    if (!source) {
+        container.style.display = 'none';
+        label.textContent = '';
+        link.textContent = '';
+        link.removeAttribute('href');
+        activeLLMTemplate = null;
+        return;
+    }
+
+    activeLLMTemplate = templateName;
+    label.textContent = t('hint.llmTemplateKeySource', { provider: source.providerName });
+    link.href = source.url;
+    link.textContent = source.url;
+    link.title = source.url;
+    container.style.display = 'block';
+}
+
+function syncLLMTemplateKeySourceHintFromInputs() {
+    updateLLMTemplateKeySourceHint(detectActiveLLMTemplate());
+}
+
 function shouldShowLLMSettings(apiType) {
     return apiType === 'openrouter' || apiType === 'openrouter_streaming_deepl_hybrid';
 }
@@ -152,29 +254,34 @@ function applyLLMTemplate(templateName) {
     const extraBodyInput = document.getElementById('openai-compat-extra-body-json');
     const dashscopeKeyInput = document.getElementById('dashscope-api-key');
     const t = window.i18n ? window.i18n.t : (key) => key;
+    const templateConfig = LLM_TEMPLATE_CONFIGS[templateName];
 
-    if (!baseUrlInput || !modelInput || !keyInput || !extraBodyInput) {
+    if (!baseUrlInput || !modelInput || !keyInput || !extraBodyInput || !templateConfig) {
         return;
     }
 
-    if (templateName === 'dashscope-qwen35') {
-        baseUrlInput.value = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-        modelInput.value = 'qwen3.5-plus';
-        extraBodyInput.value = '{"enable_thinking": false}';
+    baseUrlInput.value = templateConfig.baseUrl;
+    if (Object.prototype.hasOwnProperty.call(templateConfig, 'model')) {
+        modelInput.value = templateConfig.model;
+    }
+    if (Object.prototype.hasOwnProperty.call(templateConfig, 'extraBody')) {
+        extraBodyInput.value = templateConfig.extraBody;
+    }
 
+    if (templateConfig.copyDashscopeKey) {
         const dashscopeKey = dashscopeKeyInput ? dashscopeKeyInput.value.trim() : '';
         if (dashscopeKey) {
             keyInput.value = dashscopeKey;
             persistSecretInputValue('llm-api-key');
+            envStatus.llm.api_key_set = true;
             showMessage('✅ ' + t('msg.llmTemplateDashscopeCopied'), 'success');
         } else {
             showMessage('⚠️ ' + t('msg.llmTemplateDashscopeKeyMissing'), 'warning');
         }
-    } else if (templateName === 'openrouter') {
-        baseUrlInput.value = 'https://openrouter.ai/api/v1';
     }
 
-    onSettingChange();
+    updateLLMTemplateKeySourceHint(templateName);
+    onSettingChange(baseUrlInput);
 }
 
 function closeLanguageMenus(exceptCombo = null) {
@@ -361,6 +468,7 @@ document.addEventListener('i18n:languageChanged', function () {
     renderLanguageComboMenus();
     refreshMicDevices(true);
     updateStatus();
+    updateLLMTemplateKeySourceHint();
 });
 
 // 从服务器加载环境变量状态
@@ -493,6 +601,15 @@ function loadAPIKeys() {
     document.getElementById('llm-api-key').addEventListener('input', saveAPIKey);
     document.getElementById('doubao-api-key').addEventListener('input', saveAPIKey);
     document.getElementById('soniox-api-key').addEventListener('input', saveAPIKey);
+
+    ['llm-base-url', 'llm-model', 'openai-compat-extra-body-json'].forEach((inputId) => {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        input.addEventListener('input', (event) => {
+            syncLLMTemplateKeySourceHintFromInputs();
+            onSettingChange(event.target);
+        });
+    });
 }
 
 // 处理国际版端点开关变化
@@ -504,9 +621,10 @@ function handleInternationalEndpointChange(event) {
 
     // 更新 ASR 选项
     updateAsrOptionsForInternational(useInternational);
+    updateLLMTemplateKeySourceHint();
 
     // 触发配置保存
-    onSettingChange();
+    onSettingChange(event.target);
 }
 
 // 根据国际版设置更新 ASR 选项
@@ -570,8 +688,12 @@ function applyAsrBackendLocks() {
 function saveAPIKey(event) {
     persistSecretInputValue(event.target.id);
 
+    if (event.target.id === 'llm-api-key') {
+        envStatus.llm.api_key_set = !!event.target.value.trim();
+    }
+
     // 触发配置自动保存
-    onSettingChange();
+    onSettingChange(event.target);
 }
 
 // 从 localStorage 加载配置
@@ -660,6 +782,7 @@ function loadConfigFromLocalStorage() {
         updateLLMSettingsVisibility();
         updateSensitiveWordsHint();
         applyAsrBackendLocks();
+        syncLLMTemplateKeySourceHintFromInputs();
 
     } catch (error) {
         console.error('加载本地配置失败:', error);
@@ -670,6 +793,7 @@ function loadConfigFromLocalStorage() {
         updateLLMSettingsVisibility();
         updateSensitiveWordsHint();
         applyAsrBackendLocks();
+        syncLLMTemplateKeySourceHintFromInputs();
     }
 }
 
@@ -722,6 +846,7 @@ function loadDefaultConfig() {
     updateLLMSettingsVisibility();
     updateSensitiveWordsHint();
     applyAsrBackendLocks();
+    syncLLMTemplateKeySourceHintFromInputs();
 }
 
 // 从服务器加载配置（仅在本地无配置时使用）
@@ -775,6 +900,7 @@ async function loadConfigFromServer() {
         updateLLMSettingsVisibility();
         updateSensitiveWordsHint();
         applyAsrBackendLocks();
+        syncLLMTemplateKeySourceHintFromInputs();
 
         console.log('已从服务器加载配置');
 
@@ -906,6 +1032,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         updateLLMSettingsVisibility(apiSelect.value);
         updateSensitiveWordsHint(apiSelect.value);
+        syncLLMTemplateKeySourceHintFromInputs();
     }, 100);
 });
 
@@ -924,7 +1051,10 @@ function onSettingChange(changedElement = null) {
         saveConfigToLocalStorage();
 
         // 再保存到服务器
-        await saveConfig(true); // true表示是自动保存，不重启服务
+        const saveSucceeded = await saveConfig(true); // true表示是自动保存，不重启服务
+        if (!saveSucceeded) {
+            return;
+        }
 
         // 如果服务正在运行，仅在必要时（如 ASR 后端等）重启；否则只保存并通知后端热加载配置
         const statusResponse = await fetch(`${API_BASE}/status`);
@@ -1004,6 +1134,9 @@ async function saveConfig(autoSave = false) {
             },
             panel: {
                 width: getNormalizedPanelWidth(),
+            },
+            api_keys: {
+                llm: document.getElementById('llm-api-key').value.trim(),
             }
         };
 
@@ -1021,15 +1154,18 @@ async function saveConfig(autoSave = false) {
             if (!autoSave) {
                 showMessage(t('msg.configSaved'), 'success');
             }
+            return true;
         } else {
             const localizedMsg = localizeBackendMessage(result.message_id, result.message);
             showMessage(t('msg.saveConfigFailed') + ': ' + localizedMsg, 'error');
+            return false;
         }
     } catch (error) {
         console.error('保存配置失败:', error);
         if (!autoSave) {
             showMessage(t('msg.saveConfigFailed'), 'error');
         }
+        return false;
     }
 }
 

@@ -42,6 +42,15 @@ service_loop: Optional[asyncio.AbstractEventLoop] = None
 stop_event: Optional[asyncio.Event] = None
 
 
+def set_or_clear_env_var(name: str, value: Optional[str]) -> None:
+    """设置环境变量；空值时删除，确保运行中服务读取到最新密钥。"""
+    normalized = (value or '').strip()
+    if normalized:
+        os.environ[name] = normalized
+    else:
+        os.environ.pop(name, None)
+
+
 def get_config_dict():
     """获取当前配置"""
     return {
@@ -98,6 +107,10 @@ def get_config_dict():
 def update_config(config_data):
     """更新配置"""
     try:
+        api_keys = config_data.get('api_keys') or {}
+        if 'llm' in api_keys:
+            set_or_clear_env_var('LLM_API_KEY', api_keys['llm'])
+
         # 更新ASR配置
         if 'asr' in config_data:
             asr = config_data['asr']

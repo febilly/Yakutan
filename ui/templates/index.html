@@ -202,12 +202,22 @@
                                         <button type="button" class="btn btn-subtle btn-small"
                                             onclick="applyLLMTemplate('dashscope-qwen35')"
                                             data-i18n="btn.llmTemplateDashscopeQwen">阿里 Qwen3.5-Plus</button>
-                                        <button type="button" class="btn btn-subtle btn-small"
+                                            <button type="button" class="btn btn-subtle btn-small"
+                                            onclick="applyLLMTemplate('longcat')"
+                                            data-i18n="btn.llmTemplateLongCat">LongCat</button>
+                                            <button type="button" class="btn btn-subtle btn-small"
+                                            onclick="applyLLMTemplate('mercury2')"
+                                            data-i18n="btn.llmTemplateMercury2">Mercury 2</button>
+                                            <button type="button" class="btn btn-subtle btn-small"
                                             onclick="applyLLMTemplate('openrouter')"
                                             data-i18n="btn.llmTemplateOpenRouter">OpenRouter</button>
                                     </div>
                                     <small class="form-text" data-i18n="hint.llmTemplate">模板会直接填写下方配置；阿里模板会把当前 DashScope
                                         Key 复制到 LLM Key。</small>
+                                    <small class="form-text" id="llm-template-key-source-hint" style="display: none;">
+                                        <span id="llm-template-key-source-label"></span>
+                                        <a id="llm-template-key-source-link" href="#" target="_blank" rel="noopener noreferrer"></a>
+                                    </small>
                                     <small class="form-text" data-i18n="hint.sensitiveWordsRisk">请注意敏感词问题，必要时请切换到 DeepL
                                         或 Google 翻译</small>
                                 </div>
@@ -216,6 +226,7 @@
                                     <label for="llm-base-url" data-i18n="label.llmBaseUrl">LLM 地址</label>
                                     <input type="text" id="llm-base-url" class="form-control" placeholder="https://..."
                                         onblur="onSettingChange()">
+                                    <small class="form-text" data-i18n="hint.llmBaseUrl">填写兼容接口的根地址，例如 https://openrouter.ai/api/v1 或 https://dashscope.aliyuncs.com/compatible-mode/v1，不要带 /chat/completions。</small>
                                 </div>
 
                                 <div class="form-group">
@@ -250,7 +261,7 @@
                                 </label>
                             </label>
                             <small class="form-text" data-i18n="hint.reverseTranslation">总是使用 Google Dictionary
-                                API，请注意网络连通性</small>
+                                    API，结果会显示在小面板中，请注意网络连通性</small>
                         </div>
                     </div>
                 </section>
