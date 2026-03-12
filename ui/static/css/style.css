@@ -361,6 +361,10 @@ main {
     white-space: nowrap;
 }
 
+html[lang="en"] .language-setting-item label span[data-i18n="label.quickLangSlot"] {
+    margin-right: 0.25em;
+}
+
 .language-combo {
     position: relative;
     display: flex;

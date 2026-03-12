@@ -42,15 +42,6 @@
                             <button id="panel-btn" class="btn btn-primary" onclick="openMiniPanel()"
                                 data-i18n="btn.openPanel"
                                 style="background-color: #5aa1d9; border-color: #5aa1d9; color: white;">小面板</button>
-                            <div class="panel-mode-toggle">
-                                <label class="switch-label compact-switch-label">
-                                    <span data-i18n="label.floatingPanelMode">悬浮窗模式</span>
-                                    <label class="switch">
-                                        <input type="checkbox" id="panel-floating-mode" onchange="onPanelFloatingModeChange()">
-                                        <span class="slider"></span>
-                                    </label>
-                                </label>
-                            </div>
                         </div>
                         <div class="control-buttons-right">
                             <button id="reset-btn" class="btn btn-warning" onclick="resetToDefaults()"
@@ -443,24 +434,35 @@
                 <!-- 快捷切换按钮（折叠） -->
                 <section class="card" id="quick-lang-settings-section">
                     <div class="collapsible-header" onclick="toggleCollapsible('quick-lang-settings')">
-                        <h2 data-i18n="section.quickLangButtons">快捷切换按钮</h2>
+                        <h2 data-i18n="section.quickLangButtons">小面板设置</h2>
                         <span class="collapse-icon collapsed" id="quick-lang-settings-icon">▶</span>
                     </div>
                     <div class="collapsible-content collapsed" id="quick-lang-settings">
-                        <div class="form-group">
-                            <label class="switch-label">
-                                <span data-i18n="label.enableQuickLangBar">显示快捷切换按钮</span>
-                                <label class="switch">
-                                    <input type="checkbox" id="enable-quick-lang-bar" checked onchange="onEnableQuickLangBarChange()">
-                                    <span class="slider"></span>
+                        <div class="switch-row">
+                            <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.floatingPanelMode">悬浮窗模式</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="panel-floating-mode" onchange="onPanelFloatingModeChange()">
+                                        <span class="slider"></span>
+                                    </label>
                                 </label>
-                            </label>
+                            </div>
+                            <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.enableQuickLangBar">显示快捷切换按钮</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="enable-quick-lang-bar" checked onchange="onEnableQuickLangBarChange()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" style="margin-bottom: 12px; display: block;"
+                                    data-i18n="hint.quickLangButtons">设置小面板底部的4个快捷语言切换按钮</small>
+                            </div>
                         </div>
-                        <small class="form-text" style="margin-bottom: 12px; display: block;"
-                            data-i18n="hint.quickLangButtons">设置小面板底部的4个快捷语言切换按钮</small>
                         <div class="language-settings-grid">
                             <div class="form-group language-setting-item">
-                                <label for="quick-lang-1"><span data-i18n="label.quickLangSlot">按钮</span> 1</label>
+                                <label for="quick-lang-1"><span data-i18n="label.quickLangSlot">按钮</span>1</label>
                                 <div class="language-combo" data-input-id="quick-lang-1">
                                     <input type="text" id="quick-lang-1" class="form-control language-combo-input"
                                         placeholder="en" autocomplete="off" spellcheck="false"
@@ -472,7 +474,7 @@
                                 </div>
                             </div>
                             <div class="form-group language-setting-item">
-                                <label for="quick-lang-2"><span data-i18n="label.quickLangSlot">按钮</span> 2</label>
+                                <label for="quick-lang-2"><span data-i18n="label.quickLangSlot">按钮</span>2</label>
                                 <div class="language-combo" data-input-id="quick-lang-2">
                                     <input type="text" id="quick-lang-2" class="form-control language-combo-input"
                                         placeholder="zh-CN" autocomplete="off" spellcheck="false"
@@ -484,7 +486,7 @@
                                 </div>
                             </div>
                             <div class="form-group language-setting-item">
-                                <label for="quick-lang-3"><span data-i18n="label.quickLangSlot">按钮</span> 3</label>
+                                <label for="quick-lang-3"><span data-i18n="label.quickLangSlot">按钮</span>3</label>
                                 <div class="language-combo" data-input-id="quick-lang-3">
                                     <input type="text" id="quick-lang-3" class="form-control language-combo-input"
                                         placeholder="ja" autocomplete="off" spellcheck="false"
@@ -496,7 +498,7 @@
                                 </div>
                             </div>
                             <div class="form-group language-setting-item">
-                                <label for="quick-lang-4"><span data-i18n="label.quickLangSlot">按钮</span> 4</label>
+                                <label for="quick-lang-4"><span data-i18n="label.quickLangSlot">按钮</span>4</label>
                                 <div class="language-combo" data-input-id="quick-lang-4">
                                     <input type="text" id="quick-lang-4" class="form-control language-combo-input"
                                         placeholder="ko" autocomplete="off" spellcheck="false"
