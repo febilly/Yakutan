@@ -75,6 +75,7 @@ def get_config_dict():
             'llm_base_url': getattr(config, 'LLM_BASE_URL', ''),
             'llm_model': getattr(config, 'LLM_MODEL', ''),
             'openai_compat_extra_body_json': getattr(config, 'OPENAI_COMPAT_EXTRA_BODY_JSON', ''),
+            'enable_llm_parallel_fastest': getattr(config, 'ENABLE_LLM_PARALLEL_FASTEST', False),
             'show_partial_results': config.SHOW_PARTIAL_RESULTS,
             'enable_furigana': getattr(config, 'ENABLE_JA_FURIGANA', False),
             'enable_pinyin': getattr(config, 'ENABLE_ZH_PINYIN', False),
@@ -161,6 +162,8 @@ def update_config(config_data):
                     if not isinstance(parsed_extra_body, dict):
                         return False, 'msg.invalidExtraBodyJson', 'OpenAI 兼容 extra_body 必须是 JSON 对象'
                 config.OPENAI_COMPAT_EXTRA_BODY_JSON = raw_extra_body
+            if 'enable_llm_parallel_fastest' in trans:
+                config.ENABLE_LLM_PARALLEL_FASTEST = bool(trans['enable_llm_parallel_fastest'])
             if 'show_partial_results' in trans:
                 config.SHOW_PARTIAL_RESULTS = trans['show_partial_results']
             if 'enable_furigana' in trans:
@@ -546,6 +549,7 @@ def get_defaults():
             'secondary_target_language': None,
             'fallback_language': 'en',
             'api_type': 'deepl',
+            'enable_llm_parallel_fastest': False,
             'show_partial_results': False,
             'enable_furigana': False,
             'enable_reverse_translation': True,

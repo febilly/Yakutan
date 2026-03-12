@@ -186,7 +186,7 @@
                                     <span class="slider"></span>
                                 </label>
                             </label>
-                            <small class="form-text" data-i18n="hint.streamingMode">启用后支持翻译部分结果（实时翻译未完成的句子）</small>
+                            <small class="form-text" data-i18n="hint.streamingMode">启用后会边说边翻译，不用等整句话说完才出结果。请注意这会大幅增加 token 用量。</small>
                         </div>
 
                         <div class="subsection llm-settings-wrapper" id="llm-settings-wrapper" style="display: none;">
@@ -204,10 +204,10 @@
                                             data-i18n="btn.llmTemplateDashscopeQwen">阿里 Qwen3.5-Plus</button>
                                             <button type="button" class="btn btn-subtle btn-small"
                                             onclick="applyLLMTemplate('longcat')"
-                                            data-i18n="btn.llmTemplateLongCat">LongCat</button>
+                                            data-i18n="btn.llmTemplateLongCat">LongCat（免费）</button>
                                             <button type="button" class="btn btn-subtle btn-small"
                                             onclick="applyLLMTemplate('mercury2')"
-                                            data-i18n="btn.llmTemplateMercury2">Mercury 2</button>
+                                            data-i18n="btn.llmTemplateMercury2">Mercury 2（免费）</button>
                                             <button type="button" class="btn btn-subtle btn-small"
                                             onclick="applyLLMTemplate('openrouter')"
                                             data-i18n="btn.llmTemplateOpenRouter">OpenRouter</button>
@@ -247,6 +247,17 @@
                                     <input type="text" id="openai-compat-extra-body-json" class="form-control"
                                         placeholder='{"enable_thinking": false}' onblur="onSettingChange()">
                                     <small class="form-text" data-i18n="hint.openaiCompatExtraBodyJson">留空则不发送 extra_body。</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="switch-label">
+                                        <span data-i18n="label.llmParallelFastestMode">并行双发取最快返回</span>
+                                        <label class="switch">
+                                            <input type="checkbox" id="enable-llm-parallel-fastest" onchange="onSettingChange()">
+                                            <span class="slider"></span>
+                                        </label>
+                                    </label>
+                                    <small class="form-text" data-i18n="hint.llmParallelFastestMode">启用后会并行发送两个相同请求并采用先返回的结果；开启流式翻译时仅对最后终译生效。请注意这会增加 token 用量。</small>
                                 </div>
                             </div>
                         </div>

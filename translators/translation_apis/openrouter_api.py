@@ -2,6 +2,7 @@
 LLM translation API implementation using an OpenAI-compatible interface.
 支持普通翻译和流式翻译两种模式
 """
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import json
 from typing import Optional, List, Dict
 
@@ -164,7 +165,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             {"role": "user", "content": user_message},
         ]
 
-        return self._call_api(messages)
+        return self._call_api(messages, is_partial=False)
 
     def _translate_streaming(
         self,
@@ -224,7 +225,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             {"role": "user", "content": "\n\n".join(user_sections)},
         ]
 
-        return self._call_api(messages)
+        return self._call_api(messages, is_partial=is_partial)
 
     @classmethod
     def _merge_dicts(cls, base: Dict, override: Dict) -> Dict:
@@ -250,7 +251,25 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             print(f'[LLM] Warning: 解析 OPENAI_COMPAT_EXTRA_BODY_JSON 失败，已忽略: {e}')
         return {}
 
-    def _call_api(self, messages: List[Dict[str, str]]) -> str:
+    def _should_use_parallel_fastest(self, is_partial: bool) -> bool:
+        if not getattr(config, 'ENABLE_LLM_PARALLEL_FASTEST', False):
+            return False
+        if self.streaming_mode and is_partial:
+            return False
+        return True
+
+    def _execute_completion_request(self, request_kwargs: Dict[str, object]) -> str:
+        try:
+            completion = self.client.chat.completions.create(**request_kwargs)
+            if completion.choices and completion.choices[0].message.content:
+                return self.clean_response(completion.choices[0].message.content)
+            return "[ERROR] Empty response from model"
+        except Exception as e:
+            error_msg = str(e)
+            print(f"[LLM] API 调用错误: {error_msg}")
+            return f"[ERROR] {error_msg}"
+
+    def _call_api(self, messages: List[Dict[str, str]], is_partial: bool = False) -> str:
         """调用 LLM API"""
         try:
             self._maybe_rotate_key()
@@ -266,12 +285,20 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
                 extra_body = self._merge_dicts(extra_body, {"provider": {"sort": "latency"}})
             if extra_body:
                 request_kwargs["extra_body"] = extra_body
-            completion = self.client.chat.completions.create(**request_kwargs)
-            
-            if completion.choices and completion.choices[0].message.content:
-                return self.clean_response(completion.choices[0].message.content)
-            
-            return "[ERROR] Empty response from model"
+
+            if self._should_use_parallel_fastest(is_partial):
+                executor = ThreadPoolExecutor(max_workers=2)
+                futures = [
+                    executor.submit(self._execute_completion_request, dict(request_kwargs)),
+                    executor.submit(self._execute_completion_request, dict(request_kwargs)),
+                ]
+                done, _ = wait(futures, return_when=FIRST_COMPLETED)
+                first_completed = next(iter(done))
+                result = first_completed.result()
+                executor.shutdown(wait=False, cancel_futures=True)
+                return result
+
+            return self._execute_completion_request(request_kwargs)
             
         except Exception as e:
             error_msg = str(e)
