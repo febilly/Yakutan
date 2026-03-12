@@ -7,6 +7,8 @@ let autoSaveTimer = null;
 // 配置键名
 const CONFIG_STORAGE_KEY = 'vrchat_translator_config';
 const PANEL_FLOATING_MODE_STORAGE_KEY = 'panel_floating_mode';
+const LLM_TEMPLATE_KEY_STORAGE_PREFIX = 'llm_template_key_';
+const LLM_TEMPLATE_MODEL_STORAGE_PREFIX = 'llm_template_model_';
 
 // 待显示的警告消息（用于自动切换翻译API）
 let pendingWarningMessage = null;
@@ -68,19 +70,101 @@ let activeLLMTemplate = null;
 
 function detectActiveLLMTemplate() {
     const baseUrl = (document.getElementById('llm-base-url')?.value || '').trim();
-    const model = (document.getElementById('llm-model')?.value || '').trim();
 
     for (const [templateName, templateConfig] of Object.entries(LLM_TEMPLATE_CONFIGS)) {
-        if (baseUrl !== templateConfig.baseUrl) {
-            continue;
+        if (baseUrl === templateConfig.baseUrl) {
+            return templateName;
         }
-        if (Object.prototype.hasOwnProperty.call(templateConfig, 'model') && model !== templateConfig.model) {
-            continue;
-        }
-        return templateName;
     }
 
     return null;
+}
+
+function getLLMTemplateKeyStorageKey(templateName) {
+    return templateName ? `${LLM_TEMPLATE_KEY_STORAGE_PREFIX}${templateName}` : null;
+}
+
+function getLLMTemplateModelStorageKey(templateName) {
+    return templateName ? `${LLM_TEMPLATE_MODEL_STORAGE_PREFIX}${templateName}` : null;
+}
+
+function getStoredLLMTemplateKey(templateName) {
+    const storageKey = getLLMTemplateKeyStorageKey(templateName);
+    if (!storageKey) return '';
+    return localStorage.getItem(storageKey) || '';
+}
+
+function setStoredLLMTemplateKey(templateName, value) {
+    const storageKey = getLLMTemplateKeyStorageKey(templateName);
+    if (!storageKey) return;
+
+    const normalized = (value || '').trim();
+    if (normalized) {
+        localStorage.setItem(storageKey, normalized);
+    } else {
+        localStorage.removeItem(storageKey);
+    }
+}
+
+function getStoredLLMTemplateModel(templateName) {
+    const storageKey = getLLMTemplateModelStorageKey(templateName);
+    if (!storageKey) return '';
+    return localStorage.getItem(storageKey) || '';
+}
+
+function setStoredLLMTemplateModel(templateName, value) {
+    const storageKey = getLLMTemplateModelStorageKey(templateName);
+    if (!storageKey) return;
+
+    const normalized = (value || '').trim();
+    if (normalized) {
+        localStorage.setItem(storageKey, normalized);
+    } else {
+        localStorage.removeItem(storageKey);
+    }
+}
+
+function persistCurrentLLMTemplateKey() {
+    const templateName = detectActiveLLMTemplate();
+    const keyInput = document.getElementById('llm-api-key');
+    if (!templateName || !keyInput) return;
+
+    setStoredLLMTemplateKey(templateName, keyInput.value);
+}
+
+function persistCurrentLLMTemplateModel() {
+    const templateName = detectActiveLLMTemplate();
+    const modelInput = document.getElementById('llm-model');
+    if (!templateName || !modelInput) return;
+
+    if (templateName === 'openrouter') {
+        setStoredLLMTemplateModel(templateName, modelInput.value);
+    }
+}
+
+function snapshotLLMTemplateStorage() {
+    const snapshot = {};
+
+    Object.keys(LLM_TEMPLATE_CONFIGS).forEach((templateName) => {
+        snapshot[getLLMTemplateKeyStorageKey(templateName)] = getStoredLLMTemplateKey(templateName);
+
+        const modelStorageKey = getLLMTemplateModelStorageKey(templateName);
+        snapshot[modelStorageKey] = getStoredLLMTemplateModel(templateName);
+    });
+
+    return snapshot;
+}
+
+function restoreLLMTemplateStorage(snapshot) {
+    if (!snapshot) return;
+
+    Object.entries(snapshot).forEach(([storageKey, value]) => {
+        if (value) {
+            localStorage.setItem(storageKey, value);
+        } else {
+            localStorage.removeItem(storageKey);
+        }
+    });
 }
 
 function resolveLLMTemplateKeySource(templateName) {
@@ -248,6 +332,7 @@ function getNormalizedPanelWidth() {
 }
 
 function applyLLMTemplate(templateName) {
+    const previousTemplateName = detectActiveLLMTemplate();
     const baseUrlInput = document.getElementById('llm-base-url');
     const modelInput = document.getElementById('llm-model');
     const keyInput = document.getElementById('llm-api-key');
@@ -260,24 +345,44 @@ function applyLLMTemplate(templateName) {
         return;
     }
 
+    if (previousTemplateName) {
+        persistCurrentLLMTemplateKey();
+        persistCurrentLLMTemplateModel();
+    }
+
     baseUrlInput.value = templateConfig.baseUrl;
     if (Object.prototype.hasOwnProperty.call(templateConfig, 'model')) {
         modelInput.value = templateConfig.model;
+    } else if (templateName === 'openrouter') {
+        modelInput.value = getStoredLLMTemplateModel(templateName);
     }
     if (Object.prototype.hasOwnProperty.call(templateConfig, 'extraBody')) {
         extraBodyInput.value = templateConfig.extraBody;
     }
 
-    if (templateConfig.copyDashscopeKey) {
+    const storedKey = getStoredLLMTemplateKey(templateName);
+    if (storedKey) {
+        keyInput.value = storedKey;
+        persistSecretInputValue('llm-api-key');
+        envStatus.llm.api_key_set = true;
+    } else if (templateConfig.copyDashscopeKey) {
         const dashscopeKey = dashscopeKeyInput ? dashscopeKeyInput.value.trim() : '';
         if (dashscopeKey) {
             keyInput.value = dashscopeKey;
+            setStoredLLMTemplateKey(templateName, dashscopeKey);
             persistSecretInputValue('llm-api-key');
             envStatus.llm.api_key_set = true;
             showMessage('✅ ' + t('msg.llmTemplateDashscopeCopied'), 'success');
         } else {
+            keyInput.value = '';
+            persistSecretInputValue('llm-api-key');
+            envStatus.llm.api_key_set = false;
             showMessage('⚠️ ' + t('msg.llmTemplateDashscopeKeyMissing'), 'warning');
         }
+    } else {
+        keyInput.value = '';
+        persistSecretInputValue('llm-api-key');
+        envStatus.llm.api_key_set = false;
     }
 
     updateLLMTemplateKeySourceHint(templateName);
@@ -573,11 +678,25 @@ function loadAPIKeys() {
 
     if (dashscopeKey) document.getElementById('dashscope-api-key').value = dashscopeKey;
     if (deeplKey) document.getElementById('deepl-api-key').value = deeplKey;
-    if (llmKey) document.getElementById('llm-api-key').value = llmKey;
     if (doubaoKey) document.getElementById('doubao-api-key').value = doubaoKey;
 
     const sonioxKey = localStorage.getItem('soniox_api_key');
     if (sonioxKey) document.getElementById('soniox-api-key').value = sonioxKey;
+
+    const activeTemplate = detectActiveLLMTemplate();
+    const storedTemplateKey = getStoredLLMTemplateKey(activeTemplate);
+    if (storedTemplateKey) {
+        document.getElementById('llm-api-key').value = storedTemplateKey;
+    } else if (llmKey) {
+        document.getElementById('llm-api-key').value = llmKey;
+    }
+
+    if (activeTemplate === 'openrouter') {
+        const storedOpenRouterModel = getStoredLLMTemplateModel(activeTemplate);
+        if (storedOpenRouterModel) {
+            document.getElementById('llm-model').value = storedOpenRouterModel;
+        }
+    }
 
     document.getElementById('use-international-endpoint').checked = useInternational;
 
@@ -606,6 +725,9 @@ function loadAPIKeys() {
         const input = document.getElementById(inputId);
         if (!input) return;
         input.addEventListener('input', (event) => {
+            if (event.target.id === 'llm-model') {
+                persistCurrentLLMTemplateModel();
+            }
             syncLLMTemplateKeySourceHintFromInputs();
             onSettingChange(event.target);
         });
@@ -689,6 +811,7 @@ function saveAPIKey(event) {
     persistSecretInputValue(event.target.id);
 
     if (event.target.id === 'llm-api-key') {
+        persistCurrentLLMTemplateKey();
         envStatus.llm.api_key_set = !!event.target.value.trim();
     }
 
@@ -1442,6 +1565,10 @@ async function resetToDefaults() {
     }
 
     try {
+        persistCurrentLLMTemplateKey();
+        persistCurrentLLMTemplateModel();
+        const llmTemplateStorageSnapshot = snapshotLLMTemplateStorage();
+
         // 使用前端默认配置
         loadDefaultConfig();
         resetPanelFloatingModeSetting();
@@ -1451,6 +1578,7 @@ async function resetToDefaults() {
 
         // 先保存到本地浏览器
         saveConfigToLocalStorage();
+        restoreLLMTemplateStorage(llmTemplateStorageSnapshot);
 
         // 再保存到服务器
         await saveConfig();

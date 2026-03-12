@@ -105,7 +105,7 @@ const translations = {
         'label.llmKey': 'LLM API Key',
         'hint.llmKey': '仅在选择 LLM 翻译时使用。',
         'label.openaiCompatExtraBodyJson': '自定义 extra_body（可选）',
-        'hint.openaiCompatExtraBodyJson': '仅对 LLM 翻译生效，不影响 Qwen-MT。留空则不发送 extra_body。',
+        'hint.openaiCompatExtraBodyJson': '留空则不发送 extra_body。',
         'label.reverseTranslation': '启用反向翻译',
         'hint.reverseTranslation': '总是使用 Google Dictionary API，结果会显示在小面板中，请注意网络连通性',
 
@@ -313,7 +313,7 @@ const translations = {
         'label.llmKey': 'LLM API Key',
         'hint.llmKey': 'Used only when LLM translation is selected.',
         'label.openaiCompatExtraBodyJson': 'Custom extra_body (Optional)',
-        'hint.openaiCompatExtraBodyJson': 'Only applies to LLM translation. Does not affect Qwen-MT. Leave empty to avoid sending extra_body.',
+        'hint.openaiCompatExtraBodyJson': 'Leave empty to avoid sending extra_body.',
         'label.reverseTranslation': 'Enable Reverse Translation',
         'hint.reverseTranslation': 'Always uses Google Dictionary API. Results are shown in the small panel. Check network connectivity.',
 
@@ -516,7 +516,7 @@ const translations = {
         'label.llmKey': 'LLM API Key',
         'hint.llmKey': 'LLM 翻訳を選択したときのみ使用します。',
         'label.openaiCompatExtraBodyJson': 'カスタム extra_body（任意）',
-        'hint.openaiCompatExtraBodyJson': 'LLM 翻訳にのみ適用され、Qwen-MT には影響しません。空欄なら extra_body を送信しません。',
+        'hint.openaiCompatExtraBodyJson': '空欄なら extra_body を送信しません。',
         'label.reverseTranslation': '逆翻訳を有効化',
         'hint.reverseTranslation': '常に Google Dictionary API を使用します。結果は小さいパネルに表示されます。ネットワーク接続に注意してください',
 
@@ -712,7 +712,7 @@ const translations = {
         'label.llmKey': 'LLM API Key',
         'hint.llmKey': 'LLM 번역을 선택했을 때만 사용합니다.',
         'label.openaiCompatExtraBodyJson': '사용자 정의 extra_body(선택)',
-        'hint.openaiCompatExtraBodyJson': 'LLM 번역에만 적용되며 Qwen-MT에는 영향을 주지 않습니다. 비워 두면 extra_body를 보내지 않습니다.',
+        'hint.openaiCompatExtraBodyJson': '비워 두면 extra_body를 보내지 않습니다.',
         'label.reverseTranslation': '역방향 번역 사용',
         'hint.reverseTranslation': '항상 Google Dictionary API를 사용합니다. 결과는 작은 패널에 표시됩니다. 네트워크 연결을 확인하세요',
 
