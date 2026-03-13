@@ -188,7 +188,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             "Keep the style casual and friendly unless instructed otherwise. "
             "When a previous translation draft is supplied, behave like a streaming translator: reuse as much wording as possible and only make the smallest edits needed for accuracy and fluency. "
             "Maintain consistency with the previous translations in the conversation history. "
-            "Output only the translation without commentary."
+            f"Output only the translation in **{target_descriptor}** without commentary."
         )
 
         user_sections = []
