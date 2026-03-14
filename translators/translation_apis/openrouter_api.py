@@ -1,7 +1,15 @@
 """
 LLM translation API implementation using an OpenAI-compatible interface.
 支持普通翻译和流式翻译两种模式
+
+v12 smart-hybrid 策略：
+- Partial: 传 draft，使用 continuation framing 保持稳定
+- Final: 先用 continuation framing（传 draft）获取稳定翻译，
+  然后检查内容完整性。若检测到内容丢失，则用无 draft 的 fresh
+  翻译做补救，再通过 merge_with_draft 合并保留稳定前缀。
 """
+
+import re
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import json
 from typing import Optional, List, Dict
@@ -9,6 +17,71 @@ from typing import Optional, List, Dict
 from .base_translation_api import BaseTranslationAPI
 import config
 from openai_compat_client import OpenAICompatClientBase
+
+
+def merge_with_draft(fresh_translation: str, draft: str) -> str:
+    """代码级合并：保留 draft 的开头措辞，用 fresh 保证完整性。
+
+    核心策略：
+    - 用户最关注"文本不要跳动" → 开头保持一致最重要
+    - 内容不能丢 → fresh 翻译保证完整性
+    - 方法：找到 draft 和 fresh 的最佳分割点，之前用 draft 措辞，之后用 fresh 内容
+    """
+    if not draft or not fresh_translation:
+        return fresh_translation
+
+    # Case 1: fresh 已经以 draft 为前缀 → 完美
+    if fresh_translation.startswith(draft):
+        return fresh_translation
+
+    # Case 2: draft 是 fresh 的前缀或超集 → 用 fresh
+    if draft.startswith(fresh_translation):
+        return fresh_translation
+
+    # Case 3: 找公共前缀
+    common_prefix_len = 0
+    for a, b in zip(draft, fresh_translation):
+        if a == b:
+            common_prefix_len += 1
+        else:
+            break
+
+    # 如果公共前缀 >= 40% of draft 或 >= 3 chars，在该点拼接
+    if common_prefix_len >= max(len(draft) * 0.4, 3):
+        return draft[:common_prefix_len] + fresh_translation[common_prefix_len:]
+
+    # Case 4: 尝试在 fresh 中找 draft 的"逻辑结束位置"
+    # draft 翻译了源文本的前半部分，fresh 翻译了全部
+    # 如果 draft 的某些关键字出现在 fresh 的前部分，可以做嫁接
+    draft_parts = re.split(r"[\u3001\u3002\uff01\uff1f,\.!\?]+", draft)
+    draft_parts = [p.strip() for p in draft_parts if len(p.strip()) >= 2]
+
+    if draft_parts:
+        last_part = draft_parts[-1]
+        search_len = max(3, len(last_part) // 2)
+        for try_len in range(len(last_part), search_len - 1, -1):
+            substr = last_part[:try_len]
+            pos = fresh_translation.find(substr)
+            if pos != -1:
+                cut_pos = pos + len(substr)
+                # 跳过标点
+                while (
+                    cut_pos < len(fresh_translation)
+                    and fresh_translation[cut_pos] in "、。！？,.!? \t\n"
+                ):
+                    cut_pos += 1
+                remaining = fresh_translation[cut_pos:]
+                if remaining:
+                    if not re.search(r"[\u3001\u3002\uff01\uff1f,\.!\?\s]$", draft):
+                        return draft + "、" + remaining
+                    return draft + remaining
+                else:
+                    return fresh_translation
+                break
+
+    # Case 5: 两者差异太大，直接用 fresh（保质量优先）
+    return fresh_translation
+
 
 class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
     """
@@ -19,30 +92,30 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
     SUPPORTS_CONTEXT = True
 
     LANGUAGE_NAME_MAP = {
-        'zh': 'CHINESE',
-        'zh-cn': 'SIMPLIFIED CHINESE',
-        'zh-tw': 'TRADITIONAL CHINESE',
-        'zh-hans': 'SIMPLIFIED CHINESE',
-        'zh-hant': 'TRADITIONAL CHINESE',
-        'en': 'ENGLISH',
-        'en-us': 'AMERICAN ENGLISH',
-        'en-gb': 'BRITISH ENGLISH',
-        'ja': 'JAPANESE',
-        'ko': 'KOREAN',
-        'es': 'SPANISH',
-        'fr': 'FRENCH',
-        'de': 'GERMAN',
-        'id': 'INDONESIAN',
-        'ru': 'RUSSIAN',
-        'ar': 'ARABIC',
-        'pt': 'PORTUGUESE',
-        'th': 'THAI',
-        'tl': 'TAGALOG (Philippines)',
-        'it': 'ITALIAN',
-        'tr': 'TURKISH',
-        'fil': 'FILIPINO/TAGALOG',
+        "zh": "CHINESE",
+        "zh-cn": "SIMPLIFIED CHINESE",
+        "zh-tw": "TRADITIONAL CHINESE",
+        "zh-hans": "SIMPLIFIED CHINESE",
+        "zh-hant": "TRADITIONAL CHINESE",
+        "en": "ENGLISH",
+        "en-us": "AMERICAN ENGLISH",
+        "en-gb": "BRITISH ENGLISH",
+        "ja": "JAPANESE",
+        "ko": "KOREAN",
+        "es": "SPANISH",
+        "fr": "FRENCH",
+        "de": "GERMAN",
+        "id": "INDONESIAN",
+        "ru": "RUSSIAN",
+        "ar": "ARABIC",
+        "pt": "PORTUGUESE",
+        "th": "THAI",
+        "tl": "TAGALOG (Philippines)",
+        "it": "ITALIAN",
+        "tr": "TURKISH",
+        "fil": "FILIPINO/TAGALOG",
     }
-    
+
     def __init__(
         self,
         model: Optional[str] = None,
@@ -53,7 +126,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
     ) -> None:
         """
         初始化 LLM 翻译客户端
-        
+
         Args:
             model: 使用的模型名称
             temperature: 采样温度
@@ -66,14 +139,14 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         self.timeout = timeout
         self.max_retries = max_retries
         self.streaming_mode = streaming_mode
-        
+
         super().__init__(base_url=config.LLM_BASE_URL, model=self.model)
 
     @classmethod
     def _describe_language(cls, language_code: str) -> str:
-        normalized = (language_code or '').strip().lower()
-        if not normalized or normalized == 'auto':
-            return 'auto-detected source language'
+        normalized = (language_code or "").strip().lower()
+        if not normalized or normalized == "auto":
+            return "auto-detected source language"
         language_name = cls.LANGUAGE_NAME_MAP.get(normalized, normalized.upper())
         return f"{language_name} ({language_code})"
 
@@ -84,11 +157,11 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         target_language: str = "zh-CN",
         context: Optional[str] = None,
         context_pairs: Optional[List[Dict[str, str]]] = None,
-        **kwargs
+        **kwargs,
     ) -> str:
         """
         翻译文本
-        
+
         Args:
             text: 要翻译的文本
             source_language: 源语言代码
@@ -98,7 +171,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             **kwargs: 其他参数
                 previous_translation: 上一次的翻译结果 (str) - 仅 streaming_mode
                 is_partial: 是否为部分结果 (bool) - 仅 streaming_mode
-        
+
         Returns:
             翻译后的文本
         """
@@ -106,10 +179,12 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             return ""
 
         if self.streaming_mode:
-            return self._translate_streaming(text, source_language, target_language, 
-                                             context, context_pairs, **kwargs)
-        return self._translate_standard(text, source_language, target_language,
-                                        context, context_pairs, **kwargs)
+            return self._translate_streaming(
+                text, source_language, target_language, context, context_pairs, **kwargs
+            )
+        return self._translate_standard(
+            text, source_language, target_language, context, context_pairs, **kwargs
+        )
 
     def _translate_standard(
         self,
@@ -118,54 +193,51 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         target_language: str,
         context: Optional[str],
         context_pairs: Optional[List[Dict[str, str]]],
-        **kwargs
+        **kwargs,
     ) -> str:
         """标准翻译模式"""
-        if context_pairs:
-            context_lines = []
-            for pair in context_pairs:
-                context_lines.append(f"Source: {pair['source']}")
-                context_lines.append(f"Translation: {pair['target']}")
-            context_block = "\n".join(context_lines)
-        elif context and context.strip():
-            context_block = context.strip()
-        else:
-            context_block = "None."
-        
         target_descriptor = self._describe_language(target_language)
+        system_prompt = self._build_system_prompt(target_descriptor)
+        context_block = self._build_context_block(context, context_pairs)
 
-        system_prompt = (
-            "You are a strict translation assistant. "
-            f"Your output must be entirely in **{target_descriptor}**. "
-            "Do not explain anything. "
-            "Return only the translated text."
-        )
-
-        user_message = (
-            "Previous conversation context (source text and translations):\n"
-            f"{context_block}\n\n"
-            "Output Format:\n"
-            "Provide only the translated text without quotation marks, prefixes, or explanations.\n\n"
-            "Translation Principles:\n"
-            "1. Keep the tone short, breezy, and friendly.\n"
-            "2. Preserve the original meaning, named entities, and essential formatting.\n"
-            "3. Prefer natural phrasing that reads well for the target audience.\n"
-            "4. Fix any obvious recognition errors in the source text.\n"
-            "5. Maintain consistency with the previous translations shown above.\n"
-            f"6. The response must be written in **{target_descriptor}** only.\n"
-            "7. If the draft in your head is not in the requested target language, rewrite it before answering.\n\n"
-            "Task:\n"
-            f"Translate the text below inside <text> and </text> into **{target_descriptor}**.\n\n"
-            "Text To Translate:\n"
-            f"<text>{text}</text>"
-        )
+        user_parts = []
+        if context_block:
+            user_parts.append(context_block)
+        user_parts.append(f"Translate this: {text}")
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
+            {"role": "user", "content": "\n\n".join(user_parts)},
         ]
 
         return self._call_api(messages, is_partial=False)
+
+    def _build_system_prompt(self, target_descriptor: str) -> str:
+        """构建系统提示词（所有模式通用）"""
+        return (
+            f"You are a VRChat voice chat translator. "
+            f"Translate the user's message into {target_descriptor}.\n\n"
+            f"- Output ONLY in {target_descriptor}. No source-language words.\n"
+            "- Translate EVERY part completely. Never skip or shorten.\n"
+            "- Use casual spoken style, like friends chatting.\n"
+            "- For idioms/slang: translate the meaning naturally.\n"
+            "- Output the translation only. No labels, notes, or commentary."
+        )
+
+    def _build_context_block(
+        self,
+        context: Optional[str],
+        context_pairs: Optional[List[Dict[str, str]]],
+    ) -> Optional[str]:
+        """构建上下文块"""
+        if context_pairs:
+            ctx = "Conversation so far:\n"
+            for pair in context_pairs:
+                ctx += f"  {pair['source']} → {pair['target']}\n"
+            return ctx.strip()
+        if context and context.strip():
+            return f"Conversation so far:\n{context.strip()}"
+        return None
 
     def _translate_streaming(
         self,
@@ -174,58 +246,117 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         target_language: str,
         context: Optional[str],
         context_pairs: Optional[List[Dict[str, str]]],
-        **kwargs
+        **kwargs,
     ) -> str:
-        """流式翻译模式（支持 partial 和 previous_translation）"""
-        previous_translation = kwargs.get('previous_translation')
-        is_partial = kwargs.get('is_partial', False)
+        """流式翻译模式 v12: smart-hybrid
+
+        策略：
+        - Partial: 传 draft + continuation framing → 稳定的中间翻译
+        - Final: 先用 continuation framing（传 draft）→ 稳定翻译
+          → 检查内容完整性 → 若丢了内容则补救（fresh + merge）
+        """
+        previous_translation = kwargs.get("previous_translation")
+        is_partial = kwargs.get("is_partial", False)
         target_descriptor = self._describe_language(target_language)
 
-        system_prompt = (
-            "You are a strict streaming translator assisting with VRChat conversations. "
-            f"Translate all provided text into **{target_descriptor}**. "
-            f"Your output must stay entirely in **{target_descriptor}**. "
-            "Keep the style casual and friendly unless instructed otherwise. "
-            "When a previous translation draft is supplied, behave like a streaming translator: reuse as much wording as possible and only make the smallest edits needed for accuracy and fluency. "
-            "Maintain consistency with the previous translations in the conversation history. "
-            f"Output only the translation in **{target_descriptor}** without commentary."
-        )
+        system_prompt = self._build_system_prompt(target_descriptor)
+        context_block = self._build_context_block(context, context_pairs)
 
-        user_sections = []
-        if context_pairs:
-            context_lines = ["Previous conversation (source and translation pairs):"]
-            for pair in context_pairs:
-                context_lines.append(f"Source: {pair['source']}")
-                context_lines.append(f"Translation: {pair['target']}")
-            user_sections.append("\n".join(context_lines))
-        elif context and context.strip():
-            user_sections.append(f"Scene context and conversation history:\n{context.strip()}")
-
-        user_sections.append(f"Source text:\n{text}")
+        # ── Step 1: 构建 v11 continuation prompt（同时适用于 partial 和 final）──
+        user_parts = []
+        if context_block:
+            user_parts.append(context_block)
 
         if previous_translation:
-            user_sections.append(
-                "Previously streamed translation (revise minimally, keep structure where possible):\n"
-                f"{previous_translation.strip()}"
-            )
+            if is_partial:
+                user_parts.append(
+                    f"Your previous translation: {previous_translation.strip()}\n"
+                    "Source text has been updated below. Translate the full updated text. "
+                    "Keep wording consistent where meaning hasn't changed."
+                )
+            else:
+                # Final: continuation framing — 强调 "继续" 而非 "修改"
+                user_parts.append(
+                    f"You previously translated part of this as: {previous_translation.strip()}\n"
+                    "Now the complete sentence has arrived. "
+                    "Translate the COMPLETE source text below. "
+                    "Start your translation the same way as your previous version, "
+                    "then continue translating the rest of the sentence."
+                )
 
-        if is_partial:
-            user_sections.append(
-                "This is an incremental streaming update. Provide an updated translation that stays compatible with potential future continuation."
-            )
-        else:
-            user_sections.append("This is the final delivery for this utterance. Ensure the translation reads smoothly.")
-
-        user_sections.append(f"Mandatory output language: **{target_descriptor}**.")
-        user_sections.append("If any wording is not in the requested target language, rewrite it before responding.")
-        user_sections.append("Return only the translation text.")
+        user_parts.append(f"Translate this: {text}")
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "\n\n".join(user_sections)},
+            {"role": "user", "content": "\n\n".join(user_parts)},
         ]
 
-        return self._call_api(messages, is_partial=is_partial)
+        stable_translation = self._call_api(messages, is_partial=is_partial)
+
+        # ── Partial 直接返回 ──
+        if is_partial:
+            return stable_translation
+
+        # ── Step 2: Final — 内容完整性检查 ──
+        if stable_translation.startswith("[ERROR]") or not previous_translation:
+            return stable_translation
+
+        needs_rescue, rescue_reason = self._check_content_completeness(
+            text, stable_translation, previous_translation
+        )
+
+        if not needs_rescue:
+            return stable_translation
+
+        # ── Step 3: 补救 — 无 draft 的 fresh 翻译 ──
+        print(f"[LLM] v12 rescue triggered: {rescue_reason}")
+        rescue_parts = []
+        if context_block:
+            rescue_parts.append(context_block)
+        rescue_parts.append(f"Translate this: {text}")
+
+        rescue_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "\n\n".join(rescue_parts)},
+        ]
+
+        fresh_translation = self._call_api(rescue_messages, is_partial=False)
+
+        if fresh_translation.startswith("[ERROR]"):
+            return stable_translation
+
+        # ── Step 4: 合并 — 保留 stable 的开头 + fresh 的完整内容 ──
+        return merge_with_draft(fresh_translation, stable_translation)
+
+    @staticmethod
+    def _check_content_completeness(
+        source_text: str,
+        translation: str,
+        previous_translation: str,
+    ) -> tuple:
+        """检查翻译内容是否完整，返回 (needs_rescue, reason)。
+
+        两个启发式检查：
+        1. 翻译相对源文本太短（ratio < 0.6）
+        2. 源文本比 draft 长很多，但翻译没有增长
+        """
+        ratio = len(translation) / max(len(source_text), 1)
+        if ratio < 0.6:
+            return True, f"ratio={ratio:.2f}<0.6"
+
+        # 用 previous_translation 长度近似 previous source 长度
+        # （zh→ja 大约 1:1 字符比）
+        source_vs_draft = len(source_text) / max(len(previous_translation), 1)
+        trans_growth = len(translation) / max(len(previous_translation), 1)
+        source_added = len(source_text) - len(previous_translation)
+
+        if source_vs_draft >= 1.3 and source_added >= 3 and trans_growth < 1.05:
+            return True, (
+                f"source_vs_draft={source_vs_draft:.2f} (+{source_added}chars) "
+                f"but trans_growth={trans_growth:.2f}"
+            )
+
+        return False, ""
 
     @classmethod
     def _merge_dicts(cls, base: Dict, override: Dict) -> Dict:
@@ -239,20 +370,24 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
 
     @classmethod
     def _build_configured_extra_body(cls) -> Dict:
-        raw_extra_body = (getattr(config, 'OPENAI_COMPAT_EXTRA_BODY_JSON', '') or '').strip()
+        raw_extra_body = (
+            getattr(config, "OPENAI_COMPAT_EXTRA_BODY_JSON", "") or ""
+        ).strip()
         if not raw_extra_body:
             return {}
         try:
             custom_extra_body = json.loads(raw_extra_body)
             if isinstance(custom_extra_body, dict):
                 return custom_extra_body
-            print('[LLM] Warning: OPENAI_COMPAT_EXTRA_BODY_JSON 不是 JSON 对象，已忽略')
+            print("[LLM] Warning: OPENAI_COMPAT_EXTRA_BODY_JSON 不是 JSON 对象，已忽略")
         except Exception as e:
-            print(f'[LLM] Warning: 解析 OPENAI_COMPAT_EXTRA_BODY_JSON 失败，已忽略: {e}')
+            print(
+                f"[LLM] Warning: 解析 OPENAI_COMPAT_EXTRA_BODY_JSON 失败，已忽略: {e}"
+            )
         return {}
 
     def _should_use_parallel_fastest(self, is_partial: bool) -> bool:
-        if not getattr(config, 'ENABLE_LLM_PARALLEL_FASTEST', False):
+        if not getattr(config, "ENABLE_LLM_PARALLEL_FASTEST", False):
             return False
         if self.streaming_mode and is_partial:
             return False
@@ -269,7 +404,9 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             print(f"[LLM] API 调用错误: {error_msg}")
             return f"[ERROR] {error_msg}"
 
-    def _call_api(self, messages: List[Dict[str, str]], is_partial: bool = False) -> str:
+    def _call_api(
+        self, messages: List[Dict[str, str]], is_partial: bool = False
+    ) -> str:
         """调用 LLM API"""
         try:
             self._maybe_rotate_key()
@@ -282,15 +419,21 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             }
             extra_body = self._build_configured_extra_body()
             if self._is_openrouter_base_url():
-                extra_body = self._merge_dicts(extra_body, {"provider": {"sort": "latency"}})
+                extra_body = self._merge_dicts(
+                    extra_body, {"provider": {"sort": "latency"}}
+                )
             if extra_body:
                 request_kwargs["extra_body"] = extra_body
 
             if self._should_use_parallel_fastest(is_partial):
                 executor = ThreadPoolExecutor(max_workers=2)
                 futures = [
-                    executor.submit(self._execute_completion_request, dict(request_kwargs)),
-                    executor.submit(self._execute_completion_request, dict(request_kwargs)),
+                    executor.submit(
+                        self._execute_completion_request, dict(request_kwargs)
+                    ),
+                    executor.submit(
+                        self._execute_completion_request, dict(request_kwargs)
+                    ),
                 ]
                 done, _ = wait(futures, return_when=FIRST_COMPLETED)
                 first_completed = next(iter(done))
@@ -299,12 +442,11 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
                 return result
 
             return self._execute_completion_request(request_kwargs)
-            
+
         except Exception as e:
             error_msg = str(e)
             print(f"[LLM] API 调用错误: {error_msg}")
             return f"[ERROR] {error_msg}"
-
 
 
 # 为了向后兼容，保留 OpenRouterStreamingAPI 这个别名类
@@ -313,7 +455,7 @@ class OpenRouterStreamingAPI(OpenRouterAPI):
     Streaming-optimized LLM translation API (alias for OpenRouterAPI with streaming_mode=True).
     保留此类以向后兼容。
     """
-    
+
     def __init__(
         self,
         model: Optional[str] = None,
