@@ -604,7 +604,8 @@
 
                             <div class="form-group">
                                 <label for="source-language" data-i18n="label.sourceLanguage">源语言</label>
-                                <select id="source-language" class="form-control" onchange="onSettingChange()">
+                                <select id="source-language" class="form-control" onchange="onSettingChange(this)"
+                                    data-restart-required="true">
                                     <option value="auto" data-i18n="sourceLang.auto">自动检测</option>
                                     <option value="zh" data-i18n="sourceLang.zh">中文</option>
                                     <option value="en" data-i18n="sourceLang.en">英语</option>
