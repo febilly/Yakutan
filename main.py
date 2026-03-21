@@ -489,6 +489,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self._final_output_version = 0
         self.partial_translation_update_count = 0
         self._prefer_deepl_on_next_final = False
+        self._partial_debounce_handle: Optional[asyncio.TimerHandle] = None
 
     def mark_mute_finalization_requested(self) -> None:
         self._prefer_deepl_on_next_final = True
@@ -525,9 +526,64 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         min_chars = max(0, int(getattr(config, 'MIN_PARTIAL_TRANSLATION_CHARS', 2)))
         normalized_segment = segment.strip().rstrip("。？！，、.?!,… ")
         return len(normalized_segment) >= min_chars
+
+    def _cancel_partial_debounce(self) -> None:
+        """取消尚未触发的流式翻译消抖定时器。"""
+
+        def _cancel() -> None:
+            if self._partial_debounce_handle is not None:
+                self._partial_debounce_handle.cancel()
+                self._partial_debounce_handle = None
+
+        if self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(_cancel)
+        else:
+            _cancel()
+
+    def _schedule_partial_translation_with_debounce(
+        self,
+        segment: str,
+        request_id: int,
+        finalized_seq: int,
+        final_output_version: int,
+    ) -> None:
+        """对流式翻译请求做消抖：仅在短时间内无更新时才发送请求。"""
+        if not self.loop:
+            return
+
+        debounce_ms = max(0, int(getattr(config, 'PARTIAL_TRANSLATION_DEBOUNCE_MS', 50)))
+        debounce_seconds = debounce_ms / 1000.0
+
+        def _dispatch() -> None:
+            self._partial_debounce_handle = None
+            if (
+                request_id != self._latest_partial_request_id or
+                finalized_seq != self._finalized_seq or
+                final_output_version != self._final_output_version
+            ):
+                return
+            asyncio.create_task(
+                self._translate_partial_task(
+                    segment,
+                    request_id,
+                    finalized_seq,
+                    final_output_version,
+                )
+            )
+
+        def _schedule() -> None:
+            if self._partial_debounce_handle is not None:
+                self._partial_debounce_handle.cancel()
+            self._partial_debounce_handle = self.loop.call_later(
+                debounce_seconds,
+                _dispatch,
+            )
+
+        self.loop.call_soon_threadsafe(_schedule)
     
     def on_session_started(self) -> None:
         logger.info('Speech recognizer session opened.')
+        self._cancel_partial_debounce()
         self.last_partial_translation = None
         self.last_partial_translation_secondary = None
         self.last_partial_source_segment = None
@@ -538,6 +594,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self._final_output_version = 0
 
     def on_session_stopped(self) -> None:
+        self._cancel_partial_debounce()
         logger.info('Speech recognizer session closed.')
 
     def on_error(self, error: Exception) -> None:
@@ -704,9 +761,11 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     self._latest_partial_request_id = request_id
                     self.pending_partial_segment = segment
                     final_output_version = self._final_output_version
-                    asyncio.run_coroutine_threadsafe(
-                        self._translate_partial_task(segment, request_id, self._finalized_seq, final_output_version),
-                        self.loop
+                    self._schedule_partial_translation_with_debounce(
+                        segment,
+                        request_id,
+                        self._finalized_seq,
+                        final_output_version,
                     )
 
         else:
@@ -784,6 +843,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     secondary_translated_text = None
                 self._finalized_seq += 1
                 self._final_output_version += 1
+                self._cancel_partial_debounce()
                 
                 # 重置流式翻译状态
                 self.last_partial_translation = None
