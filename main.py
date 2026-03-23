@@ -74,7 +74,14 @@ def is_streaming_deepl_hybrid_mode() -> bool:
 
 
 DUAL_OUTPUT_SEPARATOR = "\n"
-DUAL_OUTPUT_MAX_CHARS_PER_RESULT = 71
+DUAL_OUTPUT_TOTAL_MAX_CHARS = 144
+DUAL_OUTPUT_BODY_BUDGET = max(0, DUAL_OUTPUT_TOTAL_MAX_CHARS - len(DUAL_OUTPUT_SEPARATOR))
+DUAL_OUTPUT_MAX_CHARS_PER_RESULT = DUAL_OUTPUT_BODY_BUDGET // 2
+
+# 双语裁剪时：中日韩权重=1，其他语言权重=2。
+COMPACT_SCRIPT_LANGUAGE_BASES = {'zh', 'ja', 'ko'}
+COMPACT_SCRIPT_BUDGET_WEIGHT = 1
+ALPHABETIC_SCRIPT_BUDGET_WEIGHT = 2
 
 
 def _normalize_optional_language_code(language: Optional[str]) -> Optional[str]:
@@ -119,6 +126,50 @@ def _sanitize_output_line(text: str) -> str:
     return " ".join(part.strip() for part in normalized.split('\n') if part.strip())
 
 
+def _normalize_language_base(language: Optional[str]) -> str:
+    if language is None:
+        return ""
+    normalized = str(language).strip().lower().replace('_', '-')
+    if not normalized:
+        return ""
+    return normalized.split('-', 1)[0]
+
+
+def _is_compact_script_language(language: Optional[str]) -> bool:
+    return _normalize_language_base(language) in COMPACT_SCRIPT_LANGUAGE_BASES
+
+
+def _get_language_budget_weight(language: Optional[str]) -> float:
+    if _is_compact_script_language(language):
+        return COMPACT_SCRIPT_BUDGET_WEIGHT
+    return ALPHABETIC_SCRIPT_BUDGET_WEIGHT
+
+
+def _allocate_dual_output_budgets(
+    primary_language: Optional[str],
+    secondary_language: Optional[str],
+    total_chars: int = DUAL_OUTPUT_BODY_BUDGET,
+) -> tuple[int, int]:
+    if total_chars <= 0:
+        return 0, 0
+
+    primary_weight = _get_language_budget_weight(primary_language)
+    secondary_weight = _get_language_budget_weight(secondary_language)
+    total_weight = primary_weight + secondary_weight
+
+    if total_chars == 1:
+        return 1, 0
+
+    if total_weight <= 0:
+        primary_budget = total_chars // 2
+    else:
+        primary_budget = int(round(total_chars * (primary_weight / total_weight)))
+
+    primary_budget = max(1, min(total_chars - 1, primary_budget))
+    secondary_budget = total_chars - primary_budget
+    return primary_budget, secondary_budget
+
+
 def limit_dual_output_text(text: str, max_chars: int = DUAL_OUTPUT_MAX_CHARS_PER_RESULT) -> str:
     sanitized = _sanitize_output_line(text)
     if len(sanitized) <= max_chars:
@@ -156,11 +207,32 @@ def get_display_translation_text(translated_text: str, target_language: str) -> 
     return add_pinyin_if_needed(display_text, target_language)
 
 
-def build_dual_output_display(primary_text: str, secondary_text: Optional[str]) -> str:
-    output_lines = [limit_dual_output_text(primary_text)]
-    if secondary_text is not None:
-        output_lines.append(limit_dual_output_text(secondary_text))
-    return DUAL_OUTPUT_SEPARATOR.join(output_lines)
+def build_dual_output_display(
+    primary_text: str,
+    secondary_text: Optional[str],
+    primary_language: Optional[str] = None,
+    secondary_language: Optional[str] = None,
+) -> str:
+    if secondary_text is None:
+        return limit_dual_output_text(primary_text)
+
+    primary_sanitized = _sanitize_output_line(primary_text)
+    secondary_sanitized = _sanitize_output_line(secondary_text)
+    full_text = DUAL_OUTPUT_SEPARATOR.join([primary_sanitized, secondary_sanitized])
+
+    # 能完整装下时不做任何裁剪。
+    if len(full_text) <= DUAL_OUTPUT_TOTAL_MAX_CHARS:
+        return full_text
+
+    primary_budget, secondary_budget = _allocate_dual_output_budgets(
+        primary_language,
+        secondary_language,
+        total_chars=DUAL_OUTPUT_BODY_BUDGET,
+    )
+
+    clipped_primary = limit_dual_output_text(primary_sanitized, max_chars=primary_budget)
+    clipped_secondary = limit_dual_output_text(secondary_sanitized, max_chars=secondary_budget)
+    return DUAL_OUTPUT_SEPARATOR.join([clipped_primary, clipped_secondary])
 
 
 def build_streaming_output_line(text: str) -> str:
@@ -681,6 +753,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 display_text = build_dual_output_display(
                     translation_display,
                     secondary_translation_display,
+                    actual_target,
+                    actual_secondary_target,
                 )
             else:
                 show_tag = getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True)
@@ -878,6 +952,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     display_text = build_dual_output_display(
                         display_translated_text,
                         secondary_display_translated_text,
+                        actual_target,
+                        actual_secondary_target,
                     )
                 else:
                     show_tag = getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True)
