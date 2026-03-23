@@ -228,7 +228,20 @@
 
                                 <div class="form-group">
                                     <label for="llm-api-key" data-i18n="label.llmKey">LLM API Key</label>
-                                    <input type="password" id="llm-api-key" class="form-control" placeholder="sk-...">
+                                    <div class="secret-input-group">
+                                        <input type="password" id="llm-api-key" class="form-control" placeholder="sk-...">
+                                        <button
+                                            type="button"
+                                            id="llm-api-key-visibility-toggle"
+                                            class="secret-visibility-toggle"
+                                            data-target-input="llm-api-key"
+                                            aria-label="Show key"
+                                            aria-pressed="false"
+                                            title="Show key"
+                                        >
+                                            <span class="secret-visibility-icon" aria-hidden="true">&#128065;</span>
+                                        </button>
+                                    </div>
                                     <small class="form-text" data-i18n="hint.llmKey">仅在选择 LLM 翻译时使用。</small>
                                 </div>
 

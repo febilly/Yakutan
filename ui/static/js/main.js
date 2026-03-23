@@ -298,6 +298,37 @@ function persistSecretInputValue(inputId) {
     }
 }
 
+function updateSecretVisibilityToggleState(toggleButton, targetInput) {
+    if (!toggleButton || !targetInput) return;
+
+    const isVisible = targetInput.type === 'text';
+    toggleButton.classList.toggle('visible', isVisible);
+    toggleButton.setAttribute('aria-pressed', isVisible ? 'true' : 'false');
+    toggleButton.setAttribute('aria-label', isVisible ? 'Hide key' : 'Show key');
+    toggleButton.title = isVisible ? 'Hide key' : 'Show key';
+}
+
+function setupSecretVisibilityToggles() {
+    document.querySelectorAll('.secret-visibility-toggle[data-target-input]').forEach((toggleButton) => {
+        const targetInputId = toggleButton.getAttribute('data-target-input');
+        const targetInput = targetInputId ? document.getElementById(targetInputId) : null;
+        if (!targetInput) return;
+
+        updateSecretVisibilityToggleState(toggleButton, targetInput);
+
+        if (toggleButton.dataset.bound === 'true') {
+            return;
+        }
+
+        toggleButton.addEventListener('click', () => {
+            targetInput.type = targetInput.type === 'password' ? 'text' : 'password';
+            updateSecretVisibilityToggleState(toggleButton, targetInput);
+        });
+
+        toggleButton.dataset.bound = 'true';
+    });
+}
+
 function loadPanelFloatingModeSetting() {
     const toggle = document.getElementById('panel-floating-mode');
     if (!toggle) return;
@@ -646,6 +677,7 @@ document.addEventListener('DOMContentLoaded', function () {
     loadPanelFloatingModeSetting();
     loadQuickLanguageSettings();
     loadAPIKeys();
+    setupSecretVisibilityToggles();
     applyAsrBackendLocks();
     loadEnvStatus();
     refreshMicDevices(true);
