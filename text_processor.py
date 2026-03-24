@@ -1,0 +1,295 @@
+"""
+文本处理模块 - 负责假名标注、拼音标注、双语裁剪和显示格式化
+"""
+from typing import Optional
+
+import config
+
+# ============ 双语输出常量 ============
+DUAL_OUTPUT_SEPARATOR = "\n"
+DUAL_OUTPUT_TOTAL_MAX_CHARS = 144
+DUAL_OUTPUT_BODY_BUDGET = max(0, DUAL_OUTPUT_TOTAL_MAX_CHARS - len(DUAL_OUTPUT_SEPARATOR))
+DUAL_OUTPUT_MAX_CHARS_PER_RESULT = DUAL_OUTPUT_BODY_BUDGET // 2
+
+# 双语裁剪时：中日韩权重=1，其他语言权重=2。
+COMPACT_SCRIPT_LANGUAGE_BASES = {'zh', 'ja', 'ko'}
+COMPACT_SCRIPT_BUDGET_WEIGHT = 1
+ALPHABETIC_SCRIPT_BUDGET_WEIGHT = 2
+
+
+# ============ 语言代码工具函数 ============
+
+def normalize_optional_language_code(language: Optional[str]) -> Optional[str]:
+    if language is None:
+        return None
+    normalized = str(language).strip()
+    return normalized or None
+
+
+def normalize_lang_code(lang):
+    """标准化语言代码"""
+    if not lang:
+        return 'auto'
+    lang_lower = str(lang).lower()
+    if lang_lower in ['zh', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant']:
+        return 'zh'
+    if lang_lower in ['en', 'en-us', 'en-gb']:
+        return 'en'
+    return lang_lower
+
+
+def has_secondary_translation_target() -> bool:
+    return normalize_optional_language_code(
+        getattr(config, 'SECONDARY_TARGET_LANGUAGE', None)
+    ) is not None
+
+
+def resolve_output_target_language(
+    source_language: str,
+    requested_target_language: Optional[str],
+) -> Optional[str]:
+    target_language = normalize_optional_language_code(requested_target_language)
+    if target_language is None:
+        return None
+
+    fallback_language = normalize_optional_language_code(
+        getattr(config, 'FALLBACK_LANGUAGE', None)
+    )
+    if fallback_language and normalize_lang_code(source_language) == normalize_lang_code(target_language):
+        return fallback_language
+
+    return target_language
+
+
+# ============ 输出格式化 ============
+
+def _sanitize_output_line(text: str) -> str:
+    if not text:
+        return ""
+    normalized = text.replace('\r\n', '\n').replace('\r', '\n')
+    return " ".join(part.strip() for part in normalized.split('\n') if part.strip())
+
+
+def _normalize_language_base(language: Optional[str]) -> str:
+    if language is None:
+        return ""
+    normalized = str(language).strip().lower().replace('_', '-')
+    if not normalized:
+        return ""
+    return normalized.split('-', 1)[0]
+
+
+def _is_compact_script_language(language: Optional[str]) -> bool:
+    return _normalize_language_base(language) in COMPACT_SCRIPT_LANGUAGE_BASES
+
+
+def _get_language_budget_weight(language: Optional[str]) -> float:
+    if _is_compact_script_language(language):
+        return COMPACT_SCRIPT_BUDGET_WEIGHT
+    return ALPHABETIC_SCRIPT_BUDGET_WEIGHT
+
+
+def _allocate_dual_output_budgets(
+    primary_language: Optional[str],
+    secondary_language: Optional[str],
+    total_chars: int = DUAL_OUTPUT_BODY_BUDGET,
+) -> tuple[int, int]:
+    if total_chars <= 0:
+        return 0, 0
+
+    primary_weight = _get_language_budget_weight(primary_language)
+    secondary_weight = _get_language_budget_weight(secondary_language)
+    total_weight = primary_weight + secondary_weight
+
+    if total_chars == 1:
+        return 1, 0
+
+    if total_weight <= 0:
+        primary_budget = total_chars // 2
+    else:
+        primary_budget = int(round(total_chars * (primary_weight / total_weight)))
+
+    primary_budget = max(1, min(total_chars - 1, primary_budget))
+    secondary_budget = total_chars - primary_budget
+    return primary_budget, secondary_budget
+
+
+def limit_dual_output_text(
+    text: str,
+    max_chars: int = DUAL_OUTPUT_MAX_CHARS_PER_RESULT,
+) -> str:
+    sanitized = _sanitize_output_line(text)
+    if len(sanitized) <= max_chars:
+        return sanitized
+    return sanitized[:max_chars].rstrip()
+
+
+def build_dual_output_display(
+    primary_text: str,
+    secondary_text: Optional[str],
+    primary_language: Optional[str] = None,
+    secondary_language: Optional[str] = None,
+) -> str:
+    if secondary_text is None:
+        return limit_dual_output_text(primary_text)
+
+    primary_sanitized = _sanitize_output_line(primary_text)
+    secondary_sanitized = _sanitize_output_line(secondary_text)
+    full_text = DUAL_OUTPUT_SEPARATOR.join([primary_sanitized, secondary_sanitized])
+
+    # 能完整装下时不做任何裁剪。
+    if len(full_text) <= DUAL_OUTPUT_TOTAL_MAX_CHARS:
+        return full_text
+
+    primary_budget, secondary_budget = _allocate_dual_output_budgets(
+        primary_language,
+        secondary_language,
+        total_chars=DUAL_OUTPUT_BODY_BUDGET,
+    )
+
+    clipped_primary = limit_dual_output_text(primary_sanitized, max_chars=primary_budget)
+    clipped_secondary = limit_dual_output_text(secondary_sanitized, max_chars=secondary_budget)
+    return DUAL_OUTPUT_SEPARATOR.join([clipped_primary, clipped_secondary])
+
+
+def build_streaming_output_line(text: str) -> str:
+    formatted_text = _sanitize_output_line(text)
+    if formatted_text:
+        return f"{formatted_text}……"
+    return "……"
+
+
+# ============ 可选的日语假名标注支持 ============
+try:
+    from pykakasi import kakasi as _kakasi_factory
+
+    _kakasi = _kakasi_factory()
+    _kakasi.setMode("J", "H")  # Kanji -> Hiragana
+    _kakasi.setMode("K", "H")  # Katakana -> Hiragana
+    _kakasi.setMode("H", "H")  # Hiragana stays Hiragana
+except Exception:
+    _kakasi = None
+
+# ============ 可选的中文拼音标注支持 ============
+try:
+    from pypinyin import pinyin, Style
+    _pypinyin_available = True
+except ImportError:
+    _pypinyin_available = False
+
+
+def _contains_kanji(text: str) -> bool:
+    """Check if the text contains any CJK ideographs."""
+    return any('\u4e00' <= ch <= '\u9fff' for ch in text)
+
+
+def _contains_chinese(text: str) -> bool:
+    """Check if the text contains Chinese characters."""
+    return any('\u4e00' <= ch <= '\u9fff' for ch in text)
+
+
+def add_furigana(text: str) -> str:
+    """Add hiragana readings to Japanese text with kanji."""
+    if not text:
+        return text
+
+    if _kakasi is None:
+        return text
+
+    try:
+        tokens = _kakasi.convert(text)
+        parts = []
+        for token in tokens:
+            orig = token.get('orig', '')
+            hira = token.get('hira') or token.get('kana')
+
+            if orig and _contains_kanji(orig) and hira and hira != orig:
+                parts.append(f"{orig}({hira})")
+            else:
+                parts.append(orig)
+
+        return "".join(parts)
+    except Exception:
+        return text
+
+
+def add_pinyin(text: str) -> str:
+    """Add pinyin with tones to Chinese text, grouped by words.
+
+    Uses jieba for word segmentation. Output format: 大家dà'jiā晚上好wǎn'shàng'hǎo
+    """
+    if not text or not _pypinyin_available:
+        return text
+
+    if not _contains_chinese(text):
+        return text
+
+    try:
+        import jieba
+
+        full_pinyin = pinyin(text, style=Style.TONE)
+
+        char_to_pinyin = {}
+        for i, char in enumerate(text):
+            if i < len(full_pinyin):
+                py = full_pinyin[i][0]
+                if _contains_chinese(char) and py != char:
+                    char_to_pinyin[i] = py
+
+        words = list(jieba.cut(text))
+
+        result_parts = []
+        char_index = 0
+
+        for word in words:
+            if _contains_chinese(word):
+                word_pinyins = []
+                for char in word:
+                    if char_index in char_to_pinyin:
+                        word_pinyins.append(char_to_pinyin[char_index])
+                    char_index += 1
+
+                if word_pinyins:
+                    py_str = "'".join(word_pinyins)
+                    result_parts.append(f"{word}{py_str}")
+                else:
+                    result_parts.append(word)
+            else:
+                result_parts.append(word)
+                char_index += len(word)
+
+        return "".join(result_parts)
+    except ImportError:
+        return text
+    except Exception:
+        return text
+
+
+def add_furigana_if_needed(text: str, language: str) -> str:
+    """Add furigana to text if it's Japanese and furigana is enabled."""
+    if not text or not getattr(config, 'ENABLE_JA_FURIGANA', False):
+        return text
+
+    lang = (language or '').lower()
+    if not lang.startswith('ja'):
+        return text
+
+    return add_furigana(text)
+
+
+def add_pinyin_if_needed(text: str, language: str) -> str:
+    """Add pinyin to text if it's Chinese and pinyin is enabled."""
+    if not text or not getattr(config, 'ENABLE_ZH_PINYIN', False):
+        return text
+
+    lang = (language or '').lower()
+    if not lang.startswith('zh'):
+        return text
+
+    return add_pinyin(text)
+
+
+def get_display_translation_text(translated_text: str, target_language: str) -> str:
+    """为翻译结果添加假名/拼音标注。"""
+    display_text = add_furigana_if_needed(translated_text, target_language)
+    return add_pinyin_if_needed(display_text, target_language)

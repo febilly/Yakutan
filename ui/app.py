@@ -271,7 +271,7 @@ def update_config_api():
                 if service_status.get('running') and service_loop is not None:
                     import main as main_module
                     # 在主服务的事件循环线程安全地调度重初始化操作
-                    service_loop.call_soon_threadsafe(getattr(main_module, 'reinitialize_translator', lambda: None))
+                    service_loop.call_soon_threadsafe(getattr(main_module, 'reinitialize_translator_compat', lambda: None))
             except Exception as e:
                 print(f'Error notifying service to reload translator: {e}')
 
@@ -332,7 +332,7 @@ def set_target_language():
         try:
             if service_status.get('running') and service_loop is not None:
                 import main as main_module
-                service_loop.call_soon_threadsafe(getattr(main_module, 'reinitialize_translator', lambda: None))
+                service_loop.call_soon_threadsafe(getattr(main_module, 'reinitialize_translator_compat', lambda: None))
         except Exception as e:
             print(f'Error notifying service to reload translator: {e}')
 
