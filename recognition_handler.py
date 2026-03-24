@@ -80,6 +80,14 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         return normalize_lang_code(lang)
 
     @staticmethod
+    def _should_translate(source_lang: Optional[str], target_lang: Optional[str]) -> bool:
+        """当目标语言有效且与源语言不同，才需要执行翻译。"""
+        normalized_target = normalize_optional_language_code(target_lang)
+        if normalized_target is None:
+            return False
+        return normalize_lang_code(source_lang) != normalize_lang_code(normalized_target)
+
+    @staticmethod
     def _extract_streaming_segment(text: str) -> Optional[str]:
         """从识别文本中截取可用于流式翻译的片段"""
         if not text:
@@ -193,22 +201,36 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 actual_secondary_target is not None and s.secondary_translator is not None
             )
 
-            self.partial_translation_update_count += 1
+            primary_should_translate = self._should_translate(detected_lang, actual_target)
+            secondary_should_translate = (
+                use_secondary_output
+                and self._should_translate(detected_lang, actual_secondary_target)
+            )
+
+            if primary_should_translate or secondary_should_translate:
+                self.partial_translation_update_count += 1
 
             loop = asyncio.get_running_loop()
-            primary_future = loop.run_in_executor(
-                s.executor,
-                lambda: s.translator.translate(
-                    segment,
-                    source_language='auto',
-                    target_language=actual_target,
-                    context_prefix=config.CONTEXT_PREFIX,
-                    is_partial=True,
-                    previous_translation=self.last_partial_translation,
-                ),
-            )
+            primary_future = None
             secondary_future = None
-            if use_secondary_output:
+
+            translated_text = segment
+            secondary_translated_text = segment if use_secondary_output else None
+
+            if primary_should_translate:
+                primary_future = loop.run_in_executor(
+                    s.executor,
+                    lambda: s.translator.translate(
+                        segment,
+                        source_language='auto',
+                        target_language=actual_target,
+                        context_prefix=config.CONTEXT_PREFIX,
+                        is_partial=True,
+                        previous_translation=self.last_partial_translation,
+                    ),
+                )
+
+            if use_secondary_output and secondary_should_translate:
                 secondary_future = loop.run_in_executor(
                     s.executor,
                     lambda: s.secondary_translator.translate(
@@ -221,10 +243,12 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     ),
                 )
 
-            translated_text = await primary_future
-            secondary_translated_text = (
-                await secondary_future if secondary_future is not None else None
-            )
+            if primary_future is not None:
+                translated_text = await primary_future
+
+            if secondary_future is not None:
+                secondary_translated_text = await secondary_future
+
             if (
                 request_id != self._latest_partial_request_id
                 or finalized_seq != self._finalized_seq
@@ -233,17 +257,31 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 return
             success = True
 
-            if translated_text and not translated_text.startswith("[ERROR]"):
+            if primary_should_translate and translated_text and not translated_text.startswith("[ERROR]"):
                 self.last_partial_translation = translated_text
-            else:
+            elif primary_should_translate:
                 translated_text = ""
-
-            if secondary_translated_text and not secondary_translated_text.startswith("[ERROR]"):
-                self.last_partial_translation_secondary = secondary_translated_text
             else:
-                secondary_translated_text = ""
+                self.last_partial_translation = None
+                translated_text = segment
 
-            display_translation = get_display_translation_text(translated_text, actual_target)
+            if (
+                use_secondary_output
+                and secondary_should_translate
+                and secondary_translated_text
+                and not secondary_translated_text.startswith("[ERROR]")
+            ):
+                self.last_partial_translation_secondary = secondary_translated_text
+            elif use_secondary_output and secondary_should_translate:
+                secondary_translated_text = ""
+            else:
+                self.last_partial_translation_secondary = None
+                secondary_translated_text = segment if use_secondary_output else ""
+
+            display_translation = get_display_translation_text(
+                translated_text,
+                actual_target if primary_should_translate else detected_lang,
+            )
             translation_display = build_streaming_output_line(display_translation)
             current_original_display = (
                 s.subtitles_state.get("original", "") or f"{segment.strip()}……"
@@ -251,7 +289,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
             if use_secondary_output and actual_secondary_target is not None:
                 secondary_display_translation = get_display_translation_text(
-                    secondary_translated_text, actual_secondary_target,
+                    secondary_translated_text,
+                    actual_secondary_target if secondary_should_translate else detected_lang,
                 )
                 secondary_translation_display = build_streaming_output_line(
                     secondary_display_translation,
@@ -263,7 +302,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     actual_secondary_target,
                 )
             else:
-                show_tag = getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True)
+                show_tag = primary_should_translate and getattr(
+                    config, 'SHOW_ORIGINAL_AND_LANG_TAG', True,
+                )
                 if show_tag:
                     source_lang = self._normalize_lang(detected_lang)
                     target_lang = self._normalize_lang(actual_target)
@@ -327,6 +368,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         actual_target = None
         normalized_source = None
         translated_text = None
+        primary_translated = False
 
         if is_ongoing:
             print(f'部分：{text}', end='\r')
@@ -381,6 +423,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 if requested_secondary_target and actual_secondary_target != requested_secondary_target:
                     print(f'检测到第二输出语言与源语言相同，使用备用语言: {config.FALLBACK_LANGUAGE}')
 
+                primary_should_translate = self._should_translate(source_lang, actual_target)
+
                 use_deepl_final = False
                 max_updates = max(0, int(getattr(config, 'STREAMING_FINAL_DEEPL_MAX_UPDATES', 2)))
                 if (
@@ -394,37 +438,55 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 use_secondary_output = (
                     actual_secondary_target is not None and s.secondary_translator is not None
                 )
+                secondary_should_translate = (
+                    use_secondary_output
+                    and self._should_translate(source_lang, actual_secondary_target)
+                )
+
+                if not primary_should_translate:
+                    print('主输出语言与源语言相同，跳过翻译，直接输出原文')
+                if use_secondary_output and not secondary_should_translate:
+                    print('第二输出语言与源语言相同，跳过翻译，直接输出原文')
 
                 if use_secondary_output:
-                    primary_future = s.executor.submit(
-                        translate_with_backend,
-                        s.translator,
-                        s.deepl_fallback_translator,
-                        text,
-                        actual_target,
-                        self.last_partial_translation,
-                        use_deepl_final,
+                    primary_future = None
+                    secondary_future = None
+                    if primary_should_translate:
+                        primary_future = s.executor.submit(
+                            translate_with_backend,
+                            s.translator,
+                            s.deepl_fallback_translator,
+                            text,
+                            actual_target,
+                            self.last_partial_translation,
+                            use_deepl_final,
+                        )
+                    if secondary_should_translate:
+                        secondary_future = s.executor.submit(
+                            translate_with_backend,
+                            s.secondary_translator,
+                            s.secondary_deepl_fallback_translator,
+                            text,
+                            actual_secondary_target,
+                            self.last_partial_translation_secondary,
+                            use_deepl_final,
+                        )
+                    translated_text = primary_future.result() if primary_future is not None else text
+                    secondary_translated_text = (
+                        secondary_future.result() if secondary_future is not None else text
                     )
-                    secondary_future = s.executor.submit(
-                        translate_with_backend,
-                        s.secondary_translator,
-                        s.secondary_deepl_fallback_translator,
-                        text,
-                        actual_secondary_target,
-                        self.last_partial_translation_secondary,
-                        use_deepl_final,
-                    )
-                    translated_text = primary_future.result()
-                    secondary_translated_text = secondary_future.result()
                 else:
-                    translated_text = translate_with_backend(
-                        s.translator,
-                        s.deepl_fallback_translator,
-                        text,
-                        actual_target,
-                        self.last_partial_translation,
-                        use_deepl_final,
-                    )
+                    if primary_should_translate:
+                        translated_text = translate_with_backend(
+                            s.translator,
+                            s.deepl_fallback_translator,
+                            text,
+                            actual_target,
+                            self.last_partial_translation,
+                            use_deepl_final,
+                        )
+                    else:
+                        translated_text = text
                     secondary_translated_text = None
                 self._finalized_seq += 1
                 self._final_output_version += 1
@@ -439,43 +501,62 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 self.partial_translation_update_count = 0
                 self._prefer_deepl_on_next_final = False
 
-                is_translated = True
-                print(f'主目标语言：{actual_target}')
-
-                display_translated_text = get_display_translation_text(translated_text, actual_target)
-                print(f'主译文：{display_translated_text}')
-
-                secondary_display_translated_text = None
-                if use_secondary_output and actual_secondary_target is not None:
-                    print(f'第二目标语言：{actual_secondary_target}')
-                    secondary_display_translated_text = get_display_translation_text(
-                        secondary_translated_text, actual_secondary_target,
-                    )
-                    print(f'第二译文：{secondary_display_translated_text}')
-
                 display_source_text = add_furigana_if_needed(text, source_lang)
                 display_source_text = add_pinyin_if_needed(display_source_text, source_lang)
 
-                if use_secondary_output and secondary_display_translated_text is not None:
-                    display_text = build_dual_output_display(
-                        display_translated_text,
-                        secondary_display_translated_text,
-                        actual_target,
-                        actual_secondary_target,
-                    )
+                primary_translated = primary_should_translate
+                is_translated = primary_should_translate or secondary_should_translate
+
+                if not is_translated:
+                    print(f'识别：{display_source_text}')
+                    display_text = display_source_text
+                    s.update_subtitles(display_source_text, "", is_ongoing, "")
                 else:
-                    show_tag = getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True)
-                    if show_tag:
-                        display_text = (
-                            f"[{normalized_source}→{actual_target}] "
-                            f"{display_translated_text} ({display_source_text})"
+                    print(f'主目标语言：{actual_target}')
+
+                    primary_display_language = (
+                        actual_target if primary_should_translate else source_lang
+                    )
+                    display_translated_text = get_display_translation_text(
+                        translated_text,
+                        primary_display_language,
+                    )
+                    print(f'主译文：{display_translated_text}')
+
+                    secondary_display_translated_text = None
+                    if use_secondary_output and actual_secondary_target is not None:
+                        print(f'第二目标语言：{actual_secondary_target}')
+                        secondary_display_language = (
+                            actual_secondary_target if secondary_should_translate else source_lang
                         )
-                        if len(display_text) > 144:
-                            display_text = (
-                                f"[{normalized_source}→{actual_target}] {display_translated_text}"
-                            )
+                        secondary_display_translated_text = get_display_translation_text(
+                            secondary_translated_text,
+                            secondary_display_language,
+                        )
+                        print(f'第二译文：{secondary_display_translated_text}')
+
+                    if use_secondary_output and secondary_display_translated_text is not None:
+                        display_text = build_dual_output_display(
+                            display_translated_text,
+                            secondary_display_translated_text,
+                            actual_target,
+                            actual_secondary_target,
+                        )
                     else:
-                        display_text = str(display_translated_text)
+                        show_tag = primary_should_translate and getattr(
+                            config, 'SHOW_ORIGINAL_AND_LANG_TAG', True,
+                        )
+                        if show_tag:
+                            display_text = (
+                                f"[{normalized_source}→{actual_target}] "
+                                f"{display_translated_text} ({display_source_text})"
+                            )
+                            if len(display_text) > 144:
+                                display_text = (
+                                    f"[{normalized_source}→{actual_target}] {display_translated_text}"
+                                )
+                        else:
+                            display_text = str(display_translated_text)
 
         if display_text is None:
             return
@@ -511,7 +592,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         else:
             print('[OSC] Warning: Event loop not set, cannot send OSC message.')
 
-        if is_translated and config.ENABLE_REVERSE_TRANSLATION:
+        if primary_translated and config.ENABLE_REVERSE_TRANSLATION:
             reverse_translated_text = reverse_translation(
                 s.backwards_translator, translated_text, actual_target, normalized_source,
             )
