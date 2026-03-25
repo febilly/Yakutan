@@ -52,6 +52,11 @@ hiddenimports = [
     'jieba',
     'panel_app',
     'webview',
+    'translators.translation_apis.google_web_api',
+    'translators.translation_apis.google_dictionary_api',
+    'translators.translation_apis.openrouter_api',
+    'translators.translation_apis.deepl_api',
+    'translators.translation_apis.qwen_mt_api',
 ]
 
 # pywebview 在 Windows 下会动态加载平台后端，PyInstaller 需显式收集。

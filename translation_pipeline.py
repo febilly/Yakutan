@@ -1,26 +1,33 @@
 """
 翻译管道模块 - 负责翻译器实始化、API 注册表和翻译执行
 """
-import importlib
 import logging
 from typing import Optional
 
 import config
 from translators.context_aware_translator import ContextAwareTranslator
+from translators.translation_apis.deepl_api import DeepLAPI
+from translators.translation_apis.google_dictionary_api import GoogleDictionaryAPI
+from translators.translation_apis.google_web_api import GoogleWebAPI
+from translators.translation_apis.openrouter_api import (
+    OpenRouterAPI,
+    OpenRouterStreamingAPI,
+)
+from translators.translation_apis.qwen_mt_api import QwenMTAPI
 from text_processor import normalize_optional_language_code
 
 logger = logging.getLogger(__name__)
 
 # ============ 翻译 API 注册表 ============
-# 一处定义，消除原先 main.py 中两处重复的 if-elif 链
-TRANSLATION_API_REGISTRY = {
-    'google_web': 'translators.translation_apis.google_web_api.GoogleWebAPI',
-    'google_dictionary': 'translators.translation_apis.google_dictionary_api.GoogleDictionaryAPI',
-    'openrouter': 'translators.translation_apis.openrouter_api.OpenRouterAPI',
-    'openrouter_streaming': 'translators.translation_apis.openrouter_api.OpenRouterStreamingAPI',
-    'openrouter_streaming_deepl_hybrid': 'translators.translation_apis.openrouter_api.OpenRouterStreamingAPI',
-    'deepl': 'translators.translation_apis.deepl_api.DeepLAPI',
-    'qwen_mt': 'translators.translation_apis.qwen_mt_api.QwenMTAPI',
+# 直接保存类对象，避免 importlib 动态导入在 PyInstaller 单文件打包时漏收子模块。
+TRANSLATION_API_CLASS_REGISTRY = {
+    'google_web': GoogleWebAPI,
+    'google_dictionary': GoogleDictionaryAPI,
+    'openrouter': OpenRouterAPI,
+    'openrouter_streaming': OpenRouterStreamingAPI,
+    'openrouter_streaming_deepl_hybrid': OpenRouterStreamingAPI,
+    'deepl': DeepLAPI,
+    'qwen_mt': QwenMTAPI,
 }
 
 DEFAULT_API_TYPE = 'qwen_mt'
@@ -35,13 +42,11 @@ def is_streaming_deepl_hybrid_mode() -> bool:
 
 
 def _get_translation_api_class(api_type: str):
-    """根据 API 类型字符串，从注册表动态加载翻译 API 类。"""
-    class_path = TRANSLATION_API_REGISTRY.get(api_type)
-    if class_path is None:
-        class_path = TRANSLATION_API_REGISTRY[DEFAULT_API_TYPE]
-    module_path, class_name = class_path.rsplit('.', 1)
-    module = importlib.import_module(module_path)
-    return getattr(module, class_name)
+    """根据 API 类型字符串，从注册表获取翻译 API 类。"""
+    return TRANSLATION_API_CLASS_REGISTRY.get(
+        api_type,
+        TRANSLATION_API_CLASS_REGISTRY[DEFAULT_API_TYPE],
+    )
 
 
 def _build_context_translator(api_factory, target_language: str):
@@ -84,10 +89,7 @@ def reinitialize_translator(state):
         )
 
     # 反向翻译器（始终使用 Google Dictionary）
-    from translators.translation_apis.google_dictionary_api import (
-        GoogleDictionaryAPI as BackwardsTranslationAPI,
-    )
-    state.backwards_translation_api = BackwardsTranslationAPI()
+    state.backwards_translation_api = GoogleDictionaryAPI()
     state.backwards_translator = ContextAwareTranslator(
         translation_api=state.backwards_translation_api,
         max_context_size=6,
@@ -102,8 +104,6 @@ def reinitialize_translator(state):
     state.secondary_deepl_fallback_translator = None
     if is_streaming_deepl_hybrid_mode():
         try:
-            from translators.translation_apis.deepl_api import DeepLAPI
-
             state.deepl_fallback_translation_api, state.deepl_fallback_translator = (
                 _build_context_translator(DeepLAPI, config.TARGET_LANGUAGE)
             )
