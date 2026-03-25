@@ -56,6 +56,9 @@ hiddenimports = [
 
 # pywebview 在 Windows 下会动态加载平台后端，PyInstaller 需显式收集。
 hiddenimports += collect_submodules('webview.platforms')
+# 翻译后端通过 importlib 动态加载，需显式收集整个子包，否则单文件 exe
+# 运行时会出现 No module named 'translators.translation_apis.xxx'。
+hiddenimports += collect_submodules('translators.translation_apis')
 
 a = Analysis(
     ['run_ui.py'],  # Web UI入口文件

@@ -30,7 +30,7 @@ jobs:
     
     - name: Build executable with PyInstaller
       run: |
-        pyinstaller run_ui.spec
+        pyinstaller --clean --noconfirm run_ui.spec
     
     - name: Get commit info
       id: commit_info
