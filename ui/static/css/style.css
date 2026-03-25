@@ -305,6 +305,17 @@ main {
     text-decoration: underline;
 }
 
+.feature-hint-inline {
+    margin: 0 0 12px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid #d9e8f7;
+    background: #f7fbff;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #4a5a68;
+}
+
 .api-key-group {
     margin-bottom: 20px;
 }
