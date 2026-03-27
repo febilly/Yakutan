@@ -83,7 +83,12 @@ class DeepLAPI(BaseTranslationAPI):
             lang_map = {
                 'zh': 'ZH-HANS',
                 'zh-cn': 'ZH-HANS',
+                'zh-hans': 'ZH-HANS',
+                'zh-sg': 'ZH-HANS',
                 'zh-tw': 'ZH-HANT',
+                'zh-hant': 'ZH-HANT',
+                'zh-hk': 'ZH-HANT',
+                'zh-mo': 'ZH-HANT',
                 'en': 'EN-US',
                 'pt': 'PT-BR',
             }

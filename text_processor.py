@@ -27,15 +27,33 @@ def normalize_optional_language_code(language: Optional[str]) -> Optional[str]:
 
 
 def normalize_lang_code(lang):
-    """标准化语言代码"""
+    """标准化语言代码。
+
+    中文区分简体 (zh-hans) 与繁体 (zh-hant)，以便在目标语为 zh-CN / zh-TW 等时
+    仍能触发简繁互译；检测器返回的泛化 ``zh`` 视为简体（与 zh-CN 一致）。
+    """
     if not lang:
         return 'auto'
-    lang_lower = str(lang).lower()
-    if lang_lower in ['zh', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant']:
-        return 'zh'
-    if lang_lower in ['en', 'en-us', 'en-gb']:
+    lang_norm = str(lang).strip().lower().replace('_', '-')
+    if lang_norm == 'auto':
+        return 'auto'
+    if lang_norm in ('en', 'en-us', 'en-gb', 'en-au', 'en-ca', 'en-nz', 'en-ie'):
         return 'en'
-    return lang_lower
+    # 繁体中文（含港澳地区常用码）
+    if lang_norm in ('zh-tw', 'zh-hant', 'zh-hk', 'zh-mo'):
+        return 'zh-hant'
+    # 简体中文 + 无简繁信息的「zh」（检测器/ASR 常见返回值）
+    if lang_norm in (
+        'zh',
+        'zh-cn',
+        'zh-hans',
+        'zh-sg',
+        'cmn',
+        'wuu',
+        'yue',
+    ):
+        return 'zh-hans'
+    return lang_norm
 
 
 def has_secondary_translation_target() -> bool:

@@ -63,11 +63,14 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
     SUPPORTS_CONTEXT = True
 
     LANGUAGE_NAME_MAP = {
-        "zh": "CHINESE",
+        "zh": "SIMPLIFIED CHINESE",
         "zh-cn": "SIMPLIFIED CHINESE",
         "zh-tw": "TRADITIONAL CHINESE",
         "zh-hans": "SIMPLIFIED CHINESE",
         "zh-hant": "TRADITIONAL CHINESE",
+        "zh-hk": "TRADITIONAL CHINESE (Hong Kong)",
+        "zh-mo": "TRADITIONAL CHINESE (Macau)",
+        "zh-sg": "SIMPLIFIED CHINESE (Singapore)",
         "en": "ENGLISH",
         "en-us": "AMERICAN ENGLISH",
         "en-gb": "BRITISH ENGLISH",

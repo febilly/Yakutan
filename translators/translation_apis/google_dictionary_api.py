@@ -16,6 +16,24 @@ class GoogleDictionaryAPI(BaseTranslationAPI):
     
     # Google Dictionary API 不支持原生上下文
     SUPPORTS_CONTEXT = False
+
+    @staticmethod
+    def _coerce_dictionary_language_code(target_language: str) -> str:
+        """将内部语言码转为该 Extension API 接受的 language 参数（与简繁拆分兼容）。"""
+        if not target_language:
+            return 'en'
+        key = str(target_language).strip().lower().replace('_', '-')
+        aliases = {
+            'zh-hans': 'zh-cn',
+            'zh-hant': 'zh-tw',
+            'zh': 'zh-cn',
+            'zh-cn': 'zh-cn',
+            'zh-tw': 'zh-tw',
+            'zh-sg': 'zh-cn',
+            'zh-hk': 'zh-tw',
+            'zh-mo': 'zh-tw',
+        }
+        return aliases.get(key, str(target_language).strip())
     
     def __init__(self, max_retries: int = 3):
         """
@@ -82,6 +100,7 @@ class GoogleDictionaryAPI(BaseTranslationAPI):
         Returns:
             翻译后的文本
         """
+        api_language = self._coerce_dictionary_language_code(target_language)
         # 尝试指定次数
         for attempt in range(self.max_retries + 1):
             try:
@@ -90,7 +109,7 @@ class GoogleDictionaryAPI(BaseTranslationAPI):
                 
                 # 构建请求 URL
                 url = (f"{self.api_endpoint}?"
-                       f"language={target_language}&"
+                       f"language={api_language}&"
                        f"key={self.api_key}&"
                        f"term={encoded_text}&"
                        f"strategy={self.strategy}")
