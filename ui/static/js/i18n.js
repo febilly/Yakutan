@@ -39,6 +39,7 @@ const translations = {
         'btn.starting': '启动中...',
         'btn.stopping': '停止中...',
         'btn.openPanel': '小面板',
+        'btn.clearLanguageInput': '清除输入',
         'label.floatingPanelMode': '悬浮窗模式',
 
         // 基本设置
@@ -63,6 +64,7 @@ const translations = {
         // 语言选项
         'lang.zhCN': '简体中文 (zh-CN)',
         'lang.zhTW': '繁体中文 (zh-TW)',
+        'lang.asrZh': '中文 (zh)',
         'lang.en': '英语 (en)',
         'lang.enGB': '英语（英式） (en-GB)',
         'lang.ja': '日语 (ja)',
@@ -177,7 +179,7 @@ const translations = {
         'sourceLang.en': '英语',
         'sourceLang.ja': '日语',
         'sourceLang.ko': '韩语',
-        'hint.sourceLanguage': '建议保持"自动检测"',
+        'hint.sourceLanguage': '建议保持"自动检测"，也可自行输入语言代码',
         'label.micDevice': '麦克风',
         'label.device': '设备',
         'option.systemDefault': '系统默认',
@@ -257,6 +259,7 @@ const translations = {
         'btn.starting': 'Starting...',
         'btn.stopping': 'Stopping...',
         'btn.openPanel': 'Mini Panel',
+        'btn.clearLanguageInput': 'Clear input',
         'label.floatingPanelMode': 'Floating Panel Mode',
 
         // Basic settings
@@ -281,6 +284,7 @@ const translations = {
         // Language options
         'lang.zhCN': 'Simplified Chinese (zh-CN)',
         'lang.zhTW': 'Traditional Chinese (zh-TW)',
+        'lang.asrZh': 'Chinese (zh)',
         'lang.en': 'English (en)',
         'lang.enGB': 'British English (en-GB)',
         'lang.ja': 'Japanese (ja)',
@@ -395,7 +399,7 @@ const translations = {
         'sourceLang.en': 'English',
         'sourceLang.ja': 'Japanese',
         'sourceLang.ko': 'Korean',
-        'hint.sourceLanguage': 'Recommended to keep "Auto Detect"',
+        'hint.sourceLanguage': 'Recommended to keep "Auto Detect"; you can also type a language code.',
         'label.micDevice': 'Microphone',
         'label.device': 'Device',
         'option.systemDefault': 'System Default',
@@ -473,6 +477,7 @@ const translations = {
         'btn.starting': '開始中...',
         'btn.stopping': '停止中...',
         'btn.openPanel': 'ミニパネル',
+        'btn.clearLanguageInput': '入力をクリア',
         'label.floatingPanelMode': 'フローティングウィンドウ',
 
         'section.basicSettings': '基本設定',
@@ -495,6 +500,7 @@ const translations = {
 
         'lang.zhCN': '簡体字中国語 (zh-CN)',
         'lang.zhTW': '繁体字中国語 (zh-TW)',
+        'lang.asrZh': '中国語 (zh)',
         'lang.en': '英語 (en)',
         'lang.enGB': '英語（英国） (en-GB)',
         'lang.ja': '日本語 (ja)',
@@ -605,7 +611,7 @@ const translations = {
         'sourceLang.en': '英語',
         'sourceLang.ja': '日本語',
         'sourceLang.ko': '韓国語',
-        'hint.sourceLanguage': '通常は「自動検出」のままを推奨します',
+        'hint.sourceLanguage': '通常は「自動検出」のままを推奨します。言語コードを直接入力することもできます。',
         'label.micDevice': 'マイク',
         'label.device': 'デバイス',
         'option.systemDefault': 'システム既定',
@@ -679,6 +685,7 @@ const translations = {
         'btn.starting': '시작 중...',
         'btn.stopping': '중지 중...',
         'btn.openPanel': '미니 패널',
+        'btn.clearLanguageInput': '입력 지우기',
         'label.floatingPanelMode': '플로팅 창 모드',
 
         'section.basicSettings': '기본 설정',
@@ -701,6 +708,7 @@ const translations = {
 
         'lang.zhCN': '중국어 간체 (zh-CN)',
         'lang.zhTW': '중국어 번체 (zh-TW)',
+        'lang.asrZh': '중국어 (zh)',
         'lang.en': '영어 (en)',
         'lang.enGB': '영국식 영어 (en-GB)',
         'lang.ja': '일본어 (ja)',
@@ -811,7 +819,7 @@ const translations = {
         'sourceLang.en': '영어',
         'sourceLang.ja': '일본어',
         'sourceLang.ko': '한국어',
-        'hint.sourceLanguage': '"자동 감지" 유지를 권장합니다',
+        'hint.sourceLanguage': '"자동 감지" 유지를 권장합니다. 언어 코드를 직접 입력할 수도 있습니다.',
         'label.micDevice': '마이크',
         'label.device': '장치',
         'option.systemDefault': '시스템 기본값',

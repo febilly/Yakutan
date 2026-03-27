@@ -40,6 +40,74 @@ const LANGUAGE_OPTIONS = [
     { code: 'tr', labelKey: 'lang.tr' },
 ];
 
+/** 语音识别源语言下拉：中文/英文不展示地区变体（仅 zh、en） */
+const SOURCE_LANGUAGE_COMBO_OPTIONS = [
+    { code: 'zh', labelKey: 'lang.asrZh' },
+    { code: 'en', labelKey: 'lang.en' },
+    { code: 'ja', labelKey: 'lang.ja' },
+    { code: 'ko', labelKey: 'lang.ko' },
+    { code: 'ar', labelKey: 'lang.ar' },
+    { code: 'de', labelKey: 'lang.de' },
+    { code: 'es', labelKey: 'lang.es' },
+    { code: 'fr', labelKey: 'lang.fr' },
+    { code: 'id', labelKey: 'lang.id' },
+    { code: 'it', labelKey: 'lang.it' },
+    { code: 'pt', labelKey: 'lang.pt' },
+    { code: 'ru', labelKey: 'lang.ru' },
+    { code: 'th', labelKey: 'lang.th' },
+    { code: 'tl', labelKey: 'lang.tl' },
+    { code: 'tr', labelKey: 'lang.tr' },
+];
+
+function normalizeSourceLanguageInputValue(stored) {
+    const s = stored == null ? '' : String(stored).trim();
+    const lower = s.toLowerCase();
+    if (!s || lower === 'auto' || lower === 'auto-detect') {
+        return '';
+    }
+    if (lower === 'zh' || lower === 'zh-cn' || lower === 'zh-tw' || lower === 'zh-hans' || lower === 'zh-hant') {
+        return 'zh';
+    }
+    if (lower === 'en' || lower === 'en-gb' || lower === 'en-us') {
+        return 'en';
+    }
+    return s;
+}
+
+function getSourceLanguageEffective() {
+    const el = document.getElementById('source-language');
+    if (!el) return 'auto';
+    const raw = el.value.trim();
+    const lower = raw.toLowerCase();
+    if (!raw || lower === 'auto' || lower === 'auto-detect') {
+        return 'auto';
+    }
+    if (lower === 'zh' || lower === 'zh-cn' || lower === 'zh-tw' || lower === 'zh-hans' || lower === 'zh-hant') {
+        return 'zh';
+    }
+    if (lower === 'en' || lower === 'en-gb' || lower === 'en-us') {
+        return 'en';
+    }
+    return raw;
+}
+
+function normalizeSourceLanguageInputOnBlur(input) {
+    const v = input.value.trim().toLowerCase();
+    if (!v || v === 'auto' || v === 'auto-detect') {
+        input.value = '';
+    } else if (v === 'zh-cn' || v === 'zh-tw' || v === 'zh-hans' || v === 'zh-hant') {
+        input.value = 'zh';
+    } else if (v === 'en-gb' || v === 'en-us') {
+        input.value = 'en';
+    }
+}
+
+function applySourceLanguageInputFromStored(stored) {
+    const el = document.getElementById('source-language');
+    if (!el) return;
+    el.value = normalizeSourceLanguageInputValue(stored);
+}
+
 const LLM_TEMPLATE_CONFIGS = {
     'dashscope-qwen35': {
         baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -466,6 +534,27 @@ function closeLanguageMenus(exceptCombo = null) {
     });
 }
 
+function refreshLanguageComboClearLabels() {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const label = t('btn.clearLanguageInput');
+    document.querySelectorAll('.language-combo-clear').forEach((btn) => {
+        btn.setAttribute('aria-label', label);
+        btn.title = label;
+    });
+}
+
+function syncLanguageComboClearVisibility(combo) {
+    if (!combo) return;
+    const input = combo.querySelector('.language-combo-input');
+    const clearBtn = combo.querySelector('.language-combo-clear');
+    if (!input || !clearBtn) return;
+    clearBtn.hidden = input.value.trim() === '';
+}
+
+function syncAllLanguageComboClearButtons() {
+    document.querySelectorAll('.language-combo').forEach(syncLanguageComboClearVisibility);
+}
+
 function renderLanguageComboMenu(combo) {
     if (!combo) return;
 
@@ -497,20 +586,68 @@ function renderLanguageComboMenu(combo) {
 
         noneButton.addEventListener('click', () => {
             input.value = '';
+            syncLanguageComboClearVisibility(combo);
             renderLanguageComboMenu(combo);
             closeLanguageMenus();
-            onSettingChange();
+            onSettingChange(input);
             input.focus();
         });
 
         menu.appendChild(noneButton);
     }
 
-    LANGUAGE_OPTIONS.forEach((option) => {
+    if (input.id === 'source-language') {
+        const autoButton = document.createElement('button');
+        autoButton.type = 'button';
+        autoButton.className = 'language-combo-option';
+        const isAuto = !currentValue || currentValue === 'auto' || currentValue === 'auto-detect';
+        if (isAuto) {
+            autoButton.classList.add('active');
+        }
+
+        const autoCode = document.createElement('span');
+        autoCode.className = 'language-combo-option-code';
+        autoCode.textContent = 'auto';
+
+        const autoLabel = document.createElement('span');
+        autoLabel.className = 'language-combo-option-label';
+        autoLabel.textContent = t('sourceLang.auto');
+
+        autoButton.appendChild(autoCode);
+        autoButton.appendChild(autoLabel);
+
+        autoButton.addEventListener('mousedown', (event) => {
+            event.preventDefault();
+        });
+
+        autoButton.addEventListener('click', () => {
+            input.value = '';
+            syncLanguageComboClearVisibility(combo);
+            renderLanguageComboMenu(combo);
+            closeLanguageMenus();
+            onSettingChange(input);
+            input.focus();
+        });
+
+        menu.appendChild(autoButton);
+    }
+
+    const comboLanguageOptions = input.id === 'source-language' ? SOURCE_LANGUAGE_COMBO_OPTIONS : LANGUAGE_OPTIONS;
+
+    comboLanguageOptions.forEach((option) => {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'language-combo-option';
-        if (option.code.toLowerCase() === currentValue) {
+        let isActive = option.code.toLowerCase() === currentValue;
+        if (input.id === 'source-language') {
+            const oc = option.code.toLowerCase();
+            if (oc === 'zh') {
+                isActive = ['zh', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant'].includes(currentValue);
+            } else if (oc === 'en') {
+                isActive = currentValue === 'en' || currentValue === 'en-gb' || currentValue === 'en-us';
+            }
+        }
+        if (isActive) {
             button.classList.add('active');
         }
 
@@ -531,6 +668,7 @@ function renderLanguageComboMenu(combo) {
 
         button.addEventListener('click', () => {
             input.value = option.code;
+            syncLanguageComboClearVisibility(combo);
             renderLanguageComboMenu(combo);
             closeLanguageMenus();
             if (input.id === 'target-language') {
@@ -539,7 +677,7 @@ function renderLanguageComboMenu(combo) {
             if (input.id.startsWith('quick-lang-')) {
                 onQuickLangChange();
             } else {
-                onSettingChange();
+                onSettingChange(input);
             }
             input.focus();
         });
@@ -585,6 +723,7 @@ function setupLanguageComboboxes() {
         });
 
         input.addEventListener('input', () => {
+            syncLanguageComboClearVisibility(combo);
             if (combo.classList.contains('open')) {
                 renderLanguageComboMenu(combo);
             }
@@ -599,9 +738,34 @@ function setupLanguageComboboxes() {
             }
         });
 
+        const clearBtn = combo.querySelector('.language-combo-clear');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                input.value = '';
+                syncLanguageComboClearVisibility(combo);
+                closeLanguageMenus(combo);
+                renderLanguageComboMenu(combo);
+                onSettingChange(input);
+                input.focus();
+            });
+        }
+
+        if (input.id === 'source-language') {
+            input.addEventListener('blur', () => {
+                normalizeSourceLanguageInputOnBlur(input);
+                syncLanguageComboClearVisibility(combo);
+                onSettingChange(input);
+            });
+        }
+
+        syncLanguageComboClearVisibility(combo);
+
         combo.dataset.initialized = 'true';
     });
 
+    refreshLanguageComboClearLabels();
     renderLanguageComboMenus();
 }
 
@@ -731,6 +895,7 @@ document.addEventListener('i18n:languageChanged', function () {
     const useInternational = document.getElementById('use-international-endpoint')?.checked ?? false;
     updateAsrOptionsForInternational(useInternational);
     renderLanguageComboMenus();
+    refreshLanguageComboClearLabels();
     refreshMicDevices(true);
     updateStatus();
     updateLLMTemplateKeySourceHint();
@@ -1014,7 +1179,7 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
                 document.getElementById('enable-llm-parallel-fastest').checked = config.translation.enable_llm_parallel_fastest
                     ?? (detectActiveLLMTemplate() === 'longcat');
-                document.getElementById('source-language').value = config.translation.source_language || 'auto';
+                applySourceLanguageInputFromStored(config.translation.source_language ?? 'auto');
                 document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
                 document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
                 document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
@@ -1076,6 +1241,7 @@ function loadConfigFromLocalStorage() {
         updateSensitiveWordsHint();
         applyAsrBackendLocks();
         syncLLMTemplateKeySourceHintFromInputs();
+        syncAllLanguageComboClearButtons();
 
     } catch (error) {
         console.error('加载本地配置失败:', error);
@@ -1087,6 +1253,7 @@ function loadConfigFromLocalStorage() {
         updateSensitiveWordsHint();
         applyAsrBackendLocks();
         syncLLMTemplateKeySourceHintFromInputs();
+        syncAllLanguageComboClearButtons();
     }
 }
 
@@ -1098,7 +1265,7 @@ function loadDefaultConfig() {
     document.getElementById('secondary-target-language').value = '';
     document.getElementById('fallback-language').value = 'en';
     document.getElementById('translation-api-type').value = 'qwen_mt';
-    document.getElementById('source-language').value = 'auto';
+    applySourceLanguageInputFromStored('auto');
     document.getElementById('show-partial-results').checked = false;
     document.getElementById('enable-furigana').checked = false;
     document.getElementById('enable-pinyin').checked = false;
@@ -1146,6 +1313,7 @@ function loadDefaultConfig() {
     updateSensitiveWordsHint();
     applyAsrBackendLocks();
     syncLLMTemplateKeySourceHintFromInputs();
+    syncAllLanguageComboClearButtons();
 }
 
 // 从服务器加载配置（仅在本地无配置时使用）
@@ -1192,7 +1360,7 @@ async function loadConfigFromServer() {
         document.getElementById('keepalive-interval').value = config.asr.keepalive_interval;
 
         document.getElementById('language-detector').value = config.language_detector.type;
-        document.getElementById('source-language').value = config.translation.source_language;
+        applySourceLanguageInputFromStored(config.translation.source_language);
         document.getElementById('panel-width').value = (config.panel && config.panel.width) || 600;
         getNormalizedPanelWidth();
 
@@ -1207,6 +1375,7 @@ async function loadConfigFromServer() {
         updateSensitiveWordsHint();
         applyAsrBackendLocks();
         syncLLMTemplateKeySourceHintFromInputs();
+        syncAllLanguageComboClearButtons();
 
         console.log('已从服务器加载配置');
 
@@ -1239,7 +1408,7 @@ function saveConfigToLocalStorage() {
                 llm_model: document.getElementById('llm-model').value.trim(),
                 openai_compat_extra_body_json: document.getElementById('openai-compat-extra-body-json').value.trim(),
                 enable_llm_parallel_fastest: document.getElementById('enable-llm-parallel-fastest').checked,
-                source_language: document.getElementById('source-language').value,
+                source_language: getSourceLanguageEffective(),
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
                 enable_pinyin: document.getElementById('enable-pinyin').checked,
@@ -1421,7 +1590,7 @@ async function saveConfig(autoSave = false) {
                 llm_model: document.getElementById('llm-model').value.trim(),
                 openai_compat_extra_body_json: document.getElementById('openai-compat-extra-body-json').value.trim(),
                 enable_llm_parallel_fastest: document.getElementById('enable-llm-parallel-fastest').checked,
-                source_language: document.getElementById('source-language').value,
+                source_language: getSourceLanguageEffective(),
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
                 enable_pinyin: document.getElementById('enable-pinyin').checked,

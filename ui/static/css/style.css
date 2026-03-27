@@ -263,6 +263,17 @@ main {
     margin-bottom: 15px;
 }
 
+.asr-top-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 12px;
+    align-items: start;
+}
+
+.asr-top-row .form-group {
+    margin-bottom: 0;
+}
+
 .form-group label {
     display: block;
     margin-bottom: 5px;
@@ -451,6 +462,34 @@ html[lang="en"] .language-setting-item label span[data-i18n="label.quickLangSlot
     font-weight: 600;
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
+}
+
+.language-combo-clear {
+    width: 24px;
+    flex-shrink: 0;
+    margin-left: -30px;
+    margin-right: 5px;
+    position: relative;
+    z-index: 1;
+    border: none;
+    background: transparent;
+    color: #aaa;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 18px;
+    line-height: 1;
+    transition: color 0.2s;
+}
+
+.language-combo-clear:hover {
+    color: #333;
+}
+
+.language-combo-clear[hidden] {
+    display: none !important;
 }
 
 .language-combo-toggle {
@@ -728,6 +767,10 @@ footer a:hover {
 @media (max-width: 768px) {
     /* 窗口过窄时改为单栏布局 */
     main {
+        grid-template-columns: 1fr;
+    }
+
+    .asr-top-row {
         grid-template-columns: 1fr;
     }
 
