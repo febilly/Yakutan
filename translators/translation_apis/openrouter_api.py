@@ -50,36 +50,7 @@ def merge_with_draft(fresh_translation: str, draft: str) -> str:
     if common_prefix_len >= max(len(draft) * 0.4, 3):
         return draft[:common_prefix_len] + fresh_translation[common_prefix_len:]
 
-    # Case 4: 尝试在 fresh 中找 draft 的"逻辑结束位置"
-    # draft 翻译了源文本的前半部分，fresh 翻译了全部
-    # 如果 draft 的某些关键字出现在 fresh 的前部分，可以做嫁接
-    draft_parts = re.split(r"[\u3001\u3002\uff01\uff1f,\.!\?]+", draft)
-    draft_parts = [p.strip() for p in draft_parts if len(p.strip()) >= 2]
-
-    if draft_parts:
-        last_part = draft_parts[-1]
-        search_len = max(3, len(last_part) // 2)
-        for try_len in range(len(last_part), search_len - 1, -1):
-            substr = last_part[:try_len]
-            pos = fresh_translation.find(substr)
-            if pos != -1:
-                cut_pos = pos + len(substr)
-                # 跳过标点
-                while (
-                    cut_pos < len(fresh_translation)
-                    and fresh_translation[cut_pos] in "、。！？,.!? \t\n"
-                ):
-                    cut_pos += 1
-                remaining = fresh_translation[cut_pos:]
-                if remaining:
-                    if not re.search(r"[\u3001\u3002\uff01\uff1f,\.!\?\s]$", draft):
-                        return draft + "、" + remaining
-                    return draft + remaining
-                else:
-                    return fresh_translation
-                break
-
-    # Case 5: 两者差异太大，直接用 fresh（保质量优先）
+    # Case 4: 两者差异太大，直接用 fresh（保质量优先）
     return fresh_translation
 
 
@@ -257,6 +228,8 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         """
         previous_translation = kwargs.get("previous_translation")
         is_partial = kwargs.get("is_partial", False)
+        previous_source_text = kwargs.get("previous_source_text")
+        detected_source_language = kwargs.get("detected_source_language", "auto")
         target_descriptor = self._describe_language(target_language)
 
         system_prompt = self._build_system_prompt(target_descriptor)
@@ -302,7 +275,10 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             return stable_translation
 
         needs_rescue, rescue_reason = self._check_content_completeness(
-            text, stable_translation, previous_translation
+            text, stable_translation, previous_translation,
+            previous_source_text=previous_source_text,
+            detected_source_language=detected_source_language,
+            target_language=target_language,
         )
 
         if not needs_rescue:
@@ -325,34 +301,59 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         if fresh_translation.startswith("[ERROR]"):
             return stable_translation
 
+        if len(fresh_translation) <= len(stable_translation):
+            return stable_translation
+
         # ── Step 4: 合并 — 保留 stable 的开头 + fresh 的完整内容 ──
         return merge_with_draft(fresh_translation, stable_translation)
+
+    _CJK_LANG_PREFIXES = ("zh", "ja", "ko")
+
+    @staticmethod
+    def _is_cjk_language(lang_code: str) -> bool:
+        """判断语言代码是否属于中日韩（CJK）语言。"""
+        normalized = (lang_code or "").strip().lower()
+        return any(
+            normalized == p or normalized.startswith(p + "-")
+            for p in OpenRouterAPI._CJK_LANG_PREFIXES
+        )
 
     @staticmethod
     def _check_content_completeness(
         source_text: str,
         translation: str,
         previous_translation: str,
+        previous_source_text: Optional[str] = None,
+        detected_source_language: str = "auto",
+        target_language: str = "",
     ) -> tuple:
         """检查翻译内容是否完整，返回 (needs_rescue, reason)。
 
         两个启发式检查：
-        1. 翻译相对源文本太短（ratio < 0.6）
-        2. 源文本比 draft 长很多，但翻译没有增长
+        1. 翻译相对源文本太短（阈值根据 CJK 跨线情况动态调整）
+        2. 源文本增长了但翻译没有增长（使用真实的上次源文本长度）
         """
+        source_is_cjk = OpenRouterAPI._is_cjk_language(detected_source_language)
+        target_is_cjk = OpenRouterAPI._is_cjk_language(target_language)
+        cross_cjk_boundary = source_is_cjk != target_is_cjk
+        ratio_threshold = 0.15 if cross_cjk_boundary else 0.5
+
         ratio = len(translation) / max(len(source_text), 1)
-        if ratio < 0.6:
-            return True, f"ratio={ratio:.2f}<0.6"
+        if ratio < ratio_threshold:
+            return True, f"ratio={ratio:.2f}<{ratio_threshold}"
 
-        # 用 previous_translation 长度近似 previous source 长度
-        # （zh→ja 大约 1:1 字符比）
-        source_vs_draft = len(source_text) / max(len(previous_translation), 1)
+        prev_source_len = (
+            len(previous_source_text)
+            if previous_source_text
+            else len(previous_translation)
+        )
+        source_vs_prev = len(source_text) / max(prev_source_len, 1)
         trans_growth = len(translation) / max(len(previous_translation), 1)
-        source_added = len(source_text) - len(previous_translation)
+        source_added = len(source_text) - prev_source_len
 
-        if source_vs_draft >= 1.3 and source_added >= 3 and trans_growth < 1.05:
+        if source_vs_prev >= 1.3 and source_added >= 3 and trans_growth < 1.05:
             return True, (
-                f"source_vs_draft={source_vs_draft:.2f} (+{source_added}chars) "
+                f"source_vs_prev={source_vs_prev:.2f} (+{source_added}chars) "
                 f"but trans_growth={trans_growth:.2f}"
             )
 

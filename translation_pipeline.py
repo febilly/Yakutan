@@ -125,6 +125,8 @@ def translate_with_backend(
     target_language: str,
     previous_translation: Optional[str] = None,
     prefer_deepl: bool = False,
+    previous_source_text: Optional[str] = None,
+    detected_source_language: Optional[str] = None,
 ) -> str:
     """使用指定翻译器执行翻译，可选 DeepL 优先。"""
     translate_kwargs = {
@@ -135,6 +137,10 @@ def translate_with_backend(
     }
     if previous_translation is not None:
         translate_kwargs['previous_translation'] = previous_translation
+    if previous_source_text is not None:
+        translate_kwargs['previous_source_text'] = previous_source_text
+    if detected_source_language is not None:
+        translate_kwargs['detected_source_language'] = detected_source_language
 
     if prefer_deepl and deepl_translator_instance is not None:
         translated_text = deepl_translator_instance.translate(text, **translate_kwargs)

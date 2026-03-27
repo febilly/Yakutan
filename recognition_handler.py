@@ -460,6 +460,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             actual_target,
                             self.last_partial_translation,
                             use_deepl_final,
+                            self.last_partial_source_segment,
+                            source_lang,
                         )
                     if secondary_should_translate:
                         secondary_future = s.executor.submit(
@@ -470,6 +472,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             actual_secondary_target,
                             self.last_partial_translation_secondary,
                             use_deepl_final,
+                            self.last_partial_source_segment,
+                            source_lang,
                         )
                     translated_text = primary_future.result() if primary_future is not None else text
                     secondary_translated_text = (
@@ -484,6 +488,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             actual_target,
                             self.last_partial_translation,
                             use_deepl_final,
+                            self.last_partial_source_segment,
+                            source_lang,
                         )
                     else:
                         translated_text = text
