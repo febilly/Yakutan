@@ -146,7 +146,11 @@
                         <span class="collapse-icon" id="translation-api-icon">▼</span>
                     </div>
                     <div class="collapsible-content" id="translation-api">
-                        <p class="feature-hint-inline" data-i18n="feature.llmStreamingPromo">新：推荐尝试LLM流式翻译</p>
+                        <div class="feature-hint-inline feature-hint-inline-row">
+                            <span data-i18n="feature.llmStreamingPromo">新：推荐尝试LLM流式翻译</span>
+                            <button type="button" class="feature-hint-link" id="switch-to-llm-streaming-btn"
+                                data-i18n="feature.switchToLlmStreaming">点此切换到LLM流式翻译</button>
+                        </div>
                         <div class="form-group">
                             <label for="translation-api-type" data-i18n="label.translationApi">翻译API</label>
                             <select id="translation-api-type" class="form-control"
@@ -157,11 +161,7 @@
                                     Dictionary（免费，更快，请注意网络连通性）</option>
                                 <option value="google_web" data-i18n="api.googleWeb">Google Web（免费，备用，请注意网络连通性）</option>
                                 <option value="openrouter" data-i18n="api.openrouter">LLM（自定义兼容接口）</option>
-                                <!--
-                                注意：此选项目前只是在界面中隐藏，相关前后端逻辑仍保留。
-                                以后若修改 LLM / AI 相关逻辑、配置项、校验或文案，请同步更新下面这段注释内容，避免这里过时。
-                                <option value="openrouter_streaming_deepl_hybrid" data-i18n="api.openrouterStreamingDeeplHybrid">LLM 流式 + DeepL 静音终译（混合）</option>
-                                -->
+                                <option value="openrouter_streaming_deepl_hybrid" data-i18n="api.openrouterStreamingDeeplHybrid">LLM 流式 + DeepL 终译（混合）</option>
                             </select>
                             <small id="translation-api-warning" class="form-text"
                                 style="color: #e74c3c; display: none;"></small>

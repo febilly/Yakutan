@@ -232,6 +232,38 @@ function shouldShowLLMSettings(apiType) {
     return apiType === 'openrouter' || apiType === 'openrouter_streaming_deepl_hybrid';
 }
 
+/** LLM 地址、模型、Key 是否已就绪（与启动校验一致：Key 可为环境/后端已设置而输入框为空）。 */
+function isLLMConnectionFieldsComplete() {
+    const base = (document.getElementById('llm-base-url')?.value || '').trim();
+    const model = (document.getElementById('llm-model')?.value || '').trim();
+    const llmKey = (document.getElementById('llm-api-key')?.value || '').trim();
+    const hasKey = envStatus.llm.api_key_set || !!llmKey;
+    return !!(base && model && hasKey);
+}
+
+/** 同步「流式翻译模式」分组：仅普通 LLM 显示开关；混合模式固定流式（由 api_type），不显示开关且不改动开关状态，避免影响切回 LLM 时的偏好。 */
+function updateOpenRouterStreamingUi() {
+    const apiSelect = document.getElementById('translation-api-type');
+    const streamingModeGroup = document.getElementById('openrouter-streaming-mode-group');
+    const streamingMode = document.getElementById('openrouter-streaming-mode');
+    if (!apiSelect || !streamingModeGroup || !streamingMode) return;
+
+    const v = apiSelect.value;
+    if (v === 'openrouter_streaming_deepl_hybrid') {
+        streamingModeGroup.style.display = 'none';
+        streamingMode.disabled = false;
+        return;
+    }
+    if (v === 'openrouter') {
+        streamingModeGroup.style.display = 'block';
+        streamingMode.disabled = false;
+        return;
+    }
+    streamingModeGroup.style.display = 'none';
+    streamingMode.checked = false;
+    streamingMode.disabled = false;
+}
+
 function updateLLMSettingsVisibility(apiType = null, expandPanel = false) {
     const actualApiType = apiType || (document.getElementById('translation-api-type')
         ? document.getElementById('translation-api-type').value
@@ -688,6 +720,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // 显示配置保存提示
     showConfigStorageInfo();
+
+    const switchLlmStreamingBtn = document.getElementById('switch-to-llm-streaming-btn');
+    if (switchLlmStreamingBtn) {
+        switchLlmStreamingBtn.addEventListener('click', switchToLLMStreamingTranslation);
+    }
 });
 
 document.addEventListener('i18n:languageChanged', function () {
@@ -911,9 +948,12 @@ function applyAsrBackendLocks() {
     }
 
     const isDoubaoFile = asrBackendSelect.value === 'doubao_file';
+    const apiTypeVal = translationApiSelect.value;
     const isStreamingTranslation = enableTranslationToggle.checked
-        && translationApiSelect.value === 'openrouter'
-        && streamingModeToggle.checked;
+        && (
+            (apiTypeVal === 'openrouter' && streamingModeToggle.checked)
+            || apiTypeVal === 'openrouter_streaming_deepl_hybrid'
+        );
 
     if (isDoubaoFile) {
         micControlToggle.disabled = true;
@@ -958,12 +998,16 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('fallback-language').value = config.translation.fallback_language || 'en';
                 // 处理 LLM 流式模式的特殊情况
                 const apiType = config.translation.api_type || 'qwen_mt';
-                if (apiType === 'openrouter_streaming' || apiType === 'openrouter_streaming_deepl_hybrid') {
+                if (apiType === 'openrouter_streaming') {
                     document.getElementById('translation-api-type').value = 'openrouter';
-                    document.getElementById('openrouter-streaming-mode').checked = apiType === 'openrouter_streaming';
+                    document.getElementById('openrouter-streaming-mode').checked = true;
+                    document.getElementById('openrouter-streaming-mode').disabled = false;
+                } else if (apiType === 'openrouter_streaming_deepl_hybrid') {
+                    document.getElementById('translation-api-type').value = 'openrouter_streaming_deepl_hybrid';
                 } else {
                     document.getElementById('translation-api-type').value = apiType;
                     document.getElementById('openrouter-streaming-mode').checked = false;
+                    document.getElementById('openrouter-streaming-mode').disabled = false;
                 }
                 document.getElementById('llm-base-url').value = config.translation.llm_base_url || '';
                 document.getElementById('llm-model').value = config.translation.llm_model || '';
@@ -1025,6 +1069,7 @@ function loadConfigFromLocalStorage() {
         }
 
         // 根据翻译开关显示/隐藏翻译选项
+        updateOpenRouterStreamingUi();
         toggleTranslationOptions();
         updateFuriganaVisibility();
         updateLLMSettingsVisibility();
@@ -1058,7 +1103,11 @@ function loadDefaultConfig() {
     document.getElementById('enable-furigana').checked = false;
     document.getElementById('enable-pinyin').checked = false;
     document.getElementById('enable-reverse-translation').checked = true;
-    document.getElementById('openrouter-streaming-mode').checked = false;
+    const streamingModeEl = document.getElementById('openrouter-streaming-mode');
+    if (streamingModeEl) {
+        streamingModeEl.checked = false;
+        streamingModeEl.disabled = false;
+    }
     document.getElementById('enable-llm-parallel-fastest').checked = false;
     document.getElementById('llm-base-url').value = '';
     document.getElementById('llm-model').value = '';
@@ -1091,6 +1140,7 @@ function loadDefaultConfig() {
     document.getElementById('panel-width').value = 600;
 
     console.log('✓ 已加载前端默认配置');
+    updateOpenRouterStreamingUi();
     updateFuriganaVisibility();
     updateLLMSettingsVisibility();
     updateSensitiveWordsHint();
@@ -1111,12 +1161,16 @@ async function loadConfigFromServer() {
         document.getElementById('fallback-language').value = config.translation.fallback_language || '';
         // 处理 LLM 流式模式的特殊情况
         const serverApiType = config.translation.api_type;
-        if (serverApiType === 'openrouter_streaming' || serverApiType === 'openrouter_streaming_deepl_hybrid') {
+        if (serverApiType === 'openrouter_streaming') {
             document.getElementById('translation-api-type').value = 'openrouter';
-            document.getElementById('openrouter-streaming-mode').checked = serverApiType === 'openrouter_streaming';
+            document.getElementById('openrouter-streaming-mode').checked = true;
+            document.getElementById('openrouter-streaming-mode').disabled = false;
+        } else if (serverApiType === 'openrouter_streaming_deepl_hybrid') {
+            document.getElementById('translation-api-type').value = 'openrouter_streaming_deepl_hybrid';
         } else {
             document.getElementById('translation-api-type').value = serverApiType;
             document.getElementById('openrouter-streaming-mode').checked = false;
+            document.getElementById('openrouter-streaming-mode').disabled = false;
         }
         document.getElementById('llm-base-url').value = config.translation.llm_base_url || '';
         document.getElementById('llm-model').value = config.translation.llm_model || '';
@@ -1146,6 +1200,7 @@ async function loadConfigFromServer() {
         saveConfigToLocalStorage();
 
         // 根据翻译开关显示/隐藏翻译选项
+        updateOpenRouterStreamingUi();
         toggleTranslationOptions();
         updateFuriganaVisibility();
         updateLLMSettingsVisibility();
@@ -1165,9 +1220,11 @@ function saveConfigToLocalStorage() {
     try {
         applyAsrBackendLocks();
 
-        // 确定实际的 API 类型（如果是 LLM 且启用了流式模式，使用 openrouter_streaming）
+        // 确定实际的 API 类型（LLM + 流式开关 -> openrouter_streaming；混合模式保持独立值）
         let actualApiType = document.getElementById('translation-api-type').value;
-        if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
+        if (actualApiType === 'openrouter_streaming_deepl_hybrid') {
+            // 保持 hybrid
+        } else if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
             actualApiType = 'openrouter_streaming';
         }
 
@@ -1242,20 +1299,31 @@ function updateFuriganaVisibility() {
 // 处理翻译API变更
 let previousTranslationApi = null;
 
+/** 一键：启用翻译、LLM API、流式翻译模式，并走与下拉框变更相同的更新与保存逻辑。 */
+function switchToLLMStreamingTranslation() {
+    const enableTrans = document.getElementById('enable-translation');
+    if (enableTrans && !enableTrans.checked) {
+        enableTrans.checked = true;
+        toggleTranslationOptions();
+    }
+
+    const select = document.getElementById('translation-api-type');
+    const streaming = document.getElementById('openrouter-streaming-mode');
+    if (!select || !streaming) return;
+
+    select.value = 'openrouter';
+    streaming.checked = true;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 function handleTranslationApiChange(event) {
     const newApi = event.target.value;
     const warningElement = document.getElementById('translation-api-warning');
-    const streamingModeGroup = document.getElementById('openrouter-streaming-mode-group');
 
-    // 显示/隐藏 LLM 流式翻译模式选项
-    if (newApi === 'openrouter') {
-        streamingModeGroup.style.display = 'block';
-    } else {
-        streamingModeGroup.style.display = 'none';
-        // 如果切换到不支持流式的API，自动关闭流式翻译开关
-        document.getElementById('openrouter-streaming-mode').checked = false;
-    }
-    updateLLMSettingsVisibility(newApi, newApi === 'openrouter');
+    updateOpenRouterStreamingUi();
+    const expandLlmPanel = (newApi === 'openrouter' || newApi === 'openrouter_streaming_deepl_hybrid')
+        && !isLLMConnectionFieldsComplete();
+    updateLLMSettingsVisibility(newApi, expandLlmPanel);
     updateSensitiveWordsHint(newApi);
     applyAsrBackendLocks();
 
@@ -1275,13 +1343,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const apiSelect = document.getElementById('translation-api-type');
         previousTranslationApi = apiSelect.value;
 
-        // 初始化 LLM 流式模式选项的显示状态
-        const streamingModeGroup = document.getElementById('openrouter-streaming-mode-group');
-        if (apiSelect.value === 'openrouter') {
-            streamingModeGroup.style.display = 'block';
-        } else {
-            streamingModeGroup.style.display = 'none';
-        }
+        updateOpenRouterStreamingUi();
         updateLLMSettingsVisibility(apiSelect.value);
         updateSensitiveWordsHint(apiSelect.value);
         syncLLMTemplateKeySourceHintFromInputs();
@@ -1340,9 +1402,11 @@ async function saveConfig(autoSave = false) {
     try {
         applyAsrBackendLocks();
 
-        // 确定实际的 API 类型（如果是 LLM 且启用了流式模式，使用 openrouter_streaming）
+        // 确定实际的 API 类型（LLM + 流式开关 -> openrouter_streaming；混合模式保持独立值）
         let actualApiType = document.getElementById('translation-api-type').value;
-        if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
+        if (actualApiType === 'openrouter_streaming_deepl_hybrid') {
+            // 保持 hybrid
+        } else if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
             actualApiType = 'openrouter_streaming';
         }
 
@@ -1554,7 +1618,7 @@ async function startService() {
         }
 
         if (enableTranslation) {
-            if (translationApiType === 'openrouter') {
+            if (translationApiType === 'openrouter' || translationApiType === 'openrouter_streaming_deepl_hybrid') {
                 const missingFields = [];
                 const missingLabels = [];
 

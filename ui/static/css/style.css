@@ -316,6 +316,28 @@ main {
     color: #4a5a68;
 }
 
+.feature-hint-inline-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 10px;
+}
+
+.feature-hint-link {
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font: inherit;
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.feature-hint-link:hover {
+    text-decoration: underline;
+}
+
 .api-key-group {
     margin-bottom: 20px;
 }
