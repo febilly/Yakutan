@@ -429,18 +429,21 @@ def list_input_devices():
         try:
             import pyaudio
         except Exception as e:  # pragma: no cover
-            return jsonify({'devices': [], 'default_index': None, 'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None), 'error': str(e)})
+            return jsonify({'devices': [], 'default_index': None, 'default_name': None, 'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None), 'error': str(e)})
 
         pa = pyaudio.PyAudio()
         devices = []
         default_index = None
+        default_name = None
         preferred_host_api_index = None
         try:
             try:
                 default_info = pa.get_default_input_device_info()
                 default_index = default_info.get('index')
+                default_name = str(default_info.get('name') or '').strip() or None
             except Exception:
                 default_index = None
+                default_name = None
 
             # 选择一个 Host API，避免同一设备被不同 Host API 重复枚举
             # 优先 WASAPI（更贴近系统设备管理器的“启用/禁用”状态），否则用默认 Host API
@@ -495,10 +498,11 @@ def list_input_devices():
         return jsonify({
             'devices': devices,
             'default_index': default_index,
+            'default_name': default_name,
             'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None),
         })
     except Exception as e:
-        return jsonify({'devices': [], 'default_index': None, 'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None), 'error': str(e)}), 500
+        return jsonify({'devices': [], 'default_index': None, 'default_name': None, 'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None), 'error': str(e)}), 500
 
 
 @app.route('/api/service/start', methods=['POST'])

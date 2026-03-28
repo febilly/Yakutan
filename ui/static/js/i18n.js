@@ -189,6 +189,7 @@ const translations = {
         'label.micDevice': '麦克风',
         'label.device': '设备',
         'option.systemDefault': '系统默认',
+        'option.systemDefaultWithDevice': '系统默认（{name}）',
 
         // 页脚
         'footer.text': 'Yakutan',
@@ -413,6 +414,7 @@ const translations = {
         'label.micDevice': 'Microphone',
         'label.device': 'Device',
         'option.systemDefault': 'System Default',
+        'option.systemDefaultWithDevice': 'System default ({name})',
 
         // Footer
         'footer.text': 'Yakutan',
@@ -629,6 +631,7 @@ const translations = {
         'label.micDevice': 'マイク',
         'label.device': 'デバイス',
         'option.systemDefault': 'システム既定',
+        'option.systemDefaultWithDevice': 'システム既定（{name}）',
 
         'footer.text': 'Yakutan',
         'link.github': 'GitHub',
@@ -841,6 +844,7 @@ const translations = {
         'label.micDevice': '마이크',
         'label.device': '장치',
         'option.systemDefault': '시스템 기본값',
+        'option.systemDefaultWithDevice': '시스템 기본값({name})',
 
         'footer.text': 'Yakutan',
         'link.github': 'GitHub',

@@ -4,6 +4,9 @@ const API_BASE = '/api';
 // 自动保存定时器
 let autoSaveTimer = null;
 
+/** PyAudio 解析到的系统默认输入设备 identity，用于检测默认设备是否变化 */
+let lastMicDefaultIdentity = null;
+
 // 配置键名
 const CONFIG_STORAGE_KEY = 'vrchat_translator_config';
 const PANEL_FLOATING_MODE_STORAGE_KEY = 'panel_floating_mode';
@@ -1022,6 +1025,45 @@ async function loadEnvStatus() {
     }
 }
 
+/**
+ * Windows/PortAudio 下 get_default_input_device_info 的设备名常被截断（约 32 字符），
+ * 而枚举列表里的名称是完整的；且默认设备 index 可能因 Host API 过滤与列表不一致。
+ * 用列表项解析「系统默认」应展示的完整名称。
+ */
+function resolveDefaultMicDisplayName(devices, defaultIndex, defaultNameApi) {
+    const api = (defaultNameApi || '').trim();
+    const fromIndex = devices.find((ad) => ad.index === defaultIndex);
+    if (fromIndex && fromIndex.name) {
+        return String(fromIndex.name).trim();
+    }
+    if (!api) return '';
+    const exact = devices.find((d) => d.name && String(d.name).trim() === api);
+    if (exact && exact.name) {
+        return String(exact.name).trim();
+    }
+    let best = '';
+    for (const d of devices) {
+        const n = d.name ? String(d.name).trim() : '';
+        if (!n || !n.startsWith(api)) continue;
+        if (n.length > best.length) best = n;
+    }
+    return best || api;
+}
+
+// 系统默认麦克风变化且当前选用「系统默认」时，保存并重启服务以重新打开采集流
+async function maybeRestartForNewSystemDefaultMic() {
+    try {
+        const statusRes = await fetch(`${API_BASE}/status`);
+        const status = await statusRes.json();
+        if (!status.running) return;
+        const ok = await saveConfig(true);
+        if (!ok) return;
+        await restartService();
+    } catch (e) {
+        console.warn('默认麦克风变更后重启服务失败:', e);
+    }
+}
+
 // 刷新后端输入设备列表（PyAudio）
 async function refreshMicDevices(preserveSelection = true) {
     const micSelect = document.getElementById('mic-device');
@@ -1039,7 +1081,14 @@ async function refreshMicDevices(preserveSelection = true) {
         const defaultOpt = document.createElement('option');
         defaultOpt.value = '';
         const t = window.i18n ? window.i18n.t : (key) => key;
-        defaultOpt.textContent = t('option.systemDefault');
+        const defaultIndex = data.default_index;
+        const defaultNameApi = data.default_name ? String(data.default_name).trim() : '';
+        const displayDefaultName = resolveDefaultMicDisplayName(devices, defaultIndex, defaultNameApi);
+        defaultOpt.textContent = displayDefaultName
+            ? (window.i18n
+                ? window.i18n.t('option.systemDefaultWithDevice', { name: displayDefaultName })
+                : `系统默认（${displayDefaultName}）`)
+            : (window.i18n ? window.i18n.t('option.systemDefault') : '系统默认');
         micSelect.appendChild(defaultOpt);
 
         const indices = new Set();
@@ -1064,6 +1113,13 @@ async function refreshMicDevices(preserveSelection = true) {
             micSelect.value = serverSelected;
         } else {
             micSelect.value = '';
+        }
+
+        const identity = `${defaultIndex ?? 'none'}|${displayDefaultName}`;
+        const prevIdentity = lastMicDefaultIdentity;
+        lastMicDefaultIdentity = identity;
+        if (prevIdentity !== null && identity !== prevIdentity && micSelect.value === '') {
+            void maybeRestartForNewSystemDefaultMic();
         }
     } catch (e) {
         // 静默失败：不影响其它功能
