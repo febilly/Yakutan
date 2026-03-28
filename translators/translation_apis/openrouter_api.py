@@ -193,7 +193,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             f"Translate the user's message into {target_descriptor}.\n\n"
             f"- Output ONLY in {target_descriptor}. No source-language words.\n"
             "- Translate EVERY part completely. Never skip or shorten.\n"
-            "- Use casual spoken style, like friends chatting.\n"
+            "- Use casual spoken style, like friends chatting. Avoid robotic or textbook phrasing.\n"
             "- For idioms/slang: translate the meaning naturally.\n"
             "- Output the translation only. No labels, notes, or commentary."
         )
