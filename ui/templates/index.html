@@ -273,18 +273,6 @@
                                 </div>
                             </div>
                         </div>
-
-                        <div class="form-group">
-                            <label class="switch-label">
-                                <span data-i18n="label.reverseTranslation">启用反向翻译</span>
-                                <label class="switch">
-                                    <input type="checkbox" id="enable-reverse-translation" onchange="onSettingChange()">
-                                    <span class="slider"></span>
-                                </label>
-                            </label>
-                            <small class="form-text" data-i18n="hint.reverseTranslation">总是使用 Google Dictionary
-                                    API，结果会显示在小面板中，请注意网络连通性</small>
-                        </div>
                     </div>
                 </section>
             </div>
@@ -481,7 +469,7 @@
                         <span class="collapse-icon collapsed" id="quick-lang-settings-icon">▶</span>
                     </div>
                     <div class="collapsible-content collapsed" id="quick-lang-settings">
-                        <div class="switch-row">
+                        <div class="switch-row panel-mini-switch-row">
                             <div class="form-group">
                                 <label class="switch-label">
                                     <span data-i18n="label.floatingPanelMode">悬浮窗模式</span>
@@ -501,6 +489,17 @@
                                 </label>
                                 <small class="form-text" style="margin-bottom: 12px; display: block;"
                                     data-i18n="hint.quickLangButtons">设置小面板底部的4个快捷语言切换按钮</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.reverseTranslation">启用反向翻译</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="enable-reverse-translation" onchange="onSettingChange()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" style="margin-bottom: 12px; display: block;"
+                                    data-i18n="hint.reverseTranslation">将译文翻译回原文所用的语言，并在小面板中显示。总是使用 Google Dictionary API，请注意网络连通性</small>
                             </div>
                         </div>
                         <div class="language-settings-grid">

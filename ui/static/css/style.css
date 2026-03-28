@@ -600,12 +600,17 @@ html[lang="en"] .language-setting-item label span[data-i18n="label.quickLangSlot
     margin-bottom: 0;
 }
 
-/* 紧凑的开关行布局（一行两个开关） */
+/* 紧凑的开关行布局（默认一行两个开关） */
 .switch-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 15px;
     margin-bottom: 15px;
+}
+
+/* 小面板：悬浮窗 / 快捷按钮 / 反向翻译 三列 */
+.switch-row.panel-mini-switch-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .switch-row .form-group {

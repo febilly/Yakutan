@@ -119,7 +119,7 @@ const translations = {
         'option.llmParallelFastest.all': '对所有请求都启用双发',
         'hint.llmParallelFastestMode': '禁用则不双发。「仅终译」在流式翻译时不对中间断句双发；「全部」对每个请求都双发。会增加 token 用量。',
         'label.reverseTranslation': '启用反向翻译',
-        'hint.reverseTranslation': '总是使用 Google Dictionary API，结果会显示在小面板中，请注意网络连通性',
+        'hint.reverseTranslation': '将译文翻译回原文所用的语言，并在小面板中显示。总是使用 Google Dictionary API，请注意网络连通性',
 
         // API Keys配置
         'section.apiKeys': 'API Keys 配置',
@@ -344,7 +344,7 @@ const translations = {
         'option.llmParallelFastest.all': 'All requests',
         'hint.llmParallelFastestMode': 'Off: no dual-send. Final only skips dual-send for partial updates while streaming. All: dual-send for every request. Increases token usage.',
         'label.reverseTranslation': 'Enable Reverse Translation',
-        'hint.reverseTranslation': 'Always uses Google Dictionary API. Results are shown in the small panel. Check network connectivity.',
+        'hint.reverseTranslation': 'Translates the output back toward the source language and shows it in the mini panel. Always uses Google Dictionary API. Please ensure network connectivity.',
 
         // API Keys configuration
         'section.apiKeys': 'API Keys Configuration',
@@ -564,7 +564,7 @@ const translations = {
         'option.llmParallelFastest.all': '全リクエストで双発',
         'hint.llmParallelFastestMode': '無効は双発しません。「最終のみ」はストリーミング中の途中訳では双発しません。「全部」は毎回双発します。token 使用量が増えます。',
         'label.reverseTranslation': '逆翻訳を有効化',
-        'hint.reverseTranslation': '常に Google Dictionary API を使用します。結果は小さいパネルに表示されます。ネットワーク接続に注意してください',
+        'hint.reverseTranslation': '訳文を原文側の言語へ戻す訳を小パネルに表示します。常に Google Dictionary API を使用します。ネットワーク接続にご注意ください',
 
         'section.apiKeys': 'API Keys 設定',
         'label.dashscopeKey': 'Alibaba Cloud DashScope API Key',
@@ -777,7 +777,7 @@ const translations = {
         'option.llmParallelFastest.all': '모든 요청 이중 발송',
         'hint.llmParallelFastestMode': '사용 안 함: 이중 발송 없음. 최종만: 스트리밍 중간 번역은 이중 발송 안 함. 전체: 매 요청 이중 발송. 토큰 사용이 늘어납니다.',
         'label.reverseTranslation': '역방향 번역 사용',
-        'hint.reverseTranslation': '항상 Google Dictionary API를 사용합니다. 결과는 작은 패널에 표시됩니다. 네트워크 연결을 확인하세요',
+        'hint.reverseTranslation': '번역문을 원문 언어 쪽으로 되돌린 뜻을 작은 패널에 표시합니다. 항상 Google Dictionary API를 사용합니다. 네트워크 연결을 확인하세요',
 
         'section.apiKeys': 'API Keys 설정',
         'label.dashscopeKey': 'Alibaba Cloud DashScope API Key',
