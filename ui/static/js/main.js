@@ -12,6 +12,7 @@ const CONFIG_STORAGE_KEY = 'vrchat_translator_config';
 const PANEL_FLOATING_MODE_STORAGE_KEY = 'panel_floating_mode';
 const LLM_TEMPLATE_KEY_STORAGE_PREFIX = 'llm_template_key_';
 const LLM_TEMPLATE_MODEL_STORAGE_PREFIX = 'llm_template_model_';
+const LLM_TEMPLATE_EXTRABODY_STORAGE_PREFIX = 'llm_template_extrabody_';
 
 // 待显示的警告消息（用于自动切换翻译API）
 let pendingWarningMessage = null;
@@ -269,6 +270,10 @@ function getLLMTemplateModelStorageKey(templateName) {
     return templateName ? `${LLM_TEMPLATE_MODEL_STORAGE_PREFIX}${templateName}` : null;
 }
 
+function getLLMTemplateExtraBodyStorageKey(templateName) {
+    return templateName ? `${LLM_TEMPLATE_EXTRABODY_STORAGE_PREFIX}${templateName}` : null;
+}
+
 function getStoredLLMTemplateKey(templateName) {
     const storageKey = getLLMTemplateKeyStorageKey(templateName);
     if (!storageKey) return '';
@@ -305,6 +310,20 @@ function setStoredLLMTemplateModel(templateName, value) {
     }
 }
 
+/** @returns {string | null} 有记录则为字符串（可为 "" 表示用户明确留空）；从未保存过则为 null */
+function getStoredLLMTemplateExtraBody(templateName) {
+    const storageKey = getLLMTemplateExtraBodyStorageKey(templateName);
+    if (!storageKey) return null;
+    return localStorage.getItem(storageKey);
+}
+
+function setStoredLLMTemplateExtraBody(templateName, value) {
+    const storageKey = getLLMTemplateExtraBodyStorageKey(templateName);
+    if (!storageKey) return;
+    const normalized = value == null ? '' : String(value).trim();
+    localStorage.setItem(storageKey, normalized);
+}
+
 function persistCurrentLLMTemplateKey() {
     const templateName = detectActiveLLMTemplate();
     const keyInput = document.getElementById('llm-api-key');
@@ -323,6 +342,14 @@ function persistCurrentLLMTemplateModel() {
     }
 }
 
+function persistCurrentLLMTemplateExtraBody() {
+    const templateName = detectActiveLLMTemplate();
+    const extraInput = document.getElementById('openai-compat-extra-body-json');
+    if (!templateName || !extraInput) return;
+
+    setStoredLLMTemplateExtraBody(templateName, extraInput.value);
+}
+
 function snapshotLLMTemplateStorage() {
     const snapshot = {};
 
@@ -331,6 +358,14 @@ function snapshotLLMTemplateStorage() {
 
         const modelStorageKey = getLLMTemplateModelStorageKey(templateName);
         snapshot[modelStorageKey] = getStoredLLMTemplateModel(templateName);
+
+        const extraKey = getLLMTemplateExtraBodyStorageKey(templateName);
+        if (extraKey) {
+            const rawExtra = localStorage.getItem(extraKey);
+            if (rawExtra !== null) {
+                snapshot[extraKey] = rawExtra;
+            }
+        }
     });
 
     return snapshot;
@@ -340,12 +375,34 @@ function restoreLLMTemplateStorage(snapshot) {
     if (!snapshot) return;
 
     Object.entries(snapshot).forEach(([storageKey, value]) => {
+        if (storageKey.startsWith(LLM_TEMPLATE_EXTRABODY_STORAGE_PREFIX)) {
+            if (value === '') {
+                localStorage.setItem(storageKey, '');
+            } else if (value) {
+                localStorage.setItem(storageKey, String(value));
+            } else {
+                localStorage.removeItem(storageKey);
+            }
+            return;
+        }
         if (value) {
             localStorage.setItem(storageKey, value);
         } else {
             localStorage.removeItem(storageKey);
         }
     });
+}
+
+/** 若当前 Base URL 命中某一 LLM 预设且该预设下曾保存过 extra_body，则覆盖输入框（优先于配置里的全局值） */
+function applyStoredExtraBodyForActiveLLMTemplate() {
+    const templateName = detectActiveLLMTemplate();
+    const extraBodyInput = document.getElementById('openai-compat-extra-body-json');
+    if (!templateName || !extraBodyInput) return;
+
+    const storedExtra = getStoredLLMTemplateExtraBody(templateName);
+    if (storedExtra !== null) {
+        extraBodyInput.value = storedExtra;
+    }
 }
 
 function resolveLLMTemplateKeySource(templateName) {
@@ -622,6 +679,7 @@ function applyLLMTemplate(templateName) {
     if (previousTemplateName) {
         persistCurrentLLMTemplateKey();
         persistCurrentLLMTemplateModel();
+        persistCurrentLLMTemplateExtraBody();
     }
 
     baseUrlInput.value = templateConfig.baseUrl;
@@ -630,8 +688,13 @@ function applyLLMTemplate(templateName) {
     } else if (templateName === 'openrouter') {
         modelInput.value = getStoredLLMTemplateModel(templateName);
     }
-    if (Object.prototype.hasOwnProperty.call(templateConfig, 'extraBody')) {
+    const storedExtra = getStoredLLMTemplateExtraBody(templateName);
+    if (storedExtra !== null) {
+        extraBodyInput.value = storedExtra;
+    } else if (Object.prototype.hasOwnProperty.call(templateConfig, 'extraBody')) {
         extraBodyInput.value = templateConfig.extraBody;
+    } else {
+        extraBodyInput.value = '';
     }
     parallelFastestSelect.value = templateConfig.parallelFastestMode || 'off';
 
@@ -1011,6 +1074,7 @@ document.addEventListener('DOMContentLoaded', function () {
     loadPanelFloatingModeSetting();
     loadQuickLanguageSettings();
     loadAPIKeys();
+    applyStoredExtraBodyForActiveLLMTemplate();
     setupSecretVisibilityToggles();
     applyAsrBackendLocks();
     loadEnvStatus();
@@ -1246,10 +1310,29 @@ function loadAPIKeys() {
             if (event.target.id === 'llm-model') {
                 persistCurrentLLMTemplateModel();
             }
+            if (event.target.id === 'openai-compat-extra-body-json') {
+                persistCurrentLLMTemplateExtraBody();
+            }
             syncLLMTemplateKeySourceHintFromInputs();
             onSettingChange(event.target);
         });
     });
+
+    const llmBaseUrlInput = document.getElementById('llm-base-url');
+    if (llmBaseUrlInput && llmBaseUrlInput.dataset.llmExtrabodySyncBound !== 'true') {
+        llmBaseUrlInput.dataset.llmExtrabodySyncBound = 'true';
+        llmBaseUrlInput.addEventListener('blur', () => {
+            applyStoredExtraBodyForActiveLLMTemplate();
+        });
+    }
+
+    const extraBodyEl = document.getElementById('openai-compat-extra-body-json');
+    if (extraBodyEl && extraBodyEl.dataset.llmExtrabodyBlurPersistBound !== 'true') {
+        extraBodyEl.dataset.llmExtrabodyBlurPersistBound = 'true';
+        extraBodyEl.addEventListener('blur', () => {
+            persistCurrentLLMTemplateExtraBody();
+        });
+    }
 }
 
 // 处理国际版端点开关变化
@@ -1439,6 +1522,7 @@ function loadConfigFromLocalStorage() {
         syncLLMTemplateKeySourceHintFromInputs();
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
+        applyStoredExtraBodyForActiveLLMTemplate();
 
     } catch (error) {
         console.error('加载本地配置失败:', error);
@@ -1452,6 +1536,7 @@ function loadConfigFromLocalStorage() {
         syncLLMTemplateKeySourceHintFromInputs();
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
+        applyStoredExtraBodyForActiveLLMTemplate();
     }
 }
 
@@ -1579,6 +1664,7 @@ async function loadConfigFromServer() {
         syncLLMTemplateKeySourceHintFromInputs();
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
+        applyStoredExtraBodyForActiveLLMTemplate();
 
         console.log('已从服务器加载配置');
 
@@ -2142,6 +2228,7 @@ async function resetToDefaults() {
     try {
         persistCurrentLLMTemplateKey();
         persistCurrentLLMTemplateModel();
+        persistCurrentLLMTemplateExtraBody();
         const llmTemplateStorageSnapshot = snapshotLLMTemplateStorage();
 
         // 使用前端默认配置
