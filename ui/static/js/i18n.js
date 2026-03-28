@@ -14,6 +14,9 @@ const SUPPORTED_LANGUAGES = {
 // 默认语言
 const DEFAULT_LANGUAGE = 'zh-CN';
 
+// 浏览器 UI 语言无法映射到已支持的中英日韩界面时回退为英语
+const UI_LANGUAGE_FALLBACK = 'en';
+
 // 本地存储键名
 const LANGUAGE_STORAGE_KEY = 'ui_language';
 const LANGUAGE_USER_SELECTED_KEY = 'ui_language_user_selected';
@@ -937,7 +940,7 @@ function detectSystemLanguage() {
             return browserLang;
         }
 
-        const langPrefix = browserLang.split('-')[0];
+        const langPrefix = browserLang.split(/[-_]/)[0].toLowerCase();
         if (langPrefix === 'zh') {
             return 'zh-CN';
         }
@@ -952,7 +955,7 @@ function detectSystemLanguage() {
         }
     }
 
-    return null;
+    return UI_LANGUAGE_FALLBACK;
 }
 
 /**
@@ -965,12 +968,16 @@ function loadLanguageFromStorage() {
 
     if (isUserSelected && savedLang && SUPPORTED_LANGUAGES[savedLang]) {
         currentLanguage = savedLang;
-    } else if (systemLang && SUPPORTED_LANGUAGES[systemLang]) {
+    } else if (!isUserSelected && systemLang && SUPPORTED_LANGUAGES[systemLang]) {
         currentLanguage = systemLang;
         localStorage.setItem(LANGUAGE_STORAGE_KEY, systemLang);
         localStorage.setItem(LANGUAGE_USER_SELECTED_KEY, 'false');
     } else if (savedLang && SUPPORTED_LANGUAGES[savedLang]) {
         currentLanguage = savedLang;
+    } else {
+        currentLanguage = UI_LANGUAGE_FALLBACK;
+        localStorage.setItem(LANGUAGE_STORAGE_KEY, UI_LANGUAGE_FALLBACK);
+        localStorage.setItem(LANGUAGE_USER_SELECTED_KEY, 'false');
     }
 }
 
