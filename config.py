@@ -131,10 +131,9 @@ LLM_TRANSLATION_MAX_RETRIES = 3
 # 留空表示不发送 extra_body，由用户在网页中按需填写 JSON 对象
 OPENAI_COMPAT_EXTRA_BODY_JSON = ''
 
-# 是否为 LLM 翻译并行发送两个相同请求，并采用最先返回的结果
-# 可用于平滑偶发的延迟高峰；启用后会增加 token 用量
-# 当使用流式翻译时，仅对最后终译生效，不影响中间结果翻译
-ENABLE_LLM_PARALLEL_FASTEST = False
+# LLM 并行双发（两次相同请求，取先返回结果）：off 关闭；final_only 仅终译
+# （流式时对中间断句不双发）；all 对每个请求都双发。会增加 token 用量
+LLM_PARALLEL_FASTEST_MODE = 'off'
 
 # ============================================================================
 # 翻译功能配置

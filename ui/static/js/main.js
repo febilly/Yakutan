@@ -108,35 +108,65 @@ function applySourceLanguageInputFromStored(stored) {
     el.value = normalizeSourceLanguageInputValue(stored);
 }
 
+const LLM_PARALLEL_FASTEST_MODES = ['off', 'final_only', 'all'];
+
 const LLM_TEMPLATE_CONFIGS = {
     'dashscope-qwen35': {
         baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         model: 'qwen3.5-plus',
         extraBody: '{"enable_thinking": false}',
-        parallelFastestDefault: false,
+        parallelFastestMode: 'off',
         providerLabelKey: 'btn.llmTemplateDashscopeQwen',
         copyDashscopeKey: true,
     },
     openrouter: {
         baseUrl: 'https://openrouter.ai/api/v1',
-        parallelFastestDefault: false,
+        parallelFastestMode: 'off',
         providerLabelKey: 'btn.llmTemplateOpenRouter',
     },
     longcat: {
         baseUrl: 'https://api.longcat.chat/openai/v1',
         model: 'LongCat-Flash-Lite',
         extraBody: '',
-        parallelFastestDefault: true,
+        parallelFastestMode: 'all',
         providerLabelKey: 'btn.llmTemplateLongCat',
     },
     mercury2: {
         baseUrl: 'https://api.inceptionlabs.ai/v1',
         model: 'mercury-2',
         extraBody: '',
-        parallelFastestDefault: false,
+        parallelFastestMode: 'off',
         providerLabelKey: 'btn.llmTemplateMercury2',
     },
 };
+
+function resolveLLMParallelFastestModeFromStoredTranslation(trans) {
+    if (!trans) return 'off';
+    const raw = trans.llm_parallel_fastest_mode;
+    if (LLM_PARALLEL_FASTEST_MODES.includes(raw)) {
+        return raw;
+    }
+    if (typeof trans.enable_llm_parallel_fastest === 'boolean') {
+        return trans.enable_llm_parallel_fastest ? 'final_only' : 'off';
+    }
+    const url = (trans.llm_base_url || '').toLowerCase();
+    if (url.includes('longcat.chat')) {
+        return 'all';
+    }
+    return 'off';
+}
+
+function setLLMParallelFastestModeSelect(value) {
+    const el = document.getElementById('llm-parallel-fastest-mode');
+    if (!el) return;
+    el.value = LLM_PARALLEL_FASTEST_MODES.includes(value) ? value : 'off';
+}
+
+function getLLMParallelFastestModeSelect() {
+    const el = document.getElementById('llm-parallel-fastest-mode');
+    if (!el) return 'off';
+    return LLM_PARALLEL_FASTEST_MODES.includes(el.value) ? el.value : 'off';
+}
 
 let activeLLMTemplate = null;
 
@@ -472,12 +502,12 @@ function applyLLMTemplate(templateName) {
     const modelInput = document.getElementById('llm-model');
     const keyInput = document.getElementById('llm-api-key');
     const extraBodyInput = document.getElementById('openai-compat-extra-body-json');
-    const parallelFastestToggle = document.getElementById('enable-llm-parallel-fastest');
+    const parallelFastestSelect = document.getElementById('llm-parallel-fastest-mode');
     const dashscopeKeyInput = document.getElementById('dashscope-api-key');
     const t = window.i18n ? window.i18n.t : (key) => key;
     const templateConfig = LLM_TEMPLATE_CONFIGS[templateName];
 
-    if (!baseUrlInput || !modelInput || !keyInput || !extraBodyInput || !parallelFastestToggle || !templateConfig) {
+    if (!baseUrlInput || !modelInput || !keyInput || !extraBodyInput || !parallelFastestSelect || !templateConfig) {
         return;
     }
 
@@ -495,7 +525,7 @@ function applyLLMTemplate(templateName) {
     if (Object.prototype.hasOwnProperty.call(templateConfig, 'extraBody')) {
         extraBodyInput.value = templateConfig.extraBody;
     }
-    parallelFastestToggle.checked = !!templateConfig.parallelFastestDefault;
+    parallelFastestSelect.value = templateConfig.parallelFastestMode || 'off';
 
     const storedKey = getStoredLLMTemplateKey(templateName);
     if (storedKey) {
@@ -1177,8 +1207,9 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('llm-base-url').value = config.translation.llm_base_url || '';
                 document.getElementById('llm-model').value = config.translation.llm_model || '';
                 document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
-                document.getElementById('enable-llm-parallel-fastest').checked = config.translation.enable_llm_parallel_fastest
-                    ?? (detectActiveLLMTemplate() === 'longcat');
+                setLLMParallelFastestModeSelect(
+                    resolveLLMParallelFastestModeFromStoredTranslation(config.translation)
+                );
                 applySourceLanguageInputFromStored(config.translation.source_language ?? 'auto');
                 document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
                 document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
@@ -1275,7 +1306,7 @@ function loadDefaultConfig() {
         streamingModeEl.checked = false;
         streamingModeEl.disabled = false;
     }
-    document.getElementById('enable-llm-parallel-fastest').checked = false;
+    setLLMParallelFastestModeSelect('off');
     document.getElementById('llm-base-url').value = '';
     document.getElementById('llm-model').value = '';
     document.getElementById('openai-compat-extra-body-json').value = '';
@@ -1343,8 +1374,9 @@ async function loadConfigFromServer() {
         document.getElementById('llm-base-url').value = config.translation.llm_base_url || '';
         document.getElementById('llm-model').value = config.translation.llm_model || '';
         document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
-        document.getElementById('enable-llm-parallel-fastest').checked = config.translation.enable_llm_parallel_fastest
-            ?? (detectActiveLLMTemplate() === 'longcat');
+        setLLMParallelFastestModeSelect(
+            resolveLLMParallelFastestModeFromStoredTranslation(config.translation)
+        );
         document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
         document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
         document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
@@ -1407,7 +1439,7 @@ function saveConfigToLocalStorage() {
                 llm_base_url: document.getElementById('llm-base-url').value.trim(),
                 llm_model: document.getElementById('llm-model').value.trim(),
                 openai_compat_extra_body_json: document.getElementById('openai-compat-extra-body-json').value.trim(),
-                enable_llm_parallel_fastest: document.getElementById('enable-llm-parallel-fastest').checked,
+                llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
                 source_language: getSourceLanguageEffective(),
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
@@ -1589,7 +1621,7 @@ async function saveConfig(autoSave = false) {
                 llm_base_url: document.getElementById('llm-base-url').value.trim(),
                 llm_model: document.getElementById('llm-model').value.trim(),
                 openai_compat_extra_body_json: document.getElementById('openai-compat-extra-body-json').value.trim(),
-                enable_llm_parallel_fastest: document.getElementById('enable-llm-parallel-fastest').checked,
+                llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
                 source_language: getSourceLanguageEffective(),
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,

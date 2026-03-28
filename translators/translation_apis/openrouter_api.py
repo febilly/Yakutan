@@ -391,11 +391,16 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         return {}
 
     def _should_use_parallel_fastest(self, is_partial: bool) -> bool:
-        if not getattr(config, "ENABLE_LLM_PARALLEL_FASTEST", False):
+        mode = getattr(config, "LLM_PARALLEL_FASTEST_MODE", "off") or "off"
+        if mode == "off":
             return False
-        if self.streaming_mode and is_partial:
-            return False
-        return True
+        if mode == "all":
+            return True
+        if mode == "final_only":
+            if self.streaming_mode and is_partial:
+                return False
+            return True
+        return False
 
     def _execute_completion_request(self, request_kwargs: Dict[str, object]) -> str:
         try:

@@ -261,14 +261,15 @@
                                 </div>
 
                                 <div class="form-group">
-                                    <label class="switch-label">
-                                        <span data-i18n="label.llmParallelFastestMode">并行双发取最快返回</span>
-                                        <label class="switch">
-                                            <input type="checkbox" id="enable-llm-parallel-fastest" onchange="onSettingChange()">
-                                            <span class="slider"></span>
-                                        </label>
-                                    </label>
-                                    <small class="form-text" data-i18n="hint.llmParallelFastestMode">启用后会并行发送两个相同请求并采用先返回的结果；开启流式翻译时仅对最后终译生效。请注意这会增加 token 用量。</small>
+                                    <label for="llm-parallel-fastest-mode"
+                                        data-i18n="label.llmParallelFastestMode">并行双发取最快返回</label>
+                                    <select id="llm-parallel-fastest-mode" class="form-control"
+                                        onchange="onSettingChange()">
+                                        <option value="off" data-i18n="option.llmParallelFastest.off">禁用</option>
+                                        <option value="final_only" data-i18n="option.llmParallelFastest.finalOnly">仅对终译启用双发</option>
+                                        <option value="all" data-i18n="option.llmParallelFastest.all">对所有请求都启用双发</option>
+                                    </select>
+                                    <small class="form-text" data-i18n="hint.llmParallelFastestMode">启用后会并行发送两个相同请求并采用先返回的结果；请注意这会增加 token 用量。</small>
                                 </div>
                             </div>
                         </div>
