@@ -58,9 +58,9 @@ jobs:
           ## 自动构建版本
           
           **提交信息**: ${{ steps.commit_info.outputs.message }}
+          **提交日期**: ${{ steps.commit_info.outputs.commit_date }}
           **提交 SHA**: ${{ steps.commit_info.outputs.sha }}
           **构建时间**: ${{ steps.commit_info.outputs.timestamp }}
-          **提交日期**: ${{ steps.commit_info.outputs.commit_date }}
         files: ./dist/${{ steps.commit_info.outputs.exe_name }}
         draft: false
         prerelease: true
