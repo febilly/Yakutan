@@ -37,10 +37,15 @@ jobs:
       run: |
         $commitSha = "${{ github.sha }}".Substring(0, 7)
         $commitMsg = git log -1 --pretty=%B
+        $commitDate = git log -1 --date=format:%Y%m%d-%H%M%S --pretty=%cd
+        $exeName = "Yakutan-$commitDate.exe"
+        Rename-Item -Path ./dist/Yakutan.exe -NewName $exeName
         $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
         $tag = "v$timestamp-$commitSha"
         echo "sha=$commitSha" >> $env:GITHUB_OUTPUT
         echo "message=$commitMsg" >> $env:GITHUB_OUTPUT
+        echo "commit_date=$commitDate" >> $env:GITHUB_OUTPUT
+        echo "exe_name=$exeName" >> $env:GITHUB_OUTPUT
         echo "timestamp=$timestamp" >> $env:GITHUB_OUTPUT
         echo "tag=$tag" >> $env:GITHUB_OUTPUT
     
@@ -53,9 +58,10 @@ jobs:
           ## 自动构建版本
           
           **提交信息**: ${{ steps.commit_info.outputs.message }}
+          **提交日期**: ${{ steps.commit_info.outputs.commit_date }}
           **提交 SHA**: ${{ steps.commit_info.outputs.sha }}
           **构建时间**: ${{ steps.commit_info.outputs.timestamp }}
-        files: ./dist/Yakutan.exe
+        files: ./dist/${{ steps.commit_info.outputs.exe_name }}
         draft: false
         prerelease: true
       env:
@@ -65,5 +71,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: Yakutan
-        path: ./dist/Yakutan.exe
+        path: ./dist/${{ steps.commit_info.outputs.exe_name }}
         retention-days: 30
