@@ -56,6 +56,32 @@ def normalize_lang_code(lang):
     return lang_norm
 
 
+def language_code_for_osc_tag(lang: Optional[str]) -> str:
+    """OSC 等场景的语言对标记：只保留主语言码，不区分地区/简繁/script 变体。"""
+    if lang is None:
+        return 'auto'
+    norm = str(lang).strip().lower().replace('_', '-')
+    if not norm:
+        return 'auto'
+    if norm == 'auto':
+        return 'auto'
+    if norm in (
+        'zh',
+        'zh-cn',
+        'zh-hans',
+        'zh-tw',
+        'zh-hant',
+        'zh-hk',
+        'zh-mo',
+        'zh-sg',
+        'cmn',
+        'wuu',
+        'yue',
+    ):
+        return 'zh'
+    return norm.split('-', 1)[0]
+
+
 def has_secondary_translation_target() -> bool:
     return normalize_optional_language_code(
         getattr(config, 'SECONDARY_TARGET_LANGUAGE', None)

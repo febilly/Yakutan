@@ -14,6 +14,7 @@ from speech_recognizers.base_speech_recognizer import (
 from text_processor import (
     normalize_optional_language_code,
     normalize_lang_code,
+    language_code_for_osc_tag,
     resolve_output_target_language,
     add_furigana_if_needed,
     add_pinyin_if_needed,
@@ -306,8 +307,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     config, 'SHOW_ORIGINAL_AND_LANG_TAG', True,
                 )
                 if show_tag:
-                    source_lang = self._normalize_lang(detected_lang)
-                    target_lang = self._normalize_lang(actual_target)
+                    source_lang = language_code_for_osc_tag(detected_lang)
+                    target_lang = language_code_for_osc_tag(actual_target)
                     display_text = (
                         f"[{source_lang}→{target_lang}] "
                         f"{translation_display} ({current_original_display})"
@@ -553,13 +554,15 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             config, 'SHOW_ORIGINAL_AND_LANG_TAG', True,
                         )
                         if show_tag:
+                            tag_src = language_code_for_osc_tag(source_lang)
+                            tag_tgt = language_code_for_osc_tag(actual_target)
                             display_text = (
-                                f"[{normalized_source}→{actual_target}] "
+                                f"[{tag_src}→{tag_tgt}] "
                                 f"{display_translated_text} ({display_source_text})"
                             )
                             if len(display_text) > 144:
                                 display_text = (
-                                    f"[{normalized_source}→{actual_target}] {display_translated_text}"
+                                    f"[{tag_src}→{tag_tgt}] {display_translated_text}"
                                 )
                         else:
                             display_text = str(display_translated_text)
