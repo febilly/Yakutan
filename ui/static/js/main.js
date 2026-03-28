@@ -108,6 +108,82 @@ function applySourceLanguageInputFromStored(stored) {
     el.value = normalizeSourceLanguageInputValue(stored);
 }
 
+/** 手动指定的源语言是否为 zh / en / ja / ko（不含 auto） */
+function sourceLanguageIsCjkeFamily(effective) {
+    if (effective === 'auto' || !effective) {
+        return false;
+    }
+    const norm = String(effective).trim().toLowerCase();
+    return norm === 'zh' || norm === 'en' || norm === 'ja' || norm === 'ko';
+}
+
+/** 浏览器首选界面语言是否为中英日韩；无法读取时返回 undefined */
+function isBrowserPrimaryLanguageCjke() {
+    if (typeof navigator === 'undefined') {
+        return undefined;
+    }
+    const list = Array.isArray(navigator.languages) && navigator.languages.length
+        ? navigator.languages
+        : [navigator.language || navigator.userLanguage || ''].filter(Boolean);
+    if (!list.length) {
+        return undefined;
+    }
+    const raw = String(list[0]).trim();
+    if (!raw) {
+        return undefined;
+    }
+    const s = raw.toLowerCase().replace(/_/g, '-');
+    if (s === 'zh' || s.startsWith('zh-')) return true;
+    if (s === 'en' || s.startsWith('en-')) return true;
+    if (s === 'ja' || s.startsWith('ja-')) return true;
+    if (s === 'ko' || s.startsWith('ko-')) return true;
+    return false;
+}
+
+function shouldAutoUseGenericLanguageDetector() {
+    const primCjke = isBrowserPrimaryLanguageCjke();
+    if (primCjke === false) {
+        return true;
+    }
+    const effective = getSourceLanguageEffective();
+    if (effective !== 'auto' && !sourceLanguageIsCjkeFamily(effective)) {
+        return true;
+    }
+    return false;
+}
+
+/** 与中日韩英检测器匹配：手动选了中英日韩，或自动检测且浏览器首选为中英日韩 */
+function shouldAutoUseCjkeLanguageDetector() {
+    if (shouldAutoUseGenericLanguageDetector()) {
+        return false;
+    }
+    const effective = getSourceLanguageEffective();
+    if (sourceLanguageIsCjkeFamily(effective)) {
+        return true;
+    }
+    if (effective === 'auto' && isBrowserPrimaryLanguageCjke() === true) {
+        return true;
+    }
+    return false;
+}
+
+/** 按源语言 / 浏览器语言自动在 fasttext 与 cjke 之间切换；其它类型（如 enzh）在命中规则时也会被覆盖 */
+function applyAutoLanguageDetectorIfNeeded() {
+    const sel = document.getElementById('language-detector');
+    if (!sel) return false;
+    if (shouldAutoUseGenericLanguageDetector()) {
+        if (sel.value === 'fasttext') return false;
+        sel.value = 'fasttext';
+        return true;
+    }
+    if (shouldAutoUseCjkeLanguageDetector()) {
+        if (sel.value === 'cjke') return false;
+        sel.value = 'cjke';
+        return true;
+    }
+    return false;
+}
+
 const LLM_PARALLEL_FASTEST_MODES = ['off', 'final_only', 'all'];
 
 const LLM_TEMPLATE_CONFIGS = {
@@ -1252,6 +1328,8 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('language-detector').value = config.language_detector.type || 'cjke';
             }
 
+            applyAutoLanguageDetectorIfNeeded();
+
             if (config.panel) {
                 document.getElementById('panel-width').value = config.panel.width || 600;
                 getNormalizedPanelWidth();
@@ -1333,6 +1411,7 @@ function loadDefaultConfig() {
 
     // 语言检测器
     document.getElementById('language-detector').value = 'cjke';
+    applyAutoLanguageDetectorIfNeeded();
 
     // 小面板
     document.getElementById('panel-width').value = 600;
@@ -1393,6 +1472,7 @@ async function loadConfigFromServer() {
 
         document.getElementById('language-detector').value = config.language_detector.type;
         applySourceLanguageInputFromStored(config.translation.source_language);
+        applyAutoLanguageDetectorIfNeeded();
         document.getElementById('panel-width').value = (config.panel && config.panel.width) || 600;
         getNormalizedPanelWidth();
 
@@ -1554,6 +1634,7 @@ document.addEventListener('DOMContentLoaded', function () {
 // 当设置改变时自动保存（延迟保存，避免频繁请求）
 function onSettingChange(changedElement = null) {
     applyAsrBackendLocks();
+    applyAutoLanguageDetectorIfNeeded();
 
     // 清除之前的定时器
     if (autoSaveTimer) {
