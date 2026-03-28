@@ -303,11 +303,14 @@
                         <div class="api-key-group">
                             <label for="dashscope-api-key">
                                 <span data-i18n="label.dashscopeKey">阿里云 DashScope API Key</span>
-                                <span style="color: #e74c3c; font-weight: bold;" data-i18n="label.required">*必需</span>
+                                <span id="dashscope-key-required-badge"
+                                    class="dashscope-key-required-badge"
+                                    style="color: #e74c3c; font-weight: bold;"
+                                    hidden></span>
                             </label>
                             <div style="display: flex; align-items: center; gap: 16px;">
                                 <input type="password" id="dashscope-api-key" class="form-control" placeholder="sk-..."
-                                    required style="flex: 1;">
+                                    style="flex: 1;">
                                 <div style="display:flex; align-items:center; gap:8px; white-space:nowrap;">
                                     <span data-i18n="label.international">国际版</span>
                                     <label class="switch" style="margin:0;">

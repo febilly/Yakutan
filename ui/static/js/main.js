@@ -466,6 +466,35 @@ function updateSensitiveWordsHint(apiType = null) {
     hint.style.display = actualApiType === 'qwen_mt' ? 'block' : 'none';
 }
 
+/** Qwen ASR / Fun-ASR / Qwen-MT 依赖 DashScope Key，其余场景不校验 */
+function currentConfigRequiresDashscopeKey() {
+    const asrBackend = document.getElementById('asr-backend')?.value;
+    const enableTranslation = document.getElementById('enable-translation')?.checked ?? false;
+    const translationApiType = document.getElementById('translation-api-type')?.value ?? '';
+    const byAsr = asrBackend === 'qwen' || asrBackend === 'dashscope';
+    const byTranslation = enableTranslation && translationApiType === 'qwen_mt';
+    return byAsr || byTranslation;
+}
+
+function updateDashscopeKeyFieldState() {
+    const badge = document.getElementById('dashscope-key-required-badge');
+    const input = document.getElementById('dashscope-api-key');
+    if (!input) return;
+    const need = currentConfigRequiresDashscopeKey();
+    if (badge) {
+        if (need) {
+            badge.hidden = false;
+            badge.setAttribute('data-i18n', 'label.required');
+            badge.textContent = window.i18n ? window.i18n.t('label.required') : '*必需';
+        } else {
+            badge.hidden = true;
+            badge.textContent = '';
+            badge.removeAttribute('data-i18n');
+        }
+    }
+    input.required = !!need;
+}
+
 function ensureCollapsibleExpanded(id) {
     const content = document.getElementById(id);
     if (content && content.classList.contains('collapsed')) {
@@ -987,6 +1016,7 @@ document.addEventListener('DOMContentLoaded', function () {
     loadEnvStatus();
     refreshMicDevices(true);
     setupMicDeviceAutoRefresh();
+    updateDashscopeKeyFieldState();
     updateStatus();
     // 每2秒更新一次状态
     setInterval(updateStatus, 2000);
@@ -1006,6 +1036,7 @@ document.addEventListener('i18n:languageChanged', function () {
     renderLanguageComboMenus();
     refreshLanguageComboClearLabels();
     refreshMicDevices(true);
+    updateDashscopeKeyFieldState();
     updateStatus();
     updateLLMTemplateKeySourceHint();
 });
@@ -1407,6 +1438,7 @@ function loadConfigFromLocalStorage() {
         applyAsrBackendLocks();
         syncLLMTemplateKeySourceHintFromInputs();
         syncAllLanguageComboClearButtons();
+        updateDashscopeKeyFieldState();
 
     } catch (error) {
         console.error('加载本地配置失败:', error);
@@ -1419,6 +1451,7 @@ function loadConfigFromLocalStorage() {
         applyAsrBackendLocks();
         syncLLMTemplateKeySourceHintFromInputs();
         syncAllLanguageComboClearButtons();
+        updateDashscopeKeyFieldState();
     }
 }
 
@@ -1480,6 +1513,7 @@ function loadDefaultConfig() {
     applyAsrBackendLocks();
     syncLLMTemplateKeySourceHintFromInputs();
     syncAllLanguageComboClearButtons();
+    updateDashscopeKeyFieldState();
 }
 
 // 从服务器加载配置（仅在本地无配置时使用）
@@ -1544,6 +1578,7 @@ async function loadConfigFromServer() {
         applyAsrBackendLocks();
         syncLLMTemplateKeySourceHintFromInputs();
         syncAllLanguageComboClearButtons();
+        updateDashscopeKeyFieldState();
 
         console.log('已从服务器加载配置');
 
@@ -1691,6 +1726,7 @@ document.addEventListener('DOMContentLoaded', function () {
 function onSettingChange(changedElement = null) {
     applyAsrBackendLocks();
     applyAutoLanguageDetectorIfNeeded();
+    updateDashscopeKeyFieldState();
 
     // 清除之前的定时器
     if (autoSaveTimer) {
@@ -1889,10 +1925,7 @@ async function startService() {
         const translationApiSelect = document.getElementById('translation-api-type');
         let translationApiType = translationApiSelect.value;
 
-        // 当前配置是否需要 DashScope Key
-        const dashscopeRequiredByAsr = asrBackend === 'qwen' || asrBackend === 'dashscope';
-        const dashscopeRequiredByTranslation = enableTranslation && translationApiType === 'qwen_mt';
-        const requiresDashscopeKey = dashscopeRequiredByAsr || dashscopeRequiredByTranslation;
+        const requiresDashscopeKey = currentConfigRequiresDashscopeKey();
 
         if (requiresDashscopeKey && !dashscopeKey) {
             showMessage('❌ ' + t('msg.dashscopeRequired'), 'error');
