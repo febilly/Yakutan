@@ -37,7 +37,7 @@ jobs:
       run: |
         $commitSha = "${{ github.sha }}".Substring(0, 7)
         $commitMsg = git log -1 --pretty=%B
-        $commitDate = git log -1 --date=format:'%Y%m%d-%H%M%S' --pretty=%cd
+        $commitDate = git log -1 --date=format:%Y%m%d-%H%M%S --pretty=%cd
         $exeName = "Yakutan-$commitDate.exe"
         Rename-Item -Path ./dist/Yakutan.exe -NewName $exeName
         $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
