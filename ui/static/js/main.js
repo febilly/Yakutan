@@ -115,7 +115,6 @@ function getLocalAsrConfigFromForm() {
         vad_threshold: parseFloat(document.getElementById('local-vad-threshold')?.value || '0.5'),
         min_speech_duration: parseFloat(document.getElementById('local-min-speech-duration')?.value || '1'),
         max_speech_duration: parseFloat(document.getElementById('local-max-speech-duration')?.value || '30'),
-        silence_mode: document.getElementById('local-silence-mode')?.value || 'auto',
         silence_duration: parseFloat(document.getElementById('local-silence-duration')?.value || '0.8'),
         incremental_asr: document.getElementById('local-incremental-asr')?.checked ?? true,
         interim_interval: parseFloat(document.getElementById('local-interim-interval')?.value || '2'),
@@ -141,9 +140,6 @@ function applyLocalAsrConfig(config) {
     }
     if (document.getElementById('local-max-speech-duration')) {
         document.getElementById('local-max-speech-duration').value = config.max_speech_duration ?? 30.0;
-    }
-    if (document.getElementById('local-silence-mode')) {
-        document.getElementById('local-silence-mode').value = config.silence_mode || 'auto';
     }
     if (document.getElementById('local-silence-duration')) {
         document.getElementById('local-silence-duration').value = config.silence_duration ?? 0.8;
@@ -1892,7 +1888,6 @@ function loadDefaultConfig() {
             vad_threshold: 0.50,
             min_speech_duration: 1.0,
             max_speech_duration: 30.0,
-            silence_mode: 'auto',
             silence_duration: 0.8,
             incremental_asr: true,
             interim_interval: 2.0,

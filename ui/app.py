@@ -109,7 +109,6 @@ def _local_asr_config_dict() -> dict:
         'vad_threshold': getattr(config, 'LOCAL_VAD_THRESHOLD', 0.50),
         'min_speech_duration': getattr(config, 'LOCAL_VAD_MIN_SPEECH_DURATION', 1.0),
         'max_speech_duration': getattr(config, 'LOCAL_VAD_MAX_SPEECH_DURATION', 30.0),
-        'silence_mode': getattr(config, 'LOCAL_VAD_SILENCE_MODE', 'auto'),
         'silence_duration': getattr(config, 'LOCAL_VAD_SILENCE_DURATION', 0.8),
         'incremental_asr': getattr(config, 'LOCAL_INCREMENTAL_ASR', True),
         'interim_interval': getattr(config, 'LOCAL_INTERIM_INTERVAL', 2.0),
@@ -348,8 +347,6 @@ def update_config(config_data):
                 config.LOCAL_VAD_MIN_SPEECH_DURATION = float(local_asr['min_speech_duration'])
             if 'max_speech_duration' in local_asr:
                 config.LOCAL_VAD_MAX_SPEECH_DURATION = float(local_asr['max_speech_duration'])
-            if 'silence_mode' in local_asr:
-                config.LOCAL_VAD_SILENCE_MODE = str(local_asr['silence_mode'] or 'auto')
             if 'silence_duration' in local_asr:
                 config.LOCAL_VAD_SILENCE_DURATION = float(local_asr['silence_duration'])
             if 'incremental_asr' in local_asr:

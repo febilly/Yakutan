@@ -5,6 +5,7 @@ import sys
 
 import numpy as np
 
+import config
 from .model_manager import (
     MODELS_DIR,
     ensure_vendor_sources,
@@ -65,17 +66,18 @@ class Qwen3ASREngine:
         from qwen_asr_gguf.inference.schema import ASREngineConfig
 
         resolved_model_dir = model_dir or get_local_model_path("qwen3-asr") or str(MODELS_DIR / "qwen3-asr")
-        config = ASREngineConfig(
+        n_ctx = int(getattr(config, "LOCAL_QWEN_ASR_N_CTX", 2048))
+        engine_cfg = ASREngineConfig(
             model_dir=resolved_model_dir,
             use_dml=use_dml,
-            n_ctx=2048,
+            n_ctx=n_ctx,
             chunk_size=chunk_size,
             memory_num=1,
             verbose=True,
             enable_aligner=False,
             pad_to=int(chunk_size),
         )
-        self._engine = QwenASREngine(config)
+        self._engine = QwenASREngine(engine_cfg)
         self.language: str | None = None
         self._context = ""
         self.model_dir = resolved_model_dir
@@ -84,8 +86,21 @@ class Qwen3ASREngine:
     def set_language(self, language: str) -> None:
         self.language = language if language != "auto" else None
 
+    def _truncate_context_to_tokens(self, text: str) -> str:
+        if not text or self._engine is None:
+            return text
+        limit = int(getattr(config, "LOCAL_QWEN_CONTEXT_MAX_TOKENS", 1024))
+        if limit <= 0:
+            return text
+        model = self._engine.model
+        ids = model.tokenize(text, add_special=False, parse_special=True)
+        if len(ids) <= limit:
+            return text
+        return model.detokenize(ids[-limit:])
+
     def set_context(self, context: str) -> None:
         self._context = context
+        self._context = self._truncate_context_to_tokens(self._context)
 
     def to_device(self, device: str) -> bool:
         return False
@@ -104,11 +119,7 @@ class Qwen3ASREngine:
 
         qwen_language = _LANG_MAP.get(self.language) if self.language else None
 
-        audio_duration = len(audio) / QWEN_SAMPLE_RATE
-        context = self._context
-        if context:
-            context_limit = min(int(audio_duration * 20), 200)
-            context = context[-context_limit:] if context_limit > 0 else None
+        context = self._truncate_context_to_tokens(self._context)
 
         audio_embd, _enc_time = self._engine.encoder.encode(audio)
         full_embd = self._engine._build_prompt_embd(
@@ -129,7 +140,7 @@ class Qwen3ASREngine:
             return None
 
         if update_context:
-            self._context = (self._context + text)[-200:]
+            self._context = self._truncate_context_to_tokens(self._context + text)
         detected_lang = self.language or self._guess_language(text)
         return {
             "text": text,

@@ -113,7 +113,6 @@ class LocalAsrTests(unittest.TestCase):
             "LOCAL_VAD_THRESHOLD": config.LOCAL_VAD_THRESHOLD,
             "LOCAL_VAD_MIN_SPEECH_DURATION": config.LOCAL_VAD_MIN_SPEECH_DURATION,
             "LOCAL_VAD_MAX_SPEECH_DURATION": config.LOCAL_VAD_MAX_SPEECH_DURATION,
-            "LOCAL_VAD_SILENCE_MODE": config.LOCAL_VAD_SILENCE_MODE,
             "LOCAL_VAD_SILENCE_DURATION": config.LOCAL_VAD_SILENCE_DURATION,
         }
         config.LOCAL_ASR_ENGINE = "sensevoice"
@@ -124,7 +123,6 @@ class LocalAsrTests(unittest.TestCase):
         config.LOCAL_VAD_THRESHOLD = 0.50
         config.LOCAL_VAD_MIN_SPEECH_DURATION = 1.0
         config.LOCAL_VAD_MAX_SPEECH_DURATION = 30.0
-        config.LOCAL_VAD_SILENCE_MODE = "auto"
         config.LOCAL_VAD_SILENCE_DURATION = 0.8
 
     def tearDown(self) -> None:

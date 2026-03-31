@@ -99,19 +99,7 @@ class VADProcessor:
             maxlen=self._pre_speech_chunks
         )
 
-        self._silence_mode = "auto"
-        self._fixed_silence_dur = 0.8
         self._silence_limit = self._seconds_to_chunks(0.8)
-
-        self._progressive_tiers = [
-            (3.0, 1.0),
-            (6.0, 0.5),
-            (10.0, 0.25),
-        ]
-
-        self._pause_history: collections.deque[float] = collections.deque(maxlen=50)
-        self._adaptive_min = 0.3
-        self._adaptive_max = 2.0
         self.last_confidence = 0.0
 
     def _ensure_silero(self) -> _SileroOnnxVAD:
@@ -128,23 +116,6 @@ class VADProcessor:
     def _seconds_to_chunks(self, seconds: float) -> int:
         return max(1, round(seconds / self._chunk_duration))
 
-    def _update_adaptive_limit(self) -> None:
-        if len(self._pause_history) < 3:
-            return
-        pauses = sorted(self._pause_history)
-        idx = int(len(pauses) * 0.75)
-        p75 = pauses[min(idx, len(pauses) - 1)]
-        target = max(self._adaptive_min, min(self._adaptive_max, p75 * 1.2))
-        new_limit = self._seconds_to_chunks(target)
-        if new_limit != self._silence_limit:
-            logger.debug(
-                "Adaptive silence: %.2fs (%s chunks), P75=%.2fs",
-                target,
-                new_limit,
-                p75,
-            )
-            self._silence_limit = new_limit
-
     def update_settings(self, settings: dict) -> None:
         if "vad_mode" in settings:
             self.mode = settings["vad_mode"]
@@ -154,12 +125,8 @@ class VADProcessor:
             self.energy_threshold = settings["energy_threshold"]
         if "min_speech_duration" in settings:
             self.min_speech_samples = int(settings["min_speech_duration"] * self.sample_rate)
-        if "silence_mode" in settings:
-            self._silence_mode = settings["silence_mode"]
         if "silence_duration" in settings:
-            self._fixed_silence_dur = settings["silence_duration"]
-        if self._silence_mode == "fixed":
-            self._silence_limit = self._seconds_to_chunks(self._fixed_silence_dur)
+            self._silence_limit = self._seconds_to_chunks(float(settings["silence_duration"]))
 
     def _silero_confidence(self, audio_chunk: np.ndarray) -> float:
         window_size = 512 if self.sample_rate == 16000 else 256
@@ -179,30 +146,13 @@ class VADProcessor:
             return self._energy_confidence(audio_chunk)
         return 1.0
 
-    def _get_effective_silence_limit(self) -> int:
-        buf_seconds = self._speech_samples / self.sample_rate
-        multiplier = 1.0
-        for tier_seconds, tier_multiplier in self._progressive_tiers:
-            if buf_seconds < tier_seconds:
-                break
-            multiplier = tier_multiplier
-        return max(1, round(self._silence_limit * multiplier))
-
     def process_chunk(self, audio_chunk: np.ndarray) -> np.ndarray | None:
         confidence = self._get_confidence(audio_chunk)
         self.last_confidence = confidence
 
         effective_threshold = self.threshold if self.mode == "silero" else 0.5
-        effective_silence_limit = self._get_effective_silence_limit()
 
         if confidence >= effective_threshold:
-            if self._is_speaking and self._silence_counter > 0:
-                pause_duration = self._silence_counter * self._chunk_duration
-                if pause_duration >= 0.1:
-                    self._pause_history.append(pause_duration)
-                    if self._silence_mode == "auto":
-                        self._update_adaptive_limit()
-
             if not self._is_speaking:
                 for pre_chunk in self._pre_buffer:
                     self._speech_buffer.append(pre_chunk)
@@ -223,7 +173,7 @@ class VADProcessor:
         else:
             self._pre_buffer.append(audio_chunk)
 
-        if self._is_speaking and self._silence_counter >= effective_silence_limit:
+        if self._is_speaking and self._silence_counter >= self._silence_limit:
             if self._speech_samples >= self.min_speech_samples:
                 return self._flush_segment()
             logger.debug(

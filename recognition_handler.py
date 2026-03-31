@@ -3,6 +3,7 @@
 """
 import asyncio
 import logging
+import threading
 from typing import Optional
 
 import config
@@ -65,6 +66,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self._partial_inflight = 0
         self._finalized_seq = 0
         self._final_output_version = 0
+        self._final_translate_request_seq = 0
+        self._translate_ordering_lock = threading.Lock()
         self.partial_translation_update_count = 0
         self._prefer_deepl_on_next_final = False
         self._partial_debounce_handle: Optional[asyncio.TimerHandle] = None
@@ -170,6 +173,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self.partial_translation_update_count = 0
         self._prefer_deepl_on_next_final = False
         self._final_output_version = 0
+        self._final_translate_request_seq = 0
 
     def on_session_stopped(self) -> None:
         self._cancel_partial_debounce()
@@ -189,6 +193,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         try:
             if finalized_seq != self._finalized_seq:
                 return
+            with self._translate_ordering_lock:
+                if request_id != self._latest_partial_request_id:
+                    return
             detected_lang_info = s.language_detector.detect(segment)
             detected_lang = detected_lang_info['language']
             actual_target = resolve_output_target_language(detected_lang, config.TARGET_LANGUAGE)
@@ -208,9 +215,6 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 and self._should_translate(detected_lang, actual_secondary_target)
             )
 
-            if primary_should_translate or secondary_should_translate:
-                self.partial_translation_update_count += 1
-
             loop = asyncio.get_running_loop()
             primary_future = None
             secondary_future = None
@@ -227,6 +231,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         target_language=actual_target,
                         context_prefix=config.CONTEXT_PREFIX,
                         is_partial=True,
+                        record_history=False,
                         previous_translation=self.last_partial_translation,
                     ),
                 )
@@ -240,6 +245,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         target_language=actual_secondary_target,
                         context_prefix=config.CONTEXT_PREFIX,
                         is_partial=True,
+                        record_history=False,
                         previous_translation=self.last_partial_translation_secondary,
                     ),
                 )
@@ -250,13 +256,18 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             if secondary_future is not None:
                 secondary_translated_text = await secondary_future
 
+            with self._translate_ordering_lock:
+                latest_partial = self._latest_partial_request_id
             if (
-                request_id != self._latest_partial_request_id
+                request_id != latest_partial
                 or finalized_seq != self._finalized_seq
                 or final_output_version != self._final_output_version
             ):
                 return
             success = True
+
+            if primary_should_translate or secondary_should_translate:
+                self.partial_translation_update_count += 1
 
             if primary_should_translate and translated_text and not translated_text.startswith("[ERROR]"):
                 self.last_partial_translation = translated_text
@@ -342,8 +353,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         finally:
             self._partial_inflight = max(0, self._partial_inflight - 1)
             self.translating_partial = self._partial_inflight > 0
+            with self._translate_ordering_lock:
+                latest_partial = self._latest_partial_request_id
             if (
-                request_id == self._latest_partial_request_id
+                request_id == latest_partial
                 and finalized_seq == self._finalized_seq
                 and final_output_version == self._final_output_version
             ):
@@ -386,9 +399,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     and segment != self.pending_partial_segment
                     and self.loop
                 ):
-                    self._partial_request_seq += 1
-                    request_id = self._partial_request_seq
-                    self._latest_partial_request_id = request_id
+                    with self._translate_ordering_lock:
+                        self._partial_request_seq += 1
+                        request_id = self._partial_request_seq
+                        self._latest_partial_request_id = request_id
                     self.pending_partial_segment = segment
                     final_output_version = self._final_output_version
                     self._schedule_partial_translation_with_debounce(
@@ -444,10 +458,26 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     and self._should_translate(source_lang, actual_secondary_target)
                 )
 
+                # 在可能阻塞的终句翻译之前就递增，让上一句未返回的句内流式任务
+                # 与未触发的 debounce 立即因 finalized_seq / final_output_version 失效，
+                # 避免句间迟到 partial 在终句翻译期间仍刷新 OSC/字幕。
+                self._finalized_seq += 1
+                self._final_output_version += 1
+                self._cancel_partial_debounce()
+
                 if not primary_should_translate:
                     print('主输出语言与源语言相同，跳过翻译，直接输出原文')
                 if use_secondary_output and not secondary_should_translate:
                     print('第二输出语言与源语言相同，跳过翻译，直接输出原文')
+
+                will_network_translate = (
+                    primary_should_translate or secondary_should_translate
+                )
+                my_final_tid = None
+                if will_network_translate:
+                    with self._translate_ordering_lock:
+                        self._final_translate_request_seq += 1
+                        my_final_tid = self._final_translate_request_seq
 
                 if use_secondary_output:
                     primary_future = None
@@ -463,6 +493,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             use_deepl_final,
                             self.last_partial_source_segment,
                             source_lang,
+                            False,
                         )
                     if secondary_should_translate:
                         secondary_future = s.executor.submit(
@@ -475,6 +506,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             use_deepl_final,
                             self.last_partial_source_segment,
                             source_lang,
+                            False,
                         )
                     translated_text = primary_future.result() if primary_future is not None else text
                     secondary_translated_text = (
@@ -491,13 +523,33 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             use_deepl_final,
                             self.last_partial_source_segment,
                             source_lang,
+                            False,
                         )
                     else:
                         translated_text = text
                     secondary_translated_text = None
-                self._finalized_seq += 1
-                self._final_output_version += 1
-                self._cancel_partial_debounce()
+
+                if my_final_tid is not None:
+                    with self._translate_ordering_lock:
+                        latest_final = self._final_translate_request_seq
+                    if my_final_tid != latest_final:
+                        return
+
+                if primary_should_translate and translated_text and not str(
+                    translated_text,
+                ).startswith("[ERROR]"):
+                    s.translator.append_history_entry(
+                        text, translated_text, actual_target,
+                    )
+                if (
+                    use_secondary_output
+                    and secondary_should_translate
+                    and secondary_translated_text
+                    and not str(secondary_translated_text).startswith("[ERROR]")
+                ):
+                    s.secondary_translator.append_history_entry(
+                        text, secondary_translated_text, actual_secondary_target,
+                    )
 
                 # 重置流式翻译状态
                 self.last_partial_translation = None

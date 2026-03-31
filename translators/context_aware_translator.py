@@ -146,11 +146,33 @@ class ContextAwareTranslator:
             
             return pairs
     
+    def append_history_entry(
+        self,
+        source_text: str,
+        translated_text: str,
+        target_language: Optional[str] = None,
+    ) -> None:
+        """在翻译已确认需要采用后写入对话历史（终句去重、迟到丢弃路径使用）。"""
+        src = (source_text or "").strip()
+        tgt = (translated_text or "").strip()
+        if not src or not tgt or tgt.startswith("[ERROR]"):
+            return
+        lang = target_language if target_language is not None else self.target_language
+        with self._lock:
+            self.contexts.append(
+                TranslationHistoryEntry(
+                    source_text=src,
+                    translated_text=tgt,
+                    target_language=lang,
+                )
+            )
+
     def translate(
             self, text: str,
             source_language: str = 'auto',
             target_language: Optional[str] = None,
             context_prefix: str = "",
+            record_history: bool = True,
             **kwargs
         ) -> str:
         """
@@ -161,6 +183,7 @@ class ContextAwareTranslator:
             source_language: 源语言代码（默认自动检测）
             target_language: 目标语言代码（如果不指定则使用初始化时的默认值）
             context_prefix: 上下文前缀
+            record_history: 是否在完成后写入对话历史（终句并发时可先 False 再 append_history_entry）
             **kwargs: 其他参数，如 previous_translation, is_partial
         
         Returns:
@@ -230,16 +253,17 @@ class ContextAwareTranslator:
                 translated_text = translated_text.replace(CONTEXT_MARKER, '').strip()
             
             translated_text = translated_text.strip()
-            
-            # 保存到历史记录
-            with self._lock:
-                history_entry = TranslationHistoryEntry(
-                    source_text=text,
-                    translated_text=translated_text,
-                    target_language=actual_target_language
-                )
-                self.contexts.append(history_entry)
-            
+
+            is_partial = bool(kwargs.get("is_partial"))
+            if record_history and not is_partial:
+                with self._lock:
+                    history_entry = TranslationHistoryEntry(
+                        source_text=text,
+                        translated_text=translated_text,
+                        target_language=actual_target_language
+                    )
+                    self.contexts.append(history_entry)
+
             return translated_text
         
         except Exception as e:
