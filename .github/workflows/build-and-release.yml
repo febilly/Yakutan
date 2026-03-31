@@ -118,19 +118,3 @@ jobs:
         prerelease: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Upload artifact (standard)
-      if: matrix.variant == 'standard'
-      uses: actions/upload-artifact@v4
-      with:
-        name: Yakutan-${{ matrix.variant }}
-        path: ./dist/${{ steps.commit_info.outputs.exe_name }}
-        retention-days: 30
-    
-    - name: Upload artifact (local-asr)
-      if: matrix.variant == 'local-asr'
-      uses: actions/upload-artifact@v4
-      with:
-        name: Yakutan-${{ matrix.variant }}
-        path: ./dist/${{ steps.commit_info.outputs.exe_name }}
-        retention-days: 30
