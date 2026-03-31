@@ -91,7 +91,7 @@ jobs:
           - `Yakutan-*.exe`: 标准版单文件
           - `Yakutan-LocalASR-*.zip`: 本地识别版文件夹打包（解压后运行目录内 `Yakutan-LocalASR.exe`）；内置 Silero VAD；语音识别主模型仍需首次下载
         files: ./dist/${{ steps.commit_info.outputs.exe_name }}
-        draft: false
+        draft: true
         prerelease: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
