@@ -1,24 +1,27 @@
 # Yakutan
 
-更适合中国 [~~计科~~](#局限性) 宝宝体质的 VRChat 语音翻译器（翻译你自己的声音）
+更适合中国宝宝体质的 VRChat 语音翻译器（翻译你自己的声音）
 
 <div align="center">
     <img src="images/screenshot.png" alt="A Screenshot of the WebUI of Yakutan" style="max-width: 100%; width: 512px; height: auto;">
 </div>
 
-- 使用阿里的 [Qwen3实时语音识别（默认）](https://bailian.console.aliyun.com/?tab=model#/model-market/detail/qwen3-asr-flash) 或 [Fun-ASR](https://bailian.console.aliyun.com/?tab=model#/model-market/detail/fun-asr-realtime) 进行语音转文本
-- 使用 DeepL 进行翻译
-    - 可以切换为开箱即用的谷歌翻译（当然你的网得行）
+
+- 可用大模型进行**流式翻译**，实现**边说边翻译**的效果，减少对方等待时间。
+    - 也有 DeepL、qwen-mt、谷歌翻译等选项
+- 使用阿里的 [Qwen3实时语音识别（默认）](https://bailian.console.aliyun.com/?tab=model#/model-market/detail/qwen3-asr-flash) 或 [Fun-ASR](https://bailian.console.aliyun.com/?tab=model#/model-market/detail/fun-asr-realtime) 进行语音转文本，也有部分其他ASR可选
+    - 本地语音识别正在开发中，可下载最新Pre-release版本尝试，但可能有bug
 - 将结果通过 OSC 发送至游戏
 - 有一些 [独特的功能](#特点)
 - ~~其实就是把一堆 API 粘在了一起~~
 
 ## 快速开始
 
-1. 在 [Release](https://github.com/febilly/Yakutan/releases) 中下载最新的 exe
+1. 在 [https://github.com/febilly/Yakutan/releases/latest](https://github.com/febilly/Yakutan/releases/latest) 中下载最新的稳定版 exe
 2. 将 exe 放在一个空文件夹中并运行，WebUI 应该会自动打开
 3. 根据 WebUI 中 `API Keys 配置` 面板的说明获取并填入 API Keys
 4. 点击 `启动服务` 按钮
+5. 有问题的话请参见 [常见问题](#常见问题) 部分
 
 ## 不是已经有人做过了吗，为什么要再做一个翻译器？？？
 
@@ -40,6 +43,7 @@ _可以说我就是为了这点醋包的这顿饺子_
     - 没有上下文的话，比如看这句话被翻译成了啥：
         - 现在总行 _(xíng)_ 了吧？
         - Is the head office now?
+- 现有的翻译一般都需要等到一整句话说完后才进行翻译，别人得等半天，等你说完，再等它翻译完，才能看到你到底说了个啥
 
 ## 特点
 
@@ -54,7 +58,7 @@ _可以说我就是为了这点醋包的这顿饺子_
         - 可自己添加私人的词库
 - 断句：
     - 游戏内语音模式请使用 toggle 模式。说完一句话后，按下静音键，即视为一句话说完，马上全部进行转录。这样能提高响应速度。
-        - 停止录制时会额外继续录制一小段音频（默认0.3s），防止漏掉最后一个字
+        - 停止录制时会额外继续录制一小段音频（默认0.2s），防止漏掉最后一个字
     - VAD：仍然有 VAD 作为补充断句方法
 
 ### 翻译方面
@@ -66,21 +70,24 @@ _可以说我就是为了这点醋包的这顿饺子_
     - 可以指定翻译的正式程度（比如对于日语来说）
     - 原生支持上下文
     - 可以自定义词库（本项目还没实现）
+- 可以切换为使用大模型进行流式翻译
+    - 内置若干 LLM 预设，也支持自定义 LLM 配置
+- 支持第二输出语言，可同时输出两种译文
 - 可以切换为开箱即用的谷歌翻译（但有网络连通性问题，及速率限制）
-- 可以切换为使用大模型进行翻译，但由于延迟问题，默认不使用
+
 
 ## 局限性
 - ~~你得会配Python环境~~ **已提供打包好的可执行文件**
 - ~~目前没（懒得）写 GUI，所有配置需要在 `config.py` 文件中修改~~ **现在有Web UI了**
 - ~~使用脚本启动时系统的默认麦克风~~ **现在可以在Web UI中选择麦克风了**
+- ~~目前暂不支持和其他 OSC 程序同时运行~~ **已改用 OSCQuery，不再冲突**
 - 使用完毕后请**一定记得停止服务**，否则可能会持续使用转录 API，产生额外费用
 - 需要用商业服务的API Key，有一定免费额度，但免费额度用完后需要付钱
     - 阿里云的免费额度是一次性的，但是 [大学生可以拿到每年的免费额度](https://university.aliyun.com/buycenter/)
     - DeepL的免费额度每月重置，但是怎么拿到Key需要自己想办法
         - 实在懒得折腾可以把翻译器换成谷歌的
-- 目前暂不支持和其他 OSC 程序同时运行
 - 语言识别默认使用一个简单的中日韩英检测器
-    - 如需其他语言，请自行修改配置
+    - 已添加自动切换逻辑
 
 ## 命令行运行（高级）
 
@@ -98,7 +105,7 @@ cd Yakutan
 ### 2. 创建虚拟环境（推荐，非必须）
 
 ```bash
-python -m venv .
+python -m venv .  # 推荐使用uv，速度爆快
 .venv\Scripts\activate  # Windows
 source .venv/bin/activate  # macOS/Linux
 ```
@@ -106,35 +113,14 @@ source .venv/bin/activate  # macOS/Linux
 ### 3. 安装依赖
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt  # 推荐使用uv，速度爆快
 ```
 
-### 4. 配置环境变量
-
-在项目根目录创建 `.env` 文件，添加以下内容：
-
-```env
-# 必需：阿里云百炼 API Key
-DASHSCOPE_API_KEY=your_dashscope_api_key_here
-
-# 可选：DeepL API Key（如果使用默认的 DeepL 翻译）
-DEEPL_API_KEY=your_deepl_api_key_here
-
-# 可选：OpenRouter API Key（如果使用 OpenRouter 进行翻译）
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-```
-
-### 5. 修改配置（可选）
-
-编辑 `config.py` 文件，根据需求调整配置：
-
-### 6. 运行程序
+### 4. 运行程序
 
 ```bash
-python main.py
+python run_ui.py
 ```
-
-使用此方法时，需要手动在 `config.py` 中修改配置。
 
 </details>
 
@@ -207,7 +193,7 @@ python main.py
 ### 启用 OSC
 
 1. 启动 VRChat
-2. 打开快捷菜单（Action Menu）
+2. 打开快捷菜单（圆盘菜单）
 3. 进入 Options → OSC
 4. 点击 "Enable" 启用 OSC
 
@@ -217,51 +203,62 @@ python main.py
 
 ### 1. 没有任何转录
 
-- 检查系统的默认麦克风是否为你在用的麦克风
-  - 切换系统默认麦克风后，**程序需要重启（命令行界面，不只是重启识别服务）**，才能识别到新的麦克风
+- 检查 WebUI 中选择的麦克风是否为你正在使用的麦克风
 - 检查麦克风是否有声音输入
-- 检查 `ENABLE_MIC_CONTROL` 配置：
-  - 如果为 `True`，需要在 VRChat 中打开麦克风才能开始识别
-  - 如果为 `False`，程序启动后会立即开始识别
+- 检查 `游戏静音时暂停转录` 配置：
+  - 如果打开，需要在 VRChat 中**第一次由闭麦状态切换到开麦状态后**才能开始识别
+  - 如果关闭，程序启动后会立即开始识别
 
 ### 2. VRChat 聊天框没有显示
 
 - 确认 VRChat OSC 已启用
-- 如果修改了 OSC 端口，请在 `config.py` 中同步修改 `OSC_PORT` 配置
+- 打开游戏小菜单看有没有因发送消息过快被禁言（等待30秒后自动解除）
 
-### 3. WebSocket 连接经常断开
+### 3. 识别不到游戏内的麦克风的开启与关闭
 
-- 调整 `KEEPALIVE_INTERVAL` 参数（建议 30-60 秒）
-- 检查网络连接稳定性
-- 系统会自动尝试重连，通常不需要手动干预
+- 确认 VRChat OSC 已启用
+- 一般重启电脑可以解决，如果暂时懒得重启可以先暂时关闭 `游戏静音时暂停转录` 配置作为临时解决方案
 
 ### 4. 翻译延迟较高
 
-- 如果使用 OpenRouter API，延迟会比较明显
-- 建议使用 DeepL 或 Google API 以获得更快的响应速度
-- 可以设置 `ENABLE_TRANSLATION = False` 禁用翻译，直接输出识别结果
+- 如果使用 LLM 翻译，建议换用响应速度更快的模型，以及检查 LLM 是否使用了思考模式（通过自定义 extra_body 来关闭，具体方式请查阅 LLM 提供商文档）
+- 可以使用 DeepL 或 Google API 以获得更快的响应速度
 
-### 5. 配置修改后没有生效
+### 5. 语音识别报错
 
-- 确保修改的是 `config.py` 文件
-- 重启程序以使配置生效
-- 检查是否有语法错误（Python 对缩进敏感）
+- 如你在使用阿里的语音识别服务：
+    - （国内版）检查阿里账号是否已实名
+    - （国际版）检查阿里账号是否已绑定手机号与信用卡
+
+### 6. 重启识别时程序自动退出
+
+- 目前是有这么个 bug 偶发出现，咋办？先凑合用着呗，我之后再去修
 
 </details>
 
 ## 附录
 
-- 要翻译别人的声音的话建议用 [soniox](https://console.soniox.com/org/e784abf7-3ab5-4127-8823-ecfc18f68b90/projects/2b220fdd-f158-4b7a-9b12-447947b5098a/playground/speech-to-text/)，用它的网页端 Playground 就行，配合 Powertoys 的窗口裁剪器
-    - 也可以试试 [LiveCaptions Translator](https://github.com/SakiRinn/LiveCaptions-Translator)
+- 要翻译别人的声音的话建议用 [soniox](https://github.com/febilly/realtime-subtitle/releases)，这个效果很好，不过 Soniox API 是付费的（我是一分钱没赚啊喂）
+    - 也可以试试免费的 [LiveCaptions Translator](https://github.com/SakiRinn/LiveCaptions-Translator)
+    - 以及被我狠狠地嫖了代码的 [LiveTranslate](https://github.com/TheDeathDragon/LiveTranslate)
 - 我还没太试过国内其他家的识别服务效果怎样，如果有更好的（并且有不少免费额度的）请告诉我谢谢
 
 ## 致谢
+
 - 本项目部分基于阿里给的 Fun-ASR 示例代码
 - 快速的 Google Translate API 来自 https://github.com/SakiRinn/LiveCaptions-Translator
 - 提示词少量参考了 https://github.com/kapitalismho/PuriPuly-heart
-- 本地ASR代码来自 https://github.com/TheDeathDragon/LiveTranslate
-- ONNX版Sensevoice来自 https://github.com/lovemefan/SenseVoice-python
+- 还未进入稳定版的本地语音识别：
+    - 本地ASR代码来自 https://github.com/TheDeathDragon/LiveTranslate
+    - ONNX版Sensevoice来自 https://github.com/lovemefan/SenseVoice-python
+    - 用到的其他东西：
+        - https://github.com/snakers4/silero-vad
+        - https://github.com/FunAudioLLM/SenseVoice
+        - https://github.com/ggml-org/llama.cpp
+        - https://github.com/microsoft/onnxruntime
+        - https://github.com/HaujetZhao/Qwen3-ASR-GGUF
 
 ## 许可证
+
 本项目的代码，除下述例外以外，遵循 MIT 许可证，详见 [LICENSE.md](LICENSE.md) 文件
 - /docs 文件夹下的内容来自各 API 提供商的文档，是啥授权我也不知道
