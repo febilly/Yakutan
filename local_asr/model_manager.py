@@ -122,11 +122,6 @@ _QWEN3_VENDOR_URLS = {
 def apply_cache_env() -> None:
     resolved = str(MODELS_DIR.resolve())
     os.environ["HF_HOME"] = os.path.join(resolved, "huggingface")
-    bundle_torch = PACKAGE_DIR / "models" / "torch"
-    if getattr(sys, "frozen", False) and bundle_torch.is_dir():
-        os.environ["TORCH_HOME"] = str(bundle_torch.resolve())
-    else:
-        os.environ["TORCH_HOME"] = os.path.join(resolved, "torch")
 
 
 def _silero_onnx_bundle_path() -> Path:
