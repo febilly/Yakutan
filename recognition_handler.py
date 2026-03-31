@@ -30,7 +30,7 @@ from translation_pipeline import (
 
 logger = logging.getLogger(__name__)
 
-PAUSE_RESUME_BACKENDS = {'qwen', 'soniox', 'doubao_file'}
+PAUSE_RESUME_BACKENDS = {'qwen', 'soniox', 'doubao_file', 'local'}
 
 
 def is_doubao_file_backend(backend: str) -> bool:

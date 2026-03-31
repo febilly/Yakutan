@@ -2,6 +2,7 @@
 配置文件 - 统一管理所有配置项
 """
 import os
+import time
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,11 +23,11 @@ def _get_env_bool(name: str, default: bool = False) -> bool:
 USE_INTERNATIONAL_ENDPOINT = False
 
 # 首选的语音识别后端
-PREFERRED_ASR_BACKEND = 'qwen'  # 可选: 'dashscope', 'qwen', 'soniox', 'doubao_file'
+PREFERRED_ASR_BACKEND = 'qwen'  # 可选: 'dashscope', 'qwen', 'soniox', 'doubao_file', 'local'
                                 # 注意: 'dashscope' (Fun-ASR) 仅支持中国大陆版
 
 # 有效的后端列表
-VALID_ASR_BACKENDS = {'dashscope', 'qwen', 'soniox', 'doubao_file'}
+VALID_ASR_BACKENDS = {'dashscope', 'qwen', 'soniox', 'doubao_file', 'local'}
 
 # ============================================================================
 # 语音识别模型配置
@@ -69,6 +70,35 @@ DOUBAO_ASR_TIMEOUT_SECONDS = 60
 DOUBAO_ASR_MAX_BUFFER_SECONDS = 60
 
 # ============================================================================
+# 本地语音识别配置（默认值沿用 LiveTranslate）
+# ============================================================================
+
+# 本地 ASR 引擎
+# 可选: 'sensevoice', 'qwen3-asr'（已移除 Fun-ASR-Nano）
+# sensevoice：INT8 ONNX，固定 CPU（约 1.5–2.5GB 内存；发布版可内置模型）
+# qwen3-asr：固定尝试 GPU（ONNX DirectML + Vulkan），约需 1.6GB 显存
+LOCAL_ASR_ENGINE = 'sensevoice'
+_VALID_LOCAL_ASR_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
+if LOCAL_ASR_ENGINE not in _VALID_LOCAL_ASR_ENGINES:
+    LOCAL_ASR_ENGINE = 'sensevoice'
+
+# 本地 ASR 语言提示
+LOCAL_ASR_LANGUAGE = 'auto'
+
+# 本地 VAD 配置（默认值沿用 LiveTranslate VADProcessor.__init__）
+LOCAL_VAD_MODE = 'silero'  # 可选: 'silero', 'energy', 'disabled'
+LOCAL_VAD_THRESHOLD = 0.50
+LOCAL_VAD_MIN_SPEECH_DURATION = 1.0
+# 单段口语送入 VAD 的最长时长（秒）；超过后对本段仅送入静音块直至 VAD 静音或闭麦结束本段（不按时长强制切句）
+LOCAL_VAD_MAX_SPEECH_DURATION = 30.0
+LOCAL_VAD_SILENCE_MODE = 'auto'  # 可选: 'auto', 'fixed'
+LOCAL_VAD_SILENCE_DURATION = 0.8
+
+# 本地增量识别（中间结果）
+LOCAL_INCREMENTAL_ASR = True
+LOCAL_INTERIM_INTERVAL = 2.0
+
+# ============================================================================
 # 音频参数配置
 # ============================================================================
 
@@ -97,6 +127,18 @@ TARGET_LANGUAGE = 'ja'  # 翻译目标语言（'zh-CN'=简体中文, 'en'=英文
 SECONDARY_TARGET_LANGUAGE = None  # 第二输出语言（可选，启用后将并行输出两种译文）
 FALLBACK_LANGUAGE = 'en'  # 备用翻译语言（当源语言和目标语言相同时使用）
                            # 设置为 None（非字符串）则禁用备用语言功能
+
+# 后端本次启动的时刻（毫秒），整个进程生命周期内固定不变
+BACKEND_BOOT_MS = int(time.time() * 1000)
+
+# 配置最后一次被成功应用的时刻（毫秒），每次 POST /api/config 或 /api/target-language 成功后刷新
+CONFIG_APPLIED_AT_MS = BACKEND_BOOT_MS
+
+
+def bump_config_applied_at_ms() -> int:
+    global CONFIG_APPLIED_AT_MS
+    CONFIG_APPLIED_AT_MS = int(time.time() * 1000)
+    return CONFIG_APPLIED_AT_MS
 
 # ============================================================================
 # 翻译 API 配置

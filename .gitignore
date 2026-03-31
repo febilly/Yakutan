@@ -29,6 +29,10 @@ dist/
 logs/
 debug_audio/
 
-# 本地ASR相关文件
+# 本地ASR：模型缓存不入库；vendor 下 Python 源码纳入版本控制，原生 DLL/SO 不入库
 .lt_sparse/
-local_asr/
+local_asr/models/
+local_asr/vendor/**/__pycache__/
+local_asr/vendor/**/*.dll
+local_asr/vendor/**/*.so
+local_asr/vendor/qwen_asr_gguf/inference_old/

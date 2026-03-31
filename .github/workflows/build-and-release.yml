@@ -12,7 +12,19 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: standard
+            spec_file: run_ui.spec
+            exe_base: Yakutan
+            install_local_asr: false
+          - variant: local-asr
+            spec_file: run_ui_local_asr.spec
+            exe_base: Yakutan-LocalASR
+            install_local_asr: true
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -26,30 +38,40 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        if ("${{ matrix.install_local_asr }}" -eq "true") {
+          pip install -r requirements-local-asr.txt
+        }
         pip install pyinstaller
+    
+    - name: Prefetch Silero and Qwen vendor glue (no SenseVoice / Qwen weights in app zip)
+      if: matrix.variant == 'local-asr'
+      run: |
+        python -c "from local_asr.model_manager import apply_cache_env, download_silero, ensure_vendor_sources; apply_cache_env(); download_silero(); ensure_vendor_sources('qwen3-asr')"
     
     - name: Build executable with PyInstaller
       run: |
-        pyinstaller --clean --noconfirm run_ui.spec
+        pyinstaller --clean --noconfirm "${{ matrix.spec_file }}"
     
-    - name: Get commit info
+    - name: Get commit info and package artifacts
       id: commit_info
       run: |
         $commitSha = "${{ github.sha }}".Substring(0, 7)
         $commitMsg = git log -1 --pretty=%B
         $commitDate = git log -1 --date=format:%Y%m%d-%H%M%S --pretty=%cd
-        $exeName = "Yakutan-$commitDate.exe"
-        Rename-Item -Path ./dist/Yakutan.exe -NewName $exeName
-        $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-        $tag = "v$timestamp-$commitSha"
+        $tag = "v$commitDate-$commitSha"
         echo "sha=$commitSha" >> $env:GITHUB_OUTPUT
         echo "message=$commitMsg" >> $env:GITHUB_OUTPUT
         echo "commit_date=$commitDate" >> $env:GITHUB_OUTPUT
-        echo "exe_name=$exeName" >> $env:GITHUB_OUTPUT
-        echo "timestamp=$timestamp" >> $env:GITHUB_OUTPUT
         echo "tag=$tag" >> $env:GITHUB_OUTPUT
+        $base = "${{ matrix.exe_base }}"
+        $exeName = "$base-$commitDate.exe"
+        $src = Join-Path "./dist" "$base.exe"
+        if (-not (Test-Path $src)) { throw "PyInstaller 单文件输出不存在: $src" }
+        Rename-Item -Path $src -NewName $exeName
+        echo "exe_name=$exeName" >> $env:GITHUB_OUTPUT
     
-    - name: Create Release
+    - name: Create Release (standard)
+      if: matrix.variant == 'standard'
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.commit_info.outputs.tag }}
@@ -60,16 +82,38 @@ jobs:
           **提交信息**: ${{ steps.commit_info.outputs.message }}
           **提交日期**: ${{ steps.commit_info.outputs.commit_date }}
           **提交 SHA**: ${{ steps.commit_info.outputs.sha }}
-          **构建时间**: ${{ steps.commit_info.outputs.timestamp }}
+          
+          **构建产物**（与本 tag 并行 job 合计）:
+          - `Yakutan-*.exe`: 标准版单文件
+          - `Yakutan-LocalASR-*.exe`: 本地识别版单文件；内置 Silero VAD 与 Qwen 推理胶水代码。**SenseVoice / Qwen3 离线资源**：**Pack Local ASR model bundles** 工作流单独发布
+          
+          **离线语音识别资源**：可从 [https://github.com/febilly/Yakutan/releases/tag/untagged-1a0522a8c7f4c560a615](https://github.com/febilly/Yakutan/releases/tag/untagged-1a0522a8c7f4c560a615) 下载，也可以在 **WebUI** 中下载。
         files: ./dist/${{ steps.commit_info.outputs.exe_name }}
-        draft: false
+        draft: true
         prerelease: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
+    - name: Create Release (local-asr)
+      if: matrix.variant == 'local-asr'
+      uses: softprops/action-gh-release@v1
       with:
-        name: Yakutan
-        path: ./dist/${{ steps.commit_info.outputs.exe_name }}
-        retention-days: 30
+        tag_name: ${{ steps.commit_info.outputs.tag }}
+        name: Yakutan ${{ steps.commit_info.outputs.tag }}
+        body: |
+          ## 自动构建版本
+          
+          **提交信息**: ${{ steps.commit_info.outputs.message }}
+          **提交日期**: ${{ steps.commit_info.outputs.commit_date }}
+          **提交 SHA**: ${{ steps.commit_info.outputs.sha }}
+          
+          **构建产物**（与本 tag 并行 job 合计）:
+          - `Yakutan-*.exe`: 标准版单文件
+          - `Yakutan-LocalASR-*.exe`: 本地识别版单文件；内置 Silero VAD 与 Qwen 推理胶水代码。**SenseVoice / Qwen3 权重与 Qwen Vulkan 运行时**：运行 **Pack Local ASR model bundles** 工作流，将生成的 zip 内 **`local_asr_models`** 解压到与 **`Yakutan-LocalASR-*.exe` 同级**
+          
+          **离线语音识别资源**：可从 [https://github.com/febilly/Yakutan/releases/tag/untagged-1a0522a8c7f4c560a615](https://github.com/febilly/Yakutan/releases/tag/untagged-1a0522a8c7f4c560a615) 下载，也可以在 **WebUI** 中下载。
+        files: ./dist/${{ steps.commit_info.outputs.exe_name }}
+        draft: true
+        prerelease: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -259,6 +259,8 @@ python main.py
 - 本项目部分基于阿里给的 Fun-ASR 示例代码
 - 快速的 Google Translate API 来自 https://github.com/SakiRinn/LiveCaptions-Translator
 - 提示词少量参考了 https://github.com/kapitalismho/PuriPuly-heart
+- 本地ASR代码来自 https://github.com/TheDeathDragon/LiveTranslate
+- ONNX版Sensevoice来自 https://github.com/lovemefan/SenseVoice-python
 
 ## 许可证
 本项目的代码，除下述例外以外，遵循 MIT 许可证，详见 [LICENSE.md](LICENSE.md) 文件

@@ -9,6 +9,58 @@ let lastMicDefaultIdentity = null;
 
 // 配置键名
 const CONFIG_STORAGE_KEY = 'vrchat_translator_config';
+
+// ===================== 大面板 ↔ 后端 同步基础设施 =====================
+//
+// 规则：
+//   1. 后端在内存里维护 backend_boot_ms（进程启动时固定）和 config_applied_at_ms（每次配置变更刷新）
+//   2. 大面板在 localStorage 维护 touch_main_ms（用户在大面板做了任何更改就写 Date.now()）
+//      以及 last_seen_boot_ms（上次见到的后端 boot 时刻）
+//   3. 小面板不维护时间戳；只推后端、拉后端
+//
+// 打开大面板时（reconcile）：
+//   - boot_ms ≠ last_seen_boot_ms → 后端重启过 → 大面板本地配置推到后端
+//   - boot_ms = last_seen_boot_ms → 同一运行期 → config_applied_at_ms vs touch_main_ms 谁大听谁
+//
+// 运行中轮询（updateStatus）：
+//   - config_applied_at_ms > touch_main_ms → 拉服务器的（小面板改了语言等）
+
+const CONFIG_TOUCH_MAIN_MS_KEY = 'vrchat_translator_touch_main_ms';
+const LAST_SEEN_BOOT_MS_KEY = 'vrchat_translator_last_seen_boot_ms';
+
+function _readLocalStorageInt(key) {
+    const v = parseInt(localStorage.getItem(key) || '0', 10);
+    return Number.isFinite(v) ? v : 0;
+}
+
+function getMainConfigTouchMs() {
+    return _readLocalStorageInt(CONFIG_TOUCH_MAIN_MS_KEY);
+}
+
+function setMainConfigTouchMs(ms) {
+    const n = Math.floor(Number(ms));
+    if (Number.isFinite(n) && n > 0) {
+        localStorage.setItem(CONFIG_TOUCH_MAIN_MS_KEY, String(n));
+    }
+}
+
+function getLastSeenBootMs() {
+    return _readLocalStorageInt(LAST_SEEN_BOOT_MS_KEY);
+}
+
+function setLastSeenBootMs(ms) {
+    const n = Math.floor(Number(ms));
+    if (Number.isFinite(n) && n > 0) {
+        localStorage.setItem(LAST_SEEN_BOOT_MS_KEY, String(n));
+    }
+}
+
+function touchMainPanelUserEditedAt() {
+    setMainConfigTouchMs(Date.now());
+}
+
+// ===================== 同步基础设施结束 =====================
+
 const PANEL_FLOATING_MODE_STORAGE_KEY = 'panel_floating_mode';
 const LLM_TEMPLATE_KEY_STORAGE_PREFIX = 'llm_template_key_';
 const LLM_TEMPLATE_MODEL_STORAGE_PREFIX = 'llm_template_model_';
@@ -23,6 +75,235 @@ let envStatus = {
         api_key_set: false,
     },
 };
+
+let featureFlags = {
+    local_asr_build_enabled: false,
+    local_asr_ui_enabled: false,
+    engines: {},
+};
+
+let localAsrStatus = {
+    running: false,
+    engine: null,
+    status: '',
+    error: null,
+};
+
+function updateLocalAsrEngineHint() {
+    const el = document.getElementById('local-asr-engine-hint');
+    const engine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
+    if (!el) return;
+    if (!isLocalAsrUiEnabled()) {
+        el.textContent = '';
+        return;
+    }
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const key =
+        engine === 'qwen3-asr' ? 'localAsr.engine.qwen3Hint' : 'localAsr.engine.sensevoiceHint';
+    el.textContent = t(key);
+}
+
+function isLocalAsrUiEnabled() {
+    return !!featureFlags.local_asr_ui_enabled;
+}
+
+function getLocalAsrConfigFromForm() {
+    return {
+        engine: document.getElementById('local-asr-engine')?.value || 'sensevoice',
+        language: (document.getElementById('local-asr-language')?.value || '').trim() || 'auto',
+        vad_mode: document.getElementById('local-vad-mode')?.value || 'silero',
+        vad_threshold: parseFloat(document.getElementById('local-vad-threshold')?.value || '0.5'),
+        min_speech_duration: parseFloat(document.getElementById('local-min-speech-duration')?.value || '1'),
+        max_speech_duration: parseFloat(document.getElementById('local-max-speech-duration')?.value || '30'),
+        silence_mode: document.getElementById('local-silence-mode')?.value || 'auto',
+        silence_duration: parseFloat(document.getElementById('local-silence-duration')?.value || '0.8'),
+        incremental_asr: document.getElementById('local-incremental-asr')?.checked ?? true,
+        interim_interval: parseFloat(document.getElementById('local-interim-interval')?.value || '2'),
+    };
+}
+
+function applyLocalAsrConfig(config) {
+    if (!config) return;
+    if (document.getElementById('local-asr-engine')) {
+        document.getElementById('local-asr-engine').value = config.engine || 'sensevoice';
+    }
+    if (document.getElementById('local-asr-language')) {
+        document.getElementById('local-asr-language').value = config.language || 'auto';
+    }
+    if (document.getElementById('local-vad-mode')) {
+        document.getElementById('local-vad-mode').value = config.vad_mode || 'silero';
+    }
+    if (document.getElementById('local-vad-threshold')) {
+        document.getElementById('local-vad-threshold').value = config.vad_threshold ?? 0.5;
+    }
+    if (document.getElementById('local-min-speech-duration')) {
+        document.getElementById('local-min-speech-duration').value = config.min_speech_duration ?? 1.0;
+    }
+    if (document.getElementById('local-max-speech-duration')) {
+        document.getElementById('local-max-speech-duration').value = config.max_speech_duration ?? 30.0;
+    }
+    if (document.getElementById('local-silence-mode')) {
+        document.getElementById('local-silence-mode').value = config.silence_mode || 'auto';
+    }
+    if (document.getElementById('local-silence-duration')) {
+        document.getElementById('local-silence-duration').value = config.silence_duration ?? 0.8;
+    }
+    if (document.getElementById('local-incremental-asr')) {
+        document.getElementById('local-incremental-asr').checked = config.incremental_asr ?? true;
+    }
+    if (document.getElementById('local-interim-interval')) {
+        document.getElementById('local-interim-interval').value = config.interim_interval ?? 2.0;
+    }
+    updateLocalAsrEngineHint();
+}
+
+function ensureLocalAsrBackendOption() {
+    const select = document.getElementById('asr-backend');
+    if (!select) return;
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    let option = select.querySelector('option[value="local"]');
+    if (isLocalAsrUiEnabled()) {
+        if (!option) {
+            option = document.createElement('option');
+            option.value = 'local';
+            option.setAttribute('data-i18n', 'asr.local');
+            select.appendChild(option);
+        }
+        option.textContent = t('asr.local');
+    } else if (option) {
+        if (select.value === 'local') {
+            select.value = 'qwen';
+        }
+        option.remove();
+    }
+}
+
+function sanitizeAsrBackendValue(value) {
+    const normalized = value || 'qwen';
+    if (normalized === 'local' && !isLocalAsrUiEnabled()) {
+        return 'qwen';
+    }
+    return normalized;
+}
+
+function renderLocalAsrStatus(payload) {
+    const box = document.getElementById('local-asr-status');
+    const button = document.getElementById('local-asr-download-btn');
+    if (!box || !button) return;
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const engine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
+    const engineStatus = payload?.engines?.[engine];
+    localAsrStatus = payload?.download || localAsrStatus;
+
+    if (!payload || !engineStatus) {
+        box.textContent = t('hint.localAsrNotChecked');
+        button.disabled = false;
+        return;
+    }
+
+    if (localAsrStatus.running) {
+        box.textContent = `${t('status.downloading')}: ${localAsrStatus.status || ''}`;
+        button.disabled = true;
+        return;
+    }
+
+    if (engineStatus.ready) {
+        box.textContent = t('status.localAsrReady', { engine: engineStatus.display_name || engine });
+    } else {
+        const issues = [];
+        if (Array.isArray(engineStatus.runtime_issues) && engineStatus.runtime_issues.length) {
+            issues.push(`${t('label.dependencies')}: ${engineStatus.runtime_issues.join(', ')}`);
+        }
+        if (engineStatus.error) {
+            issues.push(engineStatus.error);
+        }
+        if (Array.isArray(engineStatus.missing) && engineStatus.missing.length) {
+            issues.push(t('hint.localAsrNeedsDownload'));
+        }
+        box.textContent = issues.length
+            ? issues.join(' | ')
+            : t('hint.localAsrNeedsDownload');
+        button.disabled = false;
+    }
+}
+
+async function refreshLocalAsrStatus() {
+    if (!isLocalAsrUiEnabled()) return;
+    try {
+        const response = await fetch(`${API_BASE}/local-asr/status`);
+        if (!response.ok) return;
+        const payload = await response.json();
+        renderLocalAsrStatus(payload);
+    } catch (error) {
+        console.warn('获取本地 ASR 状态失败:', error);
+    }
+}
+
+async function downloadLocalAsrModels() {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    if (!isLocalAsrUiEnabled()) return;
+    const localConfig = getLocalAsrConfigFromForm();
+    const button = document.getElementById('local-asr-download-btn');
+    if (button) {
+        button.disabled = true;
+    }
+    try {
+        const response = await fetch(`${API_BASE}/local-asr/download`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                engine: localConfig.engine,
+            }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'download failed');
+        }
+        showMessage(t('msg.localAsrDownloadStarted'), 'success');
+        await refreshLocalAsrStatus();
+    } catch (error) {
+        console.error('下载本地 ASR 失败:', error);
+        showMessage(t('msg.localAsrDownloadFailed') + ': ' + error.message, 'error');
+        if (button) {
+            button.disabled = false;
+        }
+    }
+}
+
+function updateLocalAsrUiVisibility() {
+    const card = document.getElementById('local-asr-card');
+    if (!card) return;
+    ensureLocalAsrBackendOption();
+    if (isLocalAsrUiEnabled()) {
+        card.style.display = 'block';
+        updateLocalAsrEngineHint();
+        void refreshLocalAsrStatus();
+    } else {
+        card.style.display = 'none';
+    }
+}
+
+function onLocalAsrSettingChange(changedElement = null) {
+    if (!isLocalAsrUiEnabled()) return;
+    if (changedElement && changedElement.id === 'local-asr-engine') {
+        updateLocalAsrEngineHint();
+        void refreshLocalAsrStatus();
+    }
+    onSettingChange(changedElement);
+}
+
+async function loadServerFeatures() {
+    try {
+        const response = await fetch(`${API_BASE}/features`);
+        if (!response.ok) return;
+        featureFlags = await response.json();
+        updateLocalAsrUiVisibility();
+    } catch (error) {
+        console.warn('加载功能开关失败:', error);
+    }
+}
 
 const LANGUAGE_OPTIONS = [
     { code: 'zh-CN', labelKey: 'lang.zhCN' },
@@ -1051,13 +1332,14 @@ function getQuickLanguageSettingsForPanel() {
     };
 }
 // 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', async function () {
     // 先初始化 i18n 系统
     if (window.i18n) {
         window.i18n.initI18n();
     }
 
     setupLanguageComboboxes();
+    await loadServerFeatures();
 
     document.addEventListener('click', function (event) {
         if (!event.target.closest('.language-combo')) {
@@ -1070,7 +1352,14 @@ document.addEventListener('DOMContentLoaded', function () {
         targetLangInput.addEventListener('input', updateFuriganaVisibility);
     }
 
+    const hadSavedConfig = !!localStorage.getItem(CONFIG_STORAGE_KEY);
     loadConfigFromLocalStorage();
+    if (hadSavedConfig) {
+        await reconcileMainConfigWithServerAtStartup();
+    } else {
+        await loadConfigFromServer();
+    }
+
     loadPanelFloatingModeSetting();
     loadQuickLanguageSettings();
     loadAPIKeys();
@@ -1084,6 +1373,11 @@ document.addEventListener('DOMContentLoaded', function () {
     updateStatus();
     // 每2秒更新一次状态
     setInterval(updateStatus, 2000);
+    setInterval(() => {
+        if (isLocalAsrUiEnabled()) {
+            void refreshLocalAsrStatus();
+        }
+    }, 3000);
 
     // 显示配置保存提示
     showConfigStorageInfo();
@@ -1097,6 +1391,8 @@ document.addEventListener('DOMContentLoaded', function () {
 document.addEventListener('i18n:languageChanged', function () {
     const useInternational = document.getElementById('use-international-endpoint')?.checked ?? false;
     updateAsrOptionsForInternational(useInternational);
+    updateLocalAsrEngineHint();
+    updateLocalAsrUiVisibility();
     renderLanguageComboMenus();
     refreshLanguageComboClearLabels();
     refreshMicDevices(true);
@@ -1480,7 +1776,7 @@ function loadConfigFromLocalStorage() {
             }
 
             if (config.asr) {
-                document.getElementById('asr-backend').value = config.asr.preferred_backend || 'qwen';
+                document.getElementById('asr-backend').value = sanitizeAsrBackendValue(config.asr.preferred_backend || 'qwen');
                 document.getElementById('enable-hot-words').checked = config.asr.enable_hot_words ?? true;
                 document.getElementById('enable-vad').checked = config.asr.enable_vad ?? true;
                 document.getElementById('vad-threshold').value = config.asr.vad_threshold || 0.2;
@@ -1492,6 +1788,10 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('use-international-endpoint').checked = useInternational;
                 localStorage.setItem('use_international_endpoint', useInternational.toString());
                 updateAsrOptionsForInternational(useInternational);
+            }
+
+            if (isLocalAsrUiEnabled()) {
+                applyLocalAsrConfig(config.local_asr || {});
             }
 
             if (config.language_detector) {
@@ -1507,9 +1807,8 @@ function loadConfigFromLocalStorage() {
 
             console.log('✓ 已从浏览器加载配置');
         } else {
-            // 如果没有保存的配置，使用前端默认值
+            // 如果没有保存的配置，使用前端默认值（由页面初始化处再拉取服务器并 / 或对账）
             loadDefaultConfig();
-            loadConfigFromServer();
         }
 
         // 根据翻译开关显示/隐藏翻译选项
@@ -1523,6 +1822,7 @@ function loadConfigFromLocalStorage() {
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
         applyStoredExtraBodyForActiveLLMTemplate();
+        updateLocalAsrUiVisibility();
 
     } catch (error) {
         console.error('加载本地配置失败:', error);
@@ -1537,6 +1837,7 @@ function loadConfigFromLocalStorage() {
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
         applyStoredExtraBodyForActiveLLMTemplate();
+        updateLocalAsrUiVisibility();
     }
 }
 
@@ -1575,13 +1876,28 @@ function loadDefaultConfig() {
     if (micSelect) micSelect.value = '';
 
     // ASR 配置
-    document.getElementById('asr-backend').value = 'qwen';  // 可选: 'qwen', 'dashscope'
+    document.getElementById('asr-backend').value = 'qwen';
     document.getElementById('enable-hot-words').checked = true;
     document.getElementById('enable-vad').checked = true;
     document.getElementById('vad-threshold').value = 0.2;
     document.getElementById('vad-silence-duration').value = 800;
     document.getElementById('keepalive-interval').value = 30;
     document.getElementById('use-international-endpoint').checked = false;
+
+    if (isLocalAsrUiEnabled()) {
+        applyLocalAsrConfig({
+            engine: 'sensevoice',
+            language: 'auto',
+            vad_mode: 'silero',
+            vad_threshold: 0.50,
+            min_speech_duration: 1.0,
+            max_speech_duration: 30.0,
+            silence_mode: 'auto',
+            silence_duration: 0.8,
+            incremental_asr: true,
+            interim_interval: 2.0,
+        });
+    }
 
     // 语言检测器
     document.getElementById('language-detector').value = 'cjke';
@@ -1599,75 +1915,152 @@ function loadDefaultConfig() {
     syncLLMTemplateKeySourceHintFromInputs();
     syncAllLanguageComboClearButtons();
     updateDashscopeKeyFieldState();
+    updateLocalAsrUiVisibility();
 }
 
-// 从服务器加载配置（仅在本地无配置时使用）
+function refreshUiAfterServerConfigApply() {
+    updateOpenRouterStreamingUi();
+    toggleTranslationOptions();
+    updateFuriganaVisibility();
+    updateLLMSettingsVisibility();
+    updateSensitiveWordsHint();
+    applyAsrBackendLocks();
+    syncLLMTemplateKeySourceHintFromInputs();
+    syncAllLanguageComboClearButtons();
+    updateDashscopeKeyFieldState();
+    applyStoredExtraBodyForActiveLLMTemplate();
+    updateLocalAsrUiVisibility();
+    renderLanguageComboMenus();
+}
+
+/** 将 GET /api/config 的 JSON 填回表单（不写入 localStorage、不改 touch） */
+function applyServerConfigPayload(config) {
+    if (config.features) {
+        featureFlags = config.features;
+    }
+    updateLocalAsrUiVisibility();
+
+    document.getElementById('enable-translation').checked = config.translation.enable_translation;
+    document.getElementById('target-language').value = config.translation.target_language;
+    document.getElementById('secondary-target-language').value = config.translation.secondary_target_language || '';
+    document.getElementById('fallback-language').value = config.translation.fallback_language || '';
+    const serverApiType = config.translation.api_type;
+    if (serverApiType === 'openrouter_streaming') {
+        document.getElementById('translation-api-type').value = 'openrouter';
+        document.getElementById('openrouter-streaming-mode').checked = true;
+        document.getElementById('openrouter-streaming-mode').disabled = false;
+    } else if (serverApiType === 'openrouter_streaming_deepl_hybrid') {
+        document.getElementById('translation-api-type').value = 'openrouter_streaming_deepl_hybrid';
+    } else {
+        document.getElementById('translation-api-type').value = serverApiType;
+        document.getElementById('openrouter-streaming-mode').checked = false;
+        document.getElementById('openrouter-streaming-mode').disabled = false;
+    }
+    document.getElementById('llm-base-url').value = config.translation.llm_base_url || '';
+    document.getElementById('llm-model').value = config.translation.llm_model || '';
+    document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
+    setLLMParallelFastestModeSelect(
+        resolveLLMParallelFastestModeFromStoredTranslation(config.translation),
+    );
+    document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
+    document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
+    document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
+    document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? true;
+    const showTag = document.getElementById('show-original-and-lang-tag');
+    if (showTag) {
+        showTag.checked = config.translation.show_original_and_lang_tag ?? true;
+    }
+
+    document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control;
+    document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds;
+    const micSelect = document.getElementById('mic-device');
+    if (micSelect && config.mic_control) {
+        const idx = config.mic_control.mic_device_index;
+        micSelect.value = (idx === undefined || idx === null) ? '' : String(idx);
+    }
+
+    document.getElementById('asr-backend').value = sanitizeAsrBackendValue(config.asr.preferred_backend);
+    document.getElementById('enable-hot-words').checked = config.asr.enable_hot_words;
+    document.getElementById('enable-vad').checked = config.asr.enable_vad;
+    document.getElementById('vad-threshold').value = config.asr.vad_threshold;
+    document.getElementById('vad-silence-duration').value = config.asr.vad_silence_duration_ms;
+    document.getElementById('keepalive-interval').value = config.asr.keepalive_interval;
+    const useInternational = config.asr.use_international_endpoint ?? false;
+    document.getElementById('use-international-endpoint').checked = useInternational;
+    localStorage.setItem('use_international_endpoint', useInternational.toString());
+    updateAsrOptionsForInternational(useInternational);
+
+    document.getElementById('language-detector').value = config.language_detector.type;
+    applySourceLanguageInputFromStored(config.translation.source_language);
+    applyAutoLanguageDetectorIfNeeded();
+    document.getElementById('panel-width').value = (config.panel && config.panel.width) || 600;
+    getNormalizedPanelWidth();
+    if (isLocalAsrUiEnabled()) {
+        applyLocalAsrConfig(config.local_asr || {});
+    }
+}
+
+/**
+ * 打开大面板时与后端对账。
+ *
+ * 1. 后端 boot_ms ≠ 本地记录 → 后端重启过 → 把大面板本地配置推到后端（用户上次存的就是最终态）
+ * 2. 同一运行期 → 比较 config_applied_at_ms 与 touch_main_ms，谁大听谁
+ */
+async function reconcileMainConfigWithServerAtStartup() {
+    try {
+        const response = await fetch(`${API_BASE}/config`);
+        if (!response.ok) return;
+        const serverCfg = await response.json();
+
+        const serverBootMs = Number(serverCfg.backend_boot_ms) || 0;
+        const lastSeenBootMs = getLastSeenBootMs();
+        const serverAppliedMs = Number(serverCfg.config_applied_at_ms) || 0;
+        const clientMs = getMainConfigTouchMs();
+
+        if (serverBootMs !== lastSeenBootMs) {
+            // 后端（重新）启动过 → 大面板本地配置推到后端
+            setLastSeenBootMs(serverBootMs);
+            const ok = await saveConfig(true);
+            console.log(ok
+                ? '对账：后端新启动，已将本地配置推送到服务器'
+                : '对账：后端新启动，本地配置推送失败');
+            return;
+        }
+
+        // 同一运行期：谁的时间戳更大，听谁的
+        if (serverAppliedMs > clientMs) {
+            applyServerConfigPayload(serverCfg);
+            saveConfigToLocalStorage();
+            setMainConfigTouchMs(serverAppliedMs);
+            refreshUiAfterServerConfigApply();
+            console.log('对账：服务器配置较新，已拉取到本地');
+        } else if (clientMs > serverAppliedMs) {
+            await saveConfig(true);
+            console.log('对账：本地配置较新，已推送到服务器');
+        }
+        // 相等 → 已同步，无需操作
+    } catch (e) {
+        console.warn('对账失败:', e);
+    }
+}
+
+/**
+ * 首次打开（localStorage 无配置）时从服务器拉取全量配置。
+ */
 async function loadConfigFromServer() {
     try {
         const response = await fetch(`${API_BASE}/config`);
-        const config = await response.json();
-
-        // 填充表单
-        document.getElementById('enable-translation').checked = config.translation.enable_translation;
-        document.getElementById('target-language').value = config.translation.target_language;
-        document.getElementById('secondary-target-language').value = config.translation.secondary_target_language || '';
-        document.getElementById('fallback-language').value = config.translation.fallback_language || '';
-        // 处理 LLM 流式模式的特殊情况
-        const serverApiType = config.translation.api_type;
-        if (serverApiType === 'openrouter_streaming') {
-            document.getElementById('translation-api-type').value = 'openrouter';
-            document.getElementById('openrouter-streaming-mode').checked = true;
-            document.getElementById('openrouter-streaming-mode').disabled = false;
-        } else if (serverApiType === 'openrouter_streaming_deepl_hybrid') {
-            document.getElementById('translation-api-type').value = 'openrouter_streaming_deepl_hybrid';
-        } else {
-            document.getElementById('translation-api-type').value = serverApiType;
-            document.getElementById('openrouter-streaming-mode').checked = false;
-            document.getElementById('openrouter-streaming-mode').disabled = false;
-        }
-        document.getElementById('llm-base-url').value = config.translation.llm_base_url || '';
-        document.getElementById('llm-model').value = config.translation.llm_model || '';
-        document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
-        setLLMParallelFastestModeSelect(
-            resolveLLMParallelFastestModeFromStoredTranslation(config.translation)
-        );
-        document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
-        document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
-        document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
-
-        document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control;
-        document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds;
-
-        document.getElementById('asr-backend').value = config.asr.preferred_backend;
-        document.getElementById('enable-hot-words').checked = config.asr.enable_hot_words;
-        document.getElementById('enable-vad').checked = config.asr.enable_vad;
-        document.getElementById('vad-threshold').value = config.asr.vad_threshold;
-        document.getElementById('vad-silence-duration').value = config.asr.vad_silence_duration_ms;
-        document.getElementById('keepalive-interval').value = config.asr.keepalive_interval;
-
-        document.getElementById('language-detector').value = config.language_detector.type;
-        applySourceLanguageInputFromStored(config.translation.source_language);
-        applyAutoLanguageDetectorIfNeeded();
-        document.getElementById('panel-width').value = (config.panel && config.panel.width) || 600;
-        getNormalizedPanelWidth();
-
-        // 保存到本地
+        const cfg = await response.json();
+        applyServerConfigPayload(cfg);
         saveConfigToLocalStorage();
 
-        // 根据翻译开关显示/隐藏翻译选项
-        updateOpenRouterStreamingUi();
-        toggleTranslationOptions();
-        updateFuriganaVisibility();
-        updateLLMSettingsVisibility();
-        updateSensitiveWordsHint();
-        applyAsrBackendLocks();
-        syncLLMTemplateKeySourceHintFromInputs();
-        syncAllLanguageComboClearButtons();
-        updateDashscopeKeyFieldState();
-        applyStoredExtraBodyForActiveLLMTemplate();
+        const appliedMs = Number(cfg.config_applied_at_ms) || 0;
+        if (appliedMs > 0) setMainConfigTouchMs(appliedMs);
+        const bootMs = Number(cfg.backend_boot_ms) || 0;
+        if (bootMs > 0) setLastSeenBootMs(bootMs);
 
-        console.log('已从服务器加载配置');
-
+        refreshUiAfterServerConfigApply();
+        console.log('已从服务器加载配置（首次打开）');
     } catch (error) {
         console.error('加载服务器配置失败:', error);
     }
@@ -1702,13 +2095,20 @@ function saveConfigToLocalStorage() {
                 enable_furigana: document.getElementById('enable-furigana').checked,
                 enable_pinyin: document.getElementById('enable-pinyin').checked,
                 enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,
+                show_original_and_lang_tag: document.getElementById('show-original-and-lang-tag')
+                    ? document.getElementById('show-original-and-lang-tag').checked
+                    : true,
             },
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
                 mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value),
+                mic_device_index: (() => {
+                    const v = document.getElementById('mic-device') ? document.getElementById('mic-device').value : '';
+                    return v === '' ? null : parseInt(v);
+                })(),
             },
             asr: {
-                preferred_backend: document.getElementById('asr-backend').value,
+                preferred_backend: sanitizeAsrBackendValue(document.getElementById('asr-backend').value),
                 enable_hot_words: document.getElementById('enable-hot-words').checked,
                 enable_vad: document.getElementById('enable-vad').checked,
                 vad_threshold: parseFloat(document.getElementById('vad-threshold').value),
@@ -1721,7 +2121,8 @@ function saveConfigToLocalStorage() {
             },
             panel: {
                 width: getNormalizedPanelWidth(),
-            }
+            },
+            local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
         };
 
         localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
@@ -1810,6 +2211,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 // 当设置改变时自动保存（延迟保存，避免频繁请求）
 function onSettingChange(changedElement = null) {
+    touchMainPanelUserEditedAt();
     applyAsrBackendLocks();
     applyAutoLanguageDetectorIfNeeded();
     updateDashscopeKeyFieldState();
@@ -1899,7 +2301,7 @@ async function saveConfig(autoSave = false) {
                 })(),
             },
             asr: {
-                preferred_backend: document.getElementById('asr-backend').value,
+                preferred_backend: sanitizeAsrBackendValue(document.getElementById('asr-backend').value),
                 enable_hot_words: document.getElementById('enable-hot-words').checked,
                 enable_vad: document.getElementById('enable-vad').checked,
                 vad_threshold: parseFloat(document.getElementById('vad-threshold').value),
@@ -1912,6 +2314,7 @@ async function saveConfig(autoSave = false) {
             panel: {
                 width: getNormalizedPanelWidth(),
             },
+            local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
             api_keys: {
                 llm: document.getElementById('llm-api-key').value.trim(),
             }
@@ -1928,6 +2331,9 @@ async function saveConfig(autoSave = false) {
         const result = await response.json();
 
         if (result.success) {
+            if (result.config_applied_at_ms != null && result.config_applied_at_ms !== undefined) {
+                setMainConfigTouchMs(result.config_applied_at_ms);
+            }
             if (!autoSave) {
                 showMessage(t('msg.configSaved'), 'success');
             }
@@ -1971,14 +2377,17 @@ async function updateStatus() {
             stopBtn.disabled = true;
         }
 
-        // 同步小面板对目标语言的更改到大菜单
-        if (status.target_language) {
+        // 后端时间戳比大面板记录更新 → 有人（小面板等）在别处改了配置 → 拉到大面板
+        const serverTs = Number(status.config_applied_at_ms) || 0;
+        const mainTs = getMainConfigTouchMs();
+        if (serverTs > mainTs && status.target_language) {
             const targetLangInput = document.getElementById('target-language');
             if (targetLangInput && targetLangInput.value !== status.target_language) {
                 targetLangInput.value = status.target_language;
                 renderLanguageComboMenus();
                 saveConfigToLocalStorage();
             }
+            setMainConfigTouchMs(serverTs);
         }
     } catch (error) {
         console.error('更新状态失败:', error);
@@ -2012,6 +2421,37 @@ async function startService() {
         let translationApiType = translationApiSelect.value;
 
         const requiresDashscopeKey = currentConfigRequiresDashscopeKey();
+
+        if (asrBackend === 'local') {
+            if (!isLocalAsrUiEnabled()) {
+                showMessage('❌ ' + t('msg.localAsrDisabledInBuild'), 'error');
+                startBtn.disabled = false;
+                startBtn.textContent = t('btn.startService');
+                return;
+            }
+            const localResponse = await fetch(`${API_BASE}/local-asr/status`);
+            const localPayload = await localResponse.json();
+            const localEngine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
+            const engineStatus = localPayload?.engines?.[localEngine];
+            if (!engineStatus || !engineStatus.ready) {
+                if (!engineStatus) {
+                    showMessage('❌ ' + t('msg.localAsrNotReady'), 'error');
+                } else if (engineStatus.model_cached && Array.isArray(engineStatus.runtime_issues) && engineStatus.runtime_issues.length) {
+                    showMessage(
+                        '❌ ' + t('msg.localAsrNeedPythonDeps', { deps: engineStatus.runtime_issues.join(', ') }),
+                        'error',
+                    );
+                } else if (engineStatus.model_cached === false) {
+                    showMessage('❌ ' + t('msg.localAsrNotReady'), 'error');
+                } else {
+                    showMessage('❌ ' + t('msg.localAsrNeedSilero'), 'error');
+                }
+                ensureCollapsibleExpanded('local-asr-settings');
+                startBtn.disabled = false;
+                startBtn.textContent = t('btn.startService');
+                return;
+            }
+        }
 
         if (requiresDashscopeKey && !dashscopeKey) {
             showMessage('❌ ' + t('msg.dashscopeRequired'), 'error');

@@ -74,13 +74,17 @@ jobs:
             if (-not (Test-Path (Join-Path $senseSrc $f))) { throw "缺少 SenseVoice 文件: $f" }
           }
           $stageRoot = Join-Path "./dist" "_sensevoice_pack_layout"
-          $dest = Join-Path $stageRoot "local_asr_models/sensevoice-onnx"
+          $bundleRoot = Join-Path $stageRoot "zip_root"
+          $dest = Join-Path $bundleRoot "local_asr_models/sensevoice-onnx"
           New-Item -ItemType Directory -Path $dest -Force | Out-Null
           Copy-Item -Path (Join-Path $senseSrc "*") -Destination $dest -Force
-          $root = Join-Path $stageRoot "local_asr_models"
+          $readmeCn = "请把local_asr_models文件夹放在与主程序exe同级目录下"
+          $readmeEn = "Please place the local_asr_models folder in the same directory as the main executable"
+          New-Item -ItemType File -Path (Join-Path $bundleRoot $readmeCn) -Force | Out-Null
+          New-Item -ItemType File -Path (Join-Path $bundleRoot $readmeEn) -Force | Out-Null
           $out = Join-Path "./dist" "${{ steps.meta.outputs.sense_zip }}"
           New-Item -ItemType Directory -Path "./dist" -Force | Out-Null
-          Compress-Archive -Path $root -DestinationPath $out -Force
+          Compress-Archive -Path (Join-Path $bundleRoot '*') -DestinationPath $out -Force
           Remove-Item -Recurse -Force $stageRoot
 
       - name: Build Qwen3-ASR bundle zip
@@ -101,15 +105,19 @@ jobs:
             if (-not (Test-Path (Join-Path $qwenBinSrc $f))) { throw "缺少 llama Vulkan DLL: $f" }
           }
           $stageRoot = Join-Path "./dist" "_qwen_pack_layout"
-          $qwenDest = Join-Path $stageRoot "local_asr_models/qwen3-asr"
+          $bundleRoot = Join-Path $stageRoot "zip_root"
+          $qwenDest = Join-Path $bundleRoot "local_asr_models/qwen3-asr"
           New-Item -ItemType Directory -Path $qwenDest -Force | Out-Null
           Copy-Item -Path (Join-Path $qwenSrc "*") -Destination $qwenDest -Force
-          $qwenBinDest = Join-Path $stageRoot "local_asr_models/qwen_llama_vulkan_bin"
+          $qwenBinDest = Join-Path $bundleRoot "local_asr_models/qwen_llama_vulkan_bin"
           New-Item -ItemType Directory -Path $qwenBinDest -Force | Out-Null
           Copy-Item -Path (Join-Path $qwenBinSrc "*") -Destination $qwenBinDest -Force
-          $archiveRoot = Join-Path $stageRoot "local_asr_models"
+          $readmeCn = "请把local_asr_models文件夹放在与主程序exe同级目录下"
+          $readmeEn = "Please place the local_asr_models folder in the same directory as the main executable"
+          New-Item -ItemType File -Path (Join-Path $bundleRoot $readmeCn) -Force | Out-Null
+          New-Item -ItemType File -Path (Join-Path $bundleRoot $readmeEn) -Force | Out-Null
           $out = Join-Path "./dist" "${{ steps.meta.outputs.qwen_zip }}"
-          Compress-Archive -Path $archiveRoot -DestinationPath $out -Force
+          Compress-Archive -Path (Join-Path $bundleRoot '*') -DestinationPath $out -Force
           Remove-Item -Recurse -Force $stageRoot
 
       - name: Create or update Release with bundle zips

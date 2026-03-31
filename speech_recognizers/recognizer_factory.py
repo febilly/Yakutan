@@ -10,6 +10,14 @@ import config
 from .base_speech_recognizer import MonoAudioSpeechRecognizer, SpeechRecognitionCallback, SpeechRecognizer
 from .dashscope_speech_recognizer import DashscopeSpeechRecognizer
 from .doubao_file_speech_recognizer import DoubaoFileSpeechRecognizer
+try:
+    from local_asr import is_local_asr_build_enabled
+    from local_asr.model_manager import is_asr_cached as is_local_asr_cached
+    from .local_speech_recognizer import LocalSpeechRecognizer
+except ImportError:  # pragma: no cover
+    LocalSpeechRecognizer = None  # type: ignore[assignment]
+    is_local_asr_build_enabled = lambda: False  # type: ignore[assignment]
+    is_local_asr_cached = lambda *args, **kwargs: False  # type: ignore[assignment]
 
 try:
     from .qwen_speech_recognizer import QwenSpeechRecognizer
@@ -101,7 +109,7 @@ def create_recognizer(
     创建语音识别器实例
     
     Args:
-        backend: 识别后端，'dashscope'、'qwen'、'soniox' 或 'doubao_file'
+        backend: 识别后端，'dashscope'、'qwen'、'soniox'、'doubao_file' 或 'local'
         callback: 识别回调实例
         sample_rate: 音频采样率
         audio_format: 音频格式
@@ -238,6 +246,17 @@ def create_recognizer(
         recognizer = DoubaoFileSpeechRecognizer(callback=callback, **recognition_kwargs)
         return MonoAudioSpeechRecognizer(recognizer, input_channels=input_channels)
     
+    elif backend == 'local':
+        if LocalSpeechRecognizer is None:
+            raise RuntimeError('LocalSpeechRecognizer 不可用，请安装本地 ASR 相关依赖')
+
+        recognizer = LocalSpeechRecognizer(
+            callback=callback,
+            sample_rate=sample_rate,
+            source_language=getattr(config, 'LOCAL_ASR_LANGUAGE', source_language),
+        )
+        return MonoAudioSpeechRecognizer(recognizer, input_channels=input_channels)
+
     else:
         raise ValueError(f'不支持的识别后端: {backend}')
 
@@ -247,7 +266,7 @@ def is_backend_available(backend: str) -> bool:
     检查指定后端是否可用
     
     Args:
-        backend: 后端名称，'dashscope'、'qwen'、'soniox' 或 'doubao_file'
+        backend: 后端名称，'dashscope'、'qwen'、'soniox'、'doubao_file' 或 'local'
     
     Returns:
         bool: True 表示可用，False 表示不可用
@@ -267,6 +286,11 @@ def is_backend_available(backend: str) -> bool:
     elif backend == 'doubao_file':
         api_key, app_id, access_key = _resolve_doubao_credentials()
         return bool(api_key or (app_id and access_key))
+    elif backend == 'local':
+        if LocalSpeechRecognizer is None or not is_local_asr_build_enabled():
+            return False
+        engine = getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice')
+        return bool(is_local_asr_cached(engine))
     else:
         return False
 
@@ -295,7 +319,7 @@ def select_backend(preferred_backend: str, valid_backends: set) -> str:
     else:
         print(f'[ASR] 首选后端 {preferred_backend} 不可用，正在尝试自动回退...')
 
-    for candidate in ('qwen', 'dashscope', 'doubao_file', 'soniox'):
+    for candidate in ('qwen', 'dashscope', 'doubao_file', 'soniox', 'local'):
         if candidate == preferred_backend:
             continue
         if candidate not in valid_backends:
