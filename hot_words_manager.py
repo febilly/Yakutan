@@ -17,7 +17,7 @@ class HotWordsManager:
     
     # ============ 配置常量 ============
     # 要加载的语言列表（对应 hot_words 目录下的文件名）
-    ENABLED_LANGUAGES = ['zh-cn', 'en']  # 例如：['zh-cn', 'en', 'ja']
+    ENABLED_LANGUAGES = ['zh-cn', 'en', 'ja']
     
     # 热词权重（1-5之间，推荐3-4）
     DEFAULT_WEIGHT = 4
