@@ -28,3 +28,7 @@ dist/
 
 logs/
 debug_audio/
+
+# 本地ASR相关文件
+.lt_sparse/
+local_asr/
