@@ -433,25 +433,9 @@
                                 <select id="local-asr-engine" class="form-control" onchange="onLocalAsrSettingChange(this)"
                                     data-restart-required="true">
                                     <option value="sensevoice" data-i18n="localAsr.engine.sensevoice">SenseVoice Small</option>
-                                    <option value="funasr-nano" data-i18n="localAsr.engine.funasrNano">Fun-ASR-Nano</option>
                                     <option value="qwen3-asr" data-i18n="localAsr.engine.qwen3">Qwen3-ASR</option>
                                 </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="local-asr-device" data-i18n="label.localAsrDevice">计算设备</label>
-                                <select id="local-asr-device" class="form-control" onchange="onLocalAsrSettingChange(this)"
-                                    data-restart-required="true">
-                                    <option value="cpu" data-i18n="option.cpu">CPU</option>
-                                    <option value="cuda" data-i18n="option.cuda">CUDA</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="local-asr-hub" data-i18n="label.localAsrHub">模型来源</label>
-                                <select id="local-asr-hub" class="form-control" onchange="onLocalAsrSettingChange(this)"
-                                    data-restart-required="true">
-                                    <option value="ms" data-i18n="option.modelscope">ModelScope</option>
-                                    <option value="hf" data-i18n="option.huggingface">HuggingFace</option>
-                                </select>
+                                <small id="local-asr-engine-hint" class="form-text"></small>
                             </div>
                             <div class="form-group">
                                 <label for="local-asr-language" data-i18n="label.localAsrLanguage">语言提示</label>

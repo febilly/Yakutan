@@ -89,6 +89,20 @@ let localAsrStatus = {
     error: null,
 };
 
+function updateLocalAsrEngineHint() {
+    const el = document.getElementById('local-asr-engine-hint');
+    const engine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
+    if (!el) return;
+    if (!isLocalAsrUiEnabled()) {
+        el.textContent = '';
+        return;
+    }
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const key =
+        engine === 'qwen3-asr' ? 'localAsr.engine.qwen3Hint' : 'localAsr.engine.sensevoiceHint';
+    el.textContent = t(key);
+}
+
 function isLocalAsrUiEnabled() {
     return !!featureFlags.local_asr_ui_enabled;
 }
@@ -96,8 +110,6 @@ function isLocalAsrUiEnabled() {
 function getLocalAsrConfigFromForm() {
     return {
         engine: document.getElementById('local-asr-engine')?.value || 'sensevoice',
-        device: document.getElementById('local-asr-device')?.value || 'cuda',
-        hub: document.getElementById('local-asr-hub')?.value || 'ms',
         language: (document.getElementById('local-asr-language')?.value || '').trim() || 'auto',
         vad_mode: document.getElementById('local-vad-mode')?.value || 'silero',
         vad_threshold: parseFloat(document.getElementById('local-vad-threshold')?.value || '0.5'),
@@ -114,12 +126,6 @@ function applyLocalAsrConfig(config) {
     if (!config) return;
     if (document.getElementById('local-asr-engine')) {
         document.getElementById('local-asr-engine').value = config.engine || 'sensevoice';
-    }
-    if (document.getElementById('local-asr-device')) {
-        document.getElementById('local-asr-device').value = config.device || 'cuda';
-    }
-    if (document.getElementById('local-asr-hub')) {
-        document.getElementById('local-asr-hub').value = config.hub || 'ms';
     }
     if (document.getElementById('local-asr-language')) {
         document.getElementById('local-asr-language').value = config.language || 'auto';
@@ -148,6 +154,7 @@ function applyLocalAsrConfig(config) {
     if (document.getElementById('local-interim-interval')) {
         document.getElementById('local-interim-interval').value = config.interim_interval ?? 2.0;
     }
+    updateLocalAsrEngineHint();
 }
 
 function ensureLocalAsrBackendOption() {
@@ -248,7 +255,6 @@ async function downloadLocalAsrModels() {
             },
             body: JSON.stringify({
                 engine: localConfig.engine,
-                hub: localConfig.hub,
             }),
         });
         const result = await response.json();
@@ -272,6 +278,7 @@ function updateLocalAsrUiVisibility() {
     ensureLocalAsrBackendOption();
     if (isLocalAsrUiEnabled()) {
         card.style.display = 'block';
+        updateLocalAsrEngineHint();
         void refreshLocalAsrStatus();
     } else {
         card.style.display = 'none';
@@ -281,6 +288,7 @@ function updateLocalAsrUiVisibility() {
 function onLocalAsrSettingChange(changedElement = null) {
     if (!isLocalAsrUiEnabled()) return;
     if (changedElement && changedElement.id === 'local-asr-engine') {
+        updateLocalAsrEngineHint();
         void refreshLocalAsrStatus();
     }
     onSettingChange(changedElement);
@@ -1383,6 +1391,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 document.addEventListener('i18n:languageChanged', function () {
     const useInternational = document.getElementById('use-international-endpoint')?.checked ?? false;
     updateAsrOptionsForInternational(useInternational);
+    updateLocalAsrEngineHint();
     updateLocalAsrUiVisibility();
     renderLanguageComboMenus();
     refreshLanguageComboClearLabels();
@@ -1878,8 +1887,6 @@ function loadDefaultConfig() {
     if (isLocalAsrUiEnabled()) {
         applyLocalAsrConfig({
             engine: 'sensevoice',
-            device: 'cuda',
-            hub: 'ms',
             language: 'auto',
             vad_mode: 'silero',
             vad_threshold: 0.50,
@@ -2427,7 +2434,18 @@ async function startService() {
             const localEngine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
             const engineStatus = localPayload?.engines?.[localEngine];
             if (!engineStatus || !engineStatus.ready) {
-                showMessage('❌ ' + t('msg.localAsrNotReady'), 'error');
+                if (!engineStatus) {
+                    showMessage('❌ ' + t('msg.localAsrNotReady'), 'error');
+                } else if (engineStatus.model_cached && Array.isArray(engineStatus.runtime_issues) && engineStatus.runtime_issues.length) {
+                    showMessage(
+                        '❌ ' + t('msg.localAsrNeedPythonDeps', { deps: engineStatus.runtime_issues.join(', ') }),
+                        'error',
+                    );
+                } else if (engineStatus.model_cached === false) {
+                    showMessage('❌ ' + t('msg.localAsrNotReady'), 'error');
+                } else {
+                    showMessage('❌ ' + t('msg.localAsrNeedSilero'), 'error');
+                }
                 ensureCollapsibleExpanded('local-asr-settings');
                 startBtn.disabled = false;
                 startBtn.textContent = t('btn.startService');

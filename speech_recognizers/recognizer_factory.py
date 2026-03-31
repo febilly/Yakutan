@@ -290,8 +290,7 @@ def is_backend_available(backend: str) -> bool:
         if LocalSpeechRecognizer is None or not is_local_asr_build_enabled():
             return False
         engine = getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice')
-        hub = getattr(config, 'LOCAL_ASR_HUB', 'ms')
-        return bool(is_local_asr_cached(engine, hub=hub))
+        return bool(is_local_asr_cached(engine))
     else:
         return False
 

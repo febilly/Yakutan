@@ -29,7 +29,10 @@ dist/
 logs/
 debug_audio/
 
-# 本地ASR：体积大的缓存与 vendor 运行时，不提交；Python 源码纳入版本控制
+# 本地ASR：模型缓存不入库；vendor 下 Python 源码纳入版本控制，原生 DLL/SO 不入库
 .lt_sparse/
 local_asr/models/
-local_asr/vendor/
+local_asr/vendor/**/__pycache__/
+local_asr/vendor/**/*.dll
+local_asr/vendor/**/*.so
+local_asr/vendor/qwen_asr_gguf/inference_old/

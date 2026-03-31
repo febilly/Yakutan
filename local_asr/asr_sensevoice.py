@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 
 import numpy as np
 
-from .model_manager import get_local_model_path
+from .model_manager import SENSEVOICE_ENCODER_ONNX, get_local_model_path
+from .vendor.sensevoice_onnx import SenseVoiceInferenceSession, WavFrontend
 
 logger = logging.getLogger(__name__)
 
@@ -17,75 +19,76 @@ LANG_MAP = {
     "<|yue|>": "yue",
 }
 
-
-def _resolve_device(device: str) -> str:
-    requested = (device or "cpu").strip().lower()
-    if requested == "cpu":
-        return "cpu"
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            return requested
-    except Exception:
-        pass
-    logger.warning("Requested local ASR device '%s' is unavailable, falling back to CPU", device)
-    return "cpu"
+_LANG_IDS = {"auto": 0, "zh": 3, "en": 4, "yue": 7, "ja": 11, "ko": 12, "nospeech": 13}
 
 
 class SenseVoiceEngine:
-    """Speech-to-text using FunASR SenseVoice."""
+    """SenseVoice Small INT8 ONNX on CPU (onnxruntime); pipeline from lovemefan/SenseVoice-python."""
 
-    def __init__(self, model_name: str = "iic/SenseVoiceSmall", device: str = "cuda", hub: str = "ms") -> None:
-        from funasr import AutoModel
-
-        local = get_local_model_path("sensevoice", hub=hub)
-        model = local or model_name
-        resolved_device = _resolve_device(device)
-        self._model = AutoModel(
-            model=model,
-            trust_remote_code=True,
-            device=resolved_device,
-            hub=hub,
-            disable_update=True,
-        )
+    def __init__(self, model_name: str | None = None, *, num_threads: int = 4) -> None:
+        _ = model_name
+        local = get_local_model_path("sensevoice")
+        if not local:
+            raise RuntimeError("SenseVoice ONNX 模型目录未找到，请先下载本地模型或使用内置打包资源")
+        self._model_dir = Path(local)
+        self._num_threads = max(1, int(num_threads))
+        self.device = "cpu"
         self.language: str | None = None
-        self.device = resolved_device
-        logger.info("SenseVoice loaded: %s on %s (hub=%s)", model_name, resolved_device, hub)
+
+        mvn = self._model_dir / "am.mvn"
+        embedding = self._model_dir / "embedding.npy"
+        encoder = self._model_dir / SENSEVOICE_ENCODER_ONNX
+        bpe = self._model_dir / "chn_jpn_yue_eng_ko_spectok.bpe.model"
+        for path in (mvn, embedding, encoder, bpe):
+            if not path.is_file():
+                raise FileNotFoundError(f"SenseVoice ONNX 资源缺失: {path}")
+
+        self._frontend = WavFrontend(str(mvn))
+        self._session: SenseVoiceInferenceSession | None = None
+        self._load_session()
+        logger.info("SenseVoice ONNX (INT8) loaded: %s", self._model_dir)
+
+    def _load_session(self) -> None:
+        embedding = self._model_dir / "embedding.npy"
+        encoder = self._model_dir / SENSEVOICE_ENCODER_ONNX
+        bpe = self._model_dir / "chn_jpn_yue_eng_ko_spectok.bpe.model"
+        self._session = SenseVoiceInferenceSession(
+            str(embedding),
+            str(encoder),
+            str(bpe),
+            device_id=-1,
+            intra_op_num_threads=self._num_threads,
+        )
 
     def set_language(self, language: str) -> None:
         self.language = language if language != "auto" else None
 
     def to_device(self, device: str) -> bool:
-        resolved = _resolve_device(device)
-        try:
-            self._model.model.to(resolved)
-            self.device = resolved
-            return True
-        except Exception:
-            return False
+        _ = device
+        return True
 
     def unload(self) -> None:
-        if hasattr(self, "_model") and self._model is not None:
-            try:
-                self._model.model.to("cpu")
-            except Exception:
-                pass
-            self._model = None
+        self._session = None
+        self._frontend = None
 
     def transcribe(self, audio: np.ndarray) -> dict | None:
-        result = self._model.generate(
-            input=audio,
-            cache={},
-            language=self.language or "auto",
-            use_itn=True,
-            batch_size_s=0,
-            disable_pbar=True,
-        )
-        if not result or not result[0].get("text"):
+        if self._session is None or self._frontend is None:
+            return None
+        waveform = np.asarray(audio, dtype=np.float32)
+        if waveform.ndim > 1:
+            waveform = waveform.mean(axis=1)
+        if waveform.size == 0:
             return None
 
-        raw_text = result[0]["text"]
+        feats = self._frontend.get_features(waveform)
+        lang_key = (self.language or "auto").lower()
+        lang_id = _LANG_IDS.get(lang_key, 0)
+
+        raw_text = self._session(feats[None, ...], language=lang_id, use_itn=True)
+        if not raw_text or not str(raw_text).strip():
+            return None
+
+        raw_text = str(raw_text)
         detected_lang = "auto"
         text = raw_text
         for tag, lang in LANG_MAP.items():
@@ -101,4 +104,3 @@ class SenseVoiceEngine:
             "language": detected_lang,
             "language_name": detected_lang,
         }
-

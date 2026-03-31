@@ -5,7 +5,12 @@ import sys
 
 import numpy as np
 
-from .model_manager import MODELS_DIR, ensure_vendor_sources, get_local_model_path
+from .model_manager import (
+    MODELS_DIR,
+    ensure_vendor_sources,
+    get_local_model_path,
+    prepare_qwen_llama_runtime_env,
+)
 
 logger = logging.getLogger(__name__)
 QWEN_SAMPLE_RATE = 16000
@@ -48,6 +53,7 @@ class Qwen3ASREngine:
     """Speech-to-text using Qwen3-ASR (ONNX + GGUF)."""
 
     def __init__(self, model_dir: str | None = None, use_dml: bool = True, chunk_size: float = 30.0) -> None:
+        prepare_qwen_llama_runtime_env()
         vendor_dir = ensure_vendor_sources("qwen3-asr")
         if vendor_dir is None:
             raise RuntimeError("Qwen3-ASR vendor sources are unavailable")

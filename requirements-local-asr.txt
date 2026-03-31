@@ -3,28 +3,12 @@
 #   pip install -r requirements.txt
 #   pip install -r requirements-local-asr.txt
 
---index-url https://pypi.org/simple
---extra-index-url https://download.pytorch.org/whl/cpu
-
-torch
-torchaudio
-PyYAML>=6.0
-editdistance-s>=1.0.0
-omegaconf>=2.3.0
-kaldiio>=2.18.0
-torch-complex>=0.4.0
-soundfile>=0.12.0
-librosa>=0.10.0
-jaconv>=0.3.0
-jamo>=0.4.1
-hydra-core>=1.3.0
-six>=1.16.0
+numpy>=1.24.0
+kaldi_native_fbank
+protobuf>=3.19.6
 sentencepiece>=0.2.0
-tiktoken>=0.7.0
-transformers>=4.40.0
-modelscope>=1.20.0
+soundfile>=0.12.0
 huggingface_hub>=0.20.0
 gguf>=0.18.0
 onnxruntime-directml>=1.19.0
 pydub>=0.25.1
-funasr

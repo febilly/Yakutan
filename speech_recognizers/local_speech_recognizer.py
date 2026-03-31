@@ -10,7 +10,8 @@ from typing import Optional
 import numpy as np
 
 import config
-from local_asr.model_manager import is_asr_cached
+from local_asr import get_engine_runtime_issues
+from local_asr.model_manager import is_asr_cached, is_asr_models_ready, is_silero_cached
 from local_asr.vad_processor import VADProcessor
 
 from .base_speech_recognizer import RecognitionEvent, SpeechRecognitionCallback, SpeechRecognizer
@@ -35,8 +36,6 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         self._sample_rate = sample_rate
         self._source_language = source_language
         self._engine_name = getattr(config, "LOCAL_ASR_ENGINE", "sensevoice")
-        self._hub = getattr(config, "LOCAL_ASR_HUB", "ms")
-        self._device = getattr(config, "LOCAL_ASR_DEVICE", "cuda")
         self._audio_queue: queue.Queue[bytes] = queue.Queue(maxsize=128)
         self._worker: threading.Thread | None = None
         self._asr_executor: ThreadPoolExecutor | None = None
@@ -80,21 +79,30 @@ class LocalSpeechRecognizer(SpeechRecognizer):
     def _ensure_engine(self):
         if self._engine is not None:
             return self._engine
-        if not is_asr_cached(self._engine_name, hub=self._hub):
-            raise RuntimeError(f"本地识别模型未准备好，请先下载 {self._engine_name} 所需资源")
+        if not is_asr_cached(self._engine_name):
+            if not is_silero_cached():
+                raise RuntimeError(
+                    "本地 VAD（Silero ONNX）未就绪。请在「本地音频识别」中点击下载，或检查 local_asr/models 下是否有 silero_vad。"
+                )
+            if is_asr_models_ready(self._engine_name) and get_engine_runtime_issues(
+                self._engine_name
+            ):
+                missing = ", ".join(get_engine_runtime_issues(self._engine_name))
+                raise RuntimeError(
+                    f"模型文件已在本地，但缺少 Python 依赖: {missing}。请安装: pip install -r requirements-local-asr.txt"
+                )
+            raise RuntimeError(
+                f"本地识别主模型未就绪。请在「本地音频识别」中点击下载 {self._engine_name} 所需资源。"
+            )
 
         if self._engine_name == "sensevoice":
             from local_asr.asr_sensevoice import SenseVoiceEngine
 
-            engine = SenseVoiceEngine(device=self._device, hub=self._hub)
-        elif self._engine_name == "funasr-nano":
-            from local_asr.asr_funasr_nano import FunASRNanoEngine
-
-            engine = FunASRNanoEngine(device=self._device, hub=self._hub, engine_type=self._engine_name)
+            engine = SenseVoiceEngine()
         elif self._engine_name == "qwen3-asr":
             from local_asr.asr_qwen3 import Qwen3ASREngine
 
-            engine = Qwen3ASREngine(use_dml=str(self._device).lower() != "cpu")
+            engine = Qwen3ASREngine(use_dml=True)
         else:
             raise RuntimeError(f"未知的本地识别引擎: {self._engine_name}")
 

@@ -74,16 +74,13 @@ DOUBAO_ASR_MAX_BUFFER_SECONDS = 60
 # ============================================================================
 
 # 本地 ASR 引擎
-# 可选: 'sensevoice', 'funasr-nano', 'qwen3-asr'
+# 可选: 'sensevoice', 'qwen3-asr'（已移除 Fun-ASR-Nano）
+# sensevoice：INT8 ONNX，固定 CPU（约 1.5–2.5GB 内存；发布版可内置模型）
+# qwen3-asr：固定尝试 GPU（ONNX DirectML + Vulkan），约需 1.6GB 显存
 LOCAL_ASR_ENGINE = 'sensevoice'
-
-# 本地 ASR 计算设备
-# 默认保留 LiveTranslate 的 'cuda'，若运行环境不支持会在运行时自动回退到 CPU
-LOCAL_ASR_DEVICE = 'cuda'
-
-# 本地模型来源
-# 可选: 'ms' (ModelScope), 'hf' (HuggingFace)
-LOCAL_ASR_HUB = 'ms'
+_VALID_LOCAL_ASR_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
+if LOCAL_ASR_ENGINE not in _VALID_LOCAL_ASR_ENGINES:
+    LOCAL_ASR_ENGINE = 'sensevoice'
 
 # 本地 ASR 语言提示
 LOCAL_ASR_LANGUAGE = 'auto'

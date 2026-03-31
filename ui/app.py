@@ -104,8 +104,6 @@ def _get_feature_flags() -> dict:
 def _local_asr_config_dict() -> dict:
     return {
         'engine': getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice'),
-        'device': getattr(config, 'LOCAL_ASR_DEVICE', 'cuda'),
-        'hub': getattr(config, 'LOCAL_ASR_HUB', 'ms'),
         'language': getattr(config, 'LOCAL_ASR_LANGUAGE', 'auto'),
         'vad_mode': getattr(config, 'LOCAL_VAD_MODE', 'silero'),
         'vad_threshold': getattr(config, 'LOCAL_VAD_THRESHOLD', 0.50),
@@ -135,7 +133,7 @@ def _snapshot_local_asr_download_state() -> dict:
         return dict(local_asr_download_state)
 
 
-def _download_local_asr_worker(engine: str, hub: str) -> None:
+def _download_local_asr_worker(engine: str) -> None:
     _update_local_asr_download_state(
         running=True,
         engine=engine,
@@ -149,7 +147,7 @@ def _download_local_asr_worker(engine: str, hub: str) -> None:
         _update_local_asr_download_state(
             status=f'下载 {LOCAL_ASR_DISPLAY_NAMES.get(engine, engine)} 模型与运行时...',
         )
-        download_local_asr_model(engine, hub=hub)
+        download_local_asr_model(engine)
         _update_local_asr_download_state(
             running=False,
             status='下载完成',
@@ -336,11 +334,10 @@ def update_config(config_data):
         if is_local_asr_ui_enabled() and 'local_asr' in config_data and config_data['local_asr']:
             local_asr = config_data['local_asr']
             if 'engine' in local_asr:
-                config.LOCAL_ASR_ENGINE = str(local_asr['engine'] or 'sensevoice')
-            if 'device' in local_asr:
-                config.LOCAL_ASR_DEVICE = str(local_asr['device'] or 'cuda')
-            if 'hub' in local_asr:
-                config.LOCAL_ASR_HUB = str(local_asr['hub'] or 'ms')
+                _eng = str(local_asr['engine'] or 'sensevoice')
+                if _eng not in LOCAL_ASR_ENGINES:
+                    _eng = 'sensevoice'
+                config.LOCAL_ASR_ENGINE = _eng
             if 'language' in local_asr:
                 config.LOCAL_ASR_LANGUAGE = str(local_asr['language'] or 'auto')
             if 'vad_mode' in local_asr:
@@ -418,11 +415,10 @@ def get_local_asr_status():
     if not is_local_asr_build_enabled():
         return jsonify({'success': False, 'message': 'Local ASR is disabled in this build'}), 404
 
-    hub = getattr(config, 'LOCAL_ASR_HUB', 'ms')
     engines = {}
     for engine in LOCAL_ASR_ENGINES:
         try:
-            engines[engine] = get_engine_status(engine, hub=hub)
+            engines[engine] = get_engine_status(engine)
         except Exception as e:
             engines[engine] = {
                 'engine': engine,
@@ -433,7 +429,6 @@ def get_local_asr_status():
     return jsonify({
         'success': True,
         'ui_enabled': is_local_asr_ui_enabled(),
-        'hub': hub,
         'engines': engines,
         'download': _snapshot_local_asr_download_state(),
     })
@@ -447,7 +442,6 @@ def download_local_asr():
 
     data = request.json or {}
     engine = str(data.get('engine') or getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice'))
-    hub = str(data.get('hub') or getattr(config, 'LOCAL_ASR_HUB', 'ms'))
     if engine not in LOCAL_ASR_ENGINES:
         return jsonify({'success': False, 'message': f'Unsupported engine: {engine}'}), 400
 
@@ -457,11 +451,11 @@ def download_local_asr():
 
     worker = threading.Thread(
         target=_download_local_asr_worker,
-        args=(engine, hub),
+        args=(engine,),
         daemon=True,
     )
     worker.start()
-    return jsonify({'success': True, 'message': 'download started', 'engine': engine, 'hub': hub})
+    return jsonify({'success': True, 'message': 'download started', 'engine': engine})
 
 
 @app.route('/api/local-asr/download-progress', methods=['GET'])

@@ -101,13 +101,11 @@ class LocalAsrTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         if not SAMPLE_WAV.exists():
             raise unittest.SkipTest(f"缺少测试音频: {SAMPLE_WAV}")
-        prepare_engine("sensevoice", hub="ms")
+        prepare_engine("sensevoice")
 
     def setUp(self) -> None:
         self._original_values = {
             "LOCAL_ASR_ENGINE": config.LOCAL_ASR_ENGINE,
-            "LOCAL_ASR_DEVICE": config.LOCAL_ASR_DEVICE,
-            "LOCAL_ASR_HUB": config.LOCAL_ASR_HUB,
             "LOCAL_ASR_LANGUAGE": config.LOCAL_ASR_LANGUAGE,
             "LOCAL_INCREMENTAL_ASR": config.LOCAL_INCREMENTAL_ASR,
             "LOCAL_INTERIM_INTERVAL": config.LOCAL_INTERIM_INTERVAL,
@@ -119,8 +117,6 @@ class LocalAsrTests(unittest.TestCase):
             "LOCAL_VAD_SILENCE_DURATION": config.LOCAL_VAD_SILENCE_DURATION,
         }
         config.LOCAL_ASR_ENGINE = "sensevoice"
-        config.LOCAL_ASR_DEVICE = "cpu"
-        config.LOCAL_ASR_HUB = "ms"
         config.LOCAL_ASR_LANGUAGE = "auto"
         config.LOCAL_INCREMENTAL_ASR = True
         config.LOCAL_INTERIM_INTERVAL = 1.5
