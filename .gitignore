@@ -29,6 +29,7 @@ dist/
 logs/
 debug_audio/
 
-# 本地ASR相关文件
+# 本地ASR：体积大的缓存与 vendor 运行时，不提交；Python 源码纳入版本控制
 .lt_sparse/
-local_asr/
+local_asr/models/
+local_asr/vendor/

@@ -421,6 +421,111 @@
                     </div>
                 </section>
 
+                <section class="card" id="local-asr-card" style="display: none;">
+                    <div class="collapsible-header" onclick="toggleCollapsible('local-asr-settings')">
+                        <h2 data-i18n="section.localAsrSettings">本地音频识别</h2>
+                        <span class="collapse-icon" id="local-asr-settings-icon">▼</span>
+                    </div>
+                    <div class="collapsible-content" id="local-asr-settings">
+                        <div class="local-asr-grid">
+                            <div class="form-group">
+                                <label for="local-asr-engine" data-i18n="label.localAsrEngine">本地识别引擎</label>
+                                <select id="local-asr-engine" class="form-control" onchange="onLocalAsrSettingChange(this)"
+                                    data-restart-required="true">
+                                    <option value="sensevoice" data-i18n="localAsr.engine.sensevoice">SenseVoice Small</option>
+                                    <option value="funasr-nano" data-i18n="localAsr.engine.funasrNano">Fun-ASR-Nano</option>
+                                    <option value="qwen3-asr" data-i18n="localAsr.engine.qwen3">Qwen3-ASR</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="local-asr-device" data-i18n="label.localAsrDevice">计算设备</label>
+                                <select id="local-asr-device" class="form-control" onchange="onLocalAsrSettingChange(this)"
+                                    data-restart-required="true">
+                                    <option value="cpu" data-i18n="option.cpu">CPU</option>
+                                    <option value="cuda" data-i18n="option.cuda">CUDA</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="local-asr-hub" data-i18n="label.localAsrHub">模型来源</label>
+                                <select id="local-asr-hub" class="form-control" onchange="onLocalAsrSettingChange(this)"
+                                    data-restart-required="true">
+                                    <option value="ms" data-i18n="option.modelscope">ModelScope</option>
+                                    <option value="hf" data-i18n="option.huggingface">HuggingFace</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="local-asr-language" data-i18n="label.localAsrLanguage">语言提示</label>
+                                <input type="text" id="local-asr-language" class="form-control" placeholder="auto"
+                                    onchange="onLocalAsrSettingChange(this)" onblur="onLocalAsrSettingChange(this)"
+                                    data-restart-required="true">
+                            </div>
+                            <div class="form-group">
+                                <label for="local-vad-mode" data-i18n="label.localVadMode">本地 VAD 模式</label>
+                                <select id="local-vad-mode" class="form-control" onchange="onLocalAsrSettingChange(this)"
+                                    data-restart-required="true">
+                                    <option value="silero" data-i18n="option.localVadSilero">Silero</option>
+                                    <option value="energy" data-i18n="option.localVadEnergy">能量检测</option>
+                                    <option value="disabled" data-i18n="option.localVadDisabled">禁用</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="local-vad-threshold" data-i18n="label.localVadThreshold">本地 VAD 阈值</label>
+                                <input type="number" id="local-vad-threshold" class="form-control" min="0" max="1" step="0.05"
+                                    onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                            </div>
+                            <div class="form-group">
+                                <label for="local-min-speech-duration" data-i18n="label.localMinSpeechDuration">最短语音时长（秒）</label>
+                                <input type="number" id="local-min-speech-duration" class="form-control" min="0.1" max="30"
+                                    step="0.1" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                            </div>
+                            <div class="form-group">
+                                <label for="local-max-speech-duration" data-i18n="label.localMaxSpeechDuration">单段最长语音采集（秒）</label>
+                                <input type="number" id="local-max-speech-duration" class="form-control" min="1" max="120"
+                                    step="0.5" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                            </div>
+                            <div class="form-group">
+                                <label for="local-silence-mode" data-i18n="label.localSilenceMode">静音模式</label>
+                                <select id="local-silence-mode" class="form-control" onchange="onLocalAsrSettingChange(this)"
+                                    data-restart-required="true">
+                                    <option value="auto" data-i18n="option.localSilenceAuto">自动</option>
+                                    <option value="fixed" data-i18n="option.localSilenceFixed">固定</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="local-silence-duration" data-i18n="label.localSilenceDuration">静音持续时间（秒）</label>
+                                <input type="number" id="local-silence-duration" class="form-control" min="0.1" max="5"
+                                    step="0.1" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                            </div>
+                            <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.localIncrementalAsr">启用增量识别</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="local-incremental-asr" onchange="onLocalAsrSettingChange(this)"
+                                            data-restart-required="true">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label for="local-interim-interval" data-i18n="label.localInterimInterval">中间结果间隔（秒）</label>
+                                <input type="number" id="local-interim-interval" class="form-control" min="0.5" max="20"
+                                    step="0.5" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                            </div>
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <label data-i18n="label.localAsrStatus">模型状态</label>
+                                <div id="local-asr-status" class="local-asr-status-box" data-i18n="hint.localAsrNotChecked">
+                                    尚未检查本地模型状态
+                                </div>
+                                <small class="form-text" data-i18n="hint.localAsrStatus">首次使用前请先下载对应引擎模型和运行时。</small>
+                            </div>
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <button type="button" class="btn btn-primary" id="local-asr-download-btn"
+                                    onclick="downloadLocalAsrModels()" data-i18n="btn.downloadLocalAsr">下载本地识别模型</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- 文本后处理（折叠） -->
                 <section class="card">
                     <div class="collapsible-header" onclick="toggleCollapsible('text-post-processing')">

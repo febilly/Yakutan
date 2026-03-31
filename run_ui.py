@@ -5,6 +5,21 @@ VRChat 翻译器 Web UI 启动器
 import sys
 import os
 
+# Allow PyTorch and DirectML/ONNX stacks to coexist in one process.
+os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
+
+
+def _bootstrap_local_asr_frozen_flags() -> None:
+    """在导入 Flask/UI 之前设置 Local ASR 构建标记（与 runtime_hook / 打包进目录的标记文件一致）。"""
+    if not getattr(sys, "frozen", False) or not hasattr(sys, "_MEIPASS"):
+        return
+    base = sys._MEIPASS
+    if os.path.isfile(os.path.join(base, "YAKUTAN_LOCAL_ASR_BUILD")):
+        os.environ.setdefault("YAKUTAN_LOCAL_ASR_UI", "1")
+
+
+_bootstrap_local_asr_frozen_flags()
+
 def _run_panel_mode():
     import panel_app
     panel_args = ['panel_app.py'] + sys.argv[2:]
