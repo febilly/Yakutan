@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sys
 from pathlib import Path
 from urllib.request import Request, urlopen, urlretrieve
@@ -62,6 +63,7 @@ def _default_models_dir() -> Path:
 
 MODELS_DIR = _default_models_dir()
 
+# 单文件运行时 VENDOR_DIR 在 _MEIPASS 下，仅用于读取打包自带的只读副本；可写 vendor 代码见 _qwen_vendor_package_dir()
 SENSEVOICE_ONNX_DIR_NAME = "sensevoice-onnx"
 SENSEVOICE_ONNX_REPO = "lovemefan/SenseVoice-onnx"
 SENSEVOICE_ENCODER_ONNX = "sense-voice-encoder-int8.onnx"
@@ -124,6 +126,34 @@ def apply_cache_env() -> None:
     os.environ["HF_HOME"] = os.path.join(resolved, "huggingface")
 
 
+def _qwen_vendor_package_dir() -> Path:
+    """Qwen 胶水代码目录：开发态在仓库 vendor；PyInstaller 单文件下放在 exe 同级的 local_asr_models/vendor（可写、可持久化）。"""
+    if getattr(sys, "frozen", False):
+        return MODELS_DIR / "vendor" / "qwen_asr_gguf"
+    return VENDOR_DIR / "qwen_asr_gguf"
+
+
+def _seed_qwen_vendor_from_bundle(dest: Path) -> None:
+    """将 exe 内只读 vendor 树合并复制到 dest，避免首次运行向 _MEIPASS 下载且重启后丢失。"""
+    if not getattr(sys, "frozen", False):
+        return
+    bundle_root = VENDOR_DIR / "qwen_asr_gguf"
+    if not bundle_root.is_dir():
+        return
+    binary_suffixes = {".dll", ".so", ".dylib"}
+    for path in bundle_root.rglob("*"):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() in binary_suffixes:
+            continue
+        rel = path.relative_to(bundle_root)
+        dst = dest / rel
+        if dst.exists():
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, dst)
+
+
 def _silero_onnx_bundle_path() -> Path:
     return PACKAGE_DIR / "models" / SILERO_VAD_DIR_NAME / SILERO_VAD_ONNX_NAME
 
@@ -169,7 +199,6 @@ def sensevoice_onnx_model_dir() -> Path | None:
 def _ensure_llama_cpp_vulkan_to(bin_dir: Path) -> None:
     """若 bin_dir 中缺少 llama/ggml 主库，则从 ggml-org llama.cpp win-vulkan x64 release 解压写入。"""
     import json
-    import shutil
     import zipfile
 
     if sys.platform != "win32":
@@ -257,7 +286,8 @@ def ensure_vendor_sources(engine: str) -> Path | None:
         return None
 
     if engine == "qwen3-asr":
-        base_dir = VENDOR_DIR / "qwen_asr_gguf"
+        base_dir = _qwen_vendor_package_dir()
+        _seed_qwen_vendor_from_bundle(base_dir)
         _ensure_qwen_vendor_scaffold(base_dir)
         for relative_path, url in _QWEN3_VENDOR_URLS.items():
             dest = base_dir / relative_path
@@ -272,7 +302,7 @@ def _vendor_ready(engine: str) -> bool:
     if engine == "sensevoice":
         return True
     if engine == "qwen3-asr":
-        base_dir = VENDOR_DIR / "qwen_asr_gguf"
+        base_dir = _qwen_vendor_package_dir()
         required = list(_QWEN3_VENDOR_URLS) + ["__init__.py", "inference/__init__.py"]
         return all((base_dir / relative_path).exists() for relative_path in required)
     return False
@@ -420,7 +450,6 @@ def download_qwen3_asr() -> None:
     apply_cache_env()
     ensure_vendor_sources("qwen3-asr")
 
-    import shutil
     import zipfile
 
     model_dir = MODELS_DIR / QWEN3_ASR_DIR_NAME
