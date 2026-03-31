@@ -8,10 +8,14 @@ Yakutan 主入口 - 仅负责服务编排和生命周期管理
 - audio_capture.py      : PyAudio 初始化、音频流管理、音频捕获
 - recognition_handler.py : 语音识别回调（VRChatRecognitionCallback）
 """
+import os
 import logging
 import signal
 import asyncio
 from typing import Optional
+
+# Allow PyTorch and DirectML/ONNX stacks to coexist in one process.
+os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
 
 from dotenv import load_dotenv
 
@@ -134,8 +138,10 @@ async def start_recognition_async(state):
         else:
             await loop.run_in_executor(state.executor, state.recognition_instance.start)
             state.recognition_started = True
-    except Exception:
-        pass
+    except Exception as e:
+        state.recognition_active = False
+        print(f'[ASR] 启动识别失败: {e}')
+        raise
 
     state.recognition_active = True
 

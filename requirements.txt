@@ -35,3 +35,6 @@ flask-cors>=4.0.0
 
 vrchat_oscquery @ git+https://github.com/theepicsnail/vrchat_oscquery@main
 pywebview
+
+# Local ASR is intentionally split into requirements-local-asr.txt
+# so the standard build does not pull in heavy on-device dependencies.

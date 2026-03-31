@@ -5,6 +5,9 @@ VRChat 翻译器 Web UI 启动器
 import sys
 import os
 
+# Allow PyTorch and DirectML/ONNX stacks to coexist in one process.
+os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
+
 def _run_panel_mode():
     import panel_app
     panel_args = ['panel_app.py'] + sys.argv[2:]
