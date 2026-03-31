@@ -58,21 +58,16 @@ jobs:
         $commitSha = "${{ github.sha }}".Substring(0, 7)
         $commitMsg = git log -1 --pretty=%B
         $commitDate = git log -1 --date=format:%Y%m%d-%H%M%S --pretty=%cd
-        $variant = "${{ matrix.variant }}"
         $tag = "v$commitDate-$commitSha"
         echo "sha=$commitSha" >> $env:GITHUB_OUTPUT
         echo "message=$commitMsg" >> $env:GITHUB_OUTPUT
         echo "commit_date=$commitDate" >> $env:GITHUB_OUTPUT
         echo "tag=$tag" >> $env:GITHUB_OUTPUT
-        if ($variant -eq 'standard') {
-          $exeName = "Yakutan-$commitDate.exe"
-          Rename-Item -Path "./dist/Yakutan.exe" -NewName $exeName
-        } else {
-          $dir = Join-Path "./dist" "Yakutan-LocalASR"
-          if (-not (Test-Path $dir)) { throw "PyInstaller onedir 输出不存在: $dir" }
-          $exeName = "Yakutan-LocalASR-$commitDate.zip"
-          Compress-Archive -Path $dir -DestinationPath (Join-Path "./dist" $exeName) -Force
-        }
+        $base = "${{ matrix.exe_base }}"
+        $exeName = "$base-$commitDate.exe"
+        $src = Join-Path "./dist" "$base.exe"
+        if (-not (Test-Path $src)) { throw "PyInstaller 单文件输出不存在: $src" }
+        Rename-Item -Path $src -NewName $exeName
         echo "exe_name=$exeName" >> $env:GITHUB_OUTPUT
     
     - name: Create Release (standard)
@@ -90,7 +85,7 @@ jobs:
           
           **构建产物**（与本 tag 并行 job 合计）:
           - `Yakutan-*.exe`: 标准版单文件
-          - `Yakutan-LocalASR-*.zip`: 本地识别版；内置 Silero VAD 与 Qwen 推理胶水代码。**SenseVoice / Qwen3 离线资源**：**Pack Local ASR model bundles** 工作流单独发布
+          - `Yakutan-LocalASR-*.exe`: 本地识别版单文件；内置 Silero VAD 与 Qwen 推理胶水代码。**SenseVoice / Qwen3 离线资源**：**Pack Local ASR model bundles** 工作流单独发布
         files: ./dist/${{ steps.commit_info.outputs.exe_name }}
         draft: true
         prerelease: true
@@ -112,7 +107,7 @@ jobs:
           
           **构建产物**（与本 tag 并行 job 合计）:
           - `Yakutan-*.exe`: 标准版单文件
-          - `Yakutan-LocalASR-*.zip`: 本地识别版；内置 Silero VAD 与 Qwen 推理胶水代码。**SenseVoice / Qwen3 权重与 Qwen Vulkan 运行时**：运行 **Pack Local ASR model bundles** 工作流，将生成的 zip 内 **`local_asr_models`** 解压到与 **`Yakutan-LocalASR.exe` 同级**
+          - `Yakutan-LocalASR-*.exe`: 本地识别版单文件；内置 Silero VAD 与 Qwen 推理胶水代码。**SenseVoice / Qwen3 权重与 Qwen Vulkan 运行时**：运行 **Pack Local ASR model bundles** 工作流，将生成的 zip 内 **`local_asr_models`** 解压到与 **`Yakutan-LocalASR-*.exe` 同级**
         files: ./dist/${{ steps.commit_info.outputs.exe_name }}
         draft: true
         prerelease: true
