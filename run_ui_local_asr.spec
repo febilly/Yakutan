@@ -62,6 +62,7 @@ hiddenimports = [
 hiddenimports += collect_submodules('webview.platforms')
 hiddenimports += collect_submodules('translators.translation_apis')
 hiddenimports += collect_submodules('local_asr')
+hiddenimports += collect_submodules('gguf')
 
 a = Analysis(
     ['run_ui.py'],
