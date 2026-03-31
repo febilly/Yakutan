@@ -1,0 +1,136 @@
+name: Pack Local ASR model bundles
+
+# 仅手动运行：生成 SenseVoice ONNX 与 Qwen3-ASR（ONNX+GGUF+Vulkan DLL）两个资源 zip，
+# 上传到指定 GitHub Release。**不上传** Actions artifact。
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '发布所用的 Git tag；留空则自动生成为 yakutan-local-asr-models-<日期>-<短SHA>（将在当前 commit 上创建）'
+        required: false
+        default: ''
+      draft_release:
+        description: '以草稿 Release 发布'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-local-asr.txt
+
+      - name: Compute bundle names and release tag
+        id: meta
+        shell: pwsh
+        run: |
+          $commitSha = "${{ github.sha }}".Substring(0, 7)
+          $commitDate = git log -1 --date=format:%Y%m%d-%H%M%S --pretty=%cd
+          $senseZip = "Yakutan-SenseVoice-bundle-$commitDate.zip"
+          $qwenZip = "Yakutan-Qwen3-ASR-bundle-$commitDate.zip"
+          $in = "${{ inputs.release_tag }}".Trim()
+          if ($in -eq "") {
+            $relTag = "yakutan-local-asr-models-$commitDate-$commitSha"
+          } else {
+            $relTag = $in
+          }
+          echo "sense_zip=$senseZip" >> $env:GITHUB_OUTPUT
+          echo "qwen_zip=$qwenZip" >> $env:GITHUB_OUTPUT
+          echo "release_tag=$relTag" >> $env:GITHUB_OUTPUT
+          echo "commit_date=$commitDate" >> $env:GITHUB_OUTPUT
+          echo "sha=$commitSha" >> $env:GITHUB_OUTPUT
+
+      - name: Download SenseVoice ONNX, Qwen weights, llama.cpp Vulkan, Qwen vendor
+        run: |
+          python -c "from local_asr.model_manager import apply_cache_env, download_qwen3_asr, ensure_vendor_sources, prefetch_llama_cpp_vulkan_for_pyinstaller_bundle, prefetch_sensevoice_for_pyinstaller_bundle; apply_cache_env(); ensure_vendor_sources('qwen3-asr'); prefetch_sensevoice_for_pyinstaller_bundle(); prefetch_llama_cpp_vulkan_for_pyinstaller_bundle(); download_qwen3_asr()"
+
+      - name: Build SenseVoice bundle zip
+        shell: pwsh
+        run: |
+          $senseSrc = Join-Path "." "local_asr/models/sensevoice-onnx"
+          if (-not (Test-Path $senseSrc)) { throw "缺少 SenseVoice 目录: $senseSrc" }
+          foreach ($f in @(
+            "embedding.npy",
+            "sense-voice-encoder-int8.onnx",
+            "am.mvn",
+            "chn_jpn_yue_eng_ko_spectok.bpe.model"
+          )) {
+            if (-not (Test-Path (Join-Path $senseSrc $f))) { throw "缺少 SenseVoice 文件: $f" }
+          }
+          $stageRoot = Join-Path "./dist" "_sensevoice_pack_layout"
+          $dest = Join-Path $stageRoot "local_asr_models/sensevoice-onnx"
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+          Copy-Item -Path (Join-Path $senseSrc "*") -Destination $dest -Force
+          $root = Join-Path $stageRoot "local_asr_models"
+          $out = Join-Path "./dist" "${{ steps.meta.outputs.sense_zip }}"
+          New-Item -ItemType Directory -Path "./dist" -Force | Out-Null
+          Compress-Archive -Path $root -DestinationPath $out -Force
+          Remove-Item -Recurse -Force $stageRoot
+
+      - name: Build Qwen3-ASR bundle zip
+        shell: pwsh
+        run: |
+          $qwenSrc = Join-Path "." "local_asr/models/qwen3-asr"
+          if (-not (Test-Path $qwenSrc)) { throw "缺少 Qwen3-ASR 模型目录: $qwenSrc" }
+          foreach ($f in @(
+            "qwen3_asr_encoder_frontend.int4.onnx",
+            "qwen3_asr_encoder_backend.int4.onnx",
+            "qwen3_asr_llm.q4_k.gguf"
+          )) {
+            if (-not (Test-Path (Join-Path $qwenSrc $f))) { throw "缺少 Qwen 模型文件: $f" }
+          }
+          $qwenBinSrc = Join-Path "." "local_asr/models/qwen_llama_vulkan_bin"
+          if (-not (Test-Path $qwenBinSrc)) { throw "缺少 Qwen Vulkan DLL 目录: $qwenBinSrc" }
+          foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll")) {
+            if (-not (Test-Path (Join-Path $qwenBinSrc $f))) { throw "缺少 llama Vulkan DLL: $f" }
+          }
+          $stageRoot = Join-Path "./dist" "_qwen_pack_layout"
+          $qwenDest = Join-Path $stageRoot "local_asr_models/qwen3-asr"
+          New-Item -ItemType Directory -Path $qwenDest -Force | Out-Null
+          Copy-Item -Path (Join-Path $qwenSrc "*") -Destination $qwenDest -Force
+          $qwenBinDest = Join-Path $stageRoot "local_asr_models/qwen_llama_vulkan_bin"
+          New-Item -ItemType Directory -Path $qwenBinDest -Force | Out-Null
+          Copy-Item -Path (Join-Path $qwenBinSrc "*") -Destination $qwenBinDest -Force
+          $archiveRoot = Join-Path $stageRoot "local_asr_models"
+          $out = Join-Path "./dist" "${{ steps.meta.outputs.qwen_zip }}"
+          Compress-Archive -Path $archiveRoot -DestinationPath $out -Force
+          Remove-Item -Recurse -Force $stageRoot
+
+      - name: Create or update Release with bundle zips
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.meta.outputs.release_tag }}
+          name: Local ASR model bundles ${{ steps.meta.outputs.release_tag }}
+          draft: ${{ inputs.draft_release }}
+          prerelease: false
+          body: |
+            ## Local ASR 离线资源（手动打包）
+
+            **提交日期**: ${{ steps.meta.outputs.commit_date }}
+            **提交 SHA**: ${{ steps.meta.outputs.sha }}
+
+            将任一 zip 内的 **`local_asr_models`** 文件夹解压到 **`Yakutan-LocalASR.exe` 所在目录**（与 exe 同级）。
+
+            - `${{ steps.meta.outputs.sense_zip }}`：**SenseVoice** INT8 ONNX
+            - `${{ steps.meta.outputs.qwen_zip }}`：**Qwen3-ASR** ONNX×2 + GGUF + llama.cpp Vulkan DLL
+          files: |
+            ./dist/${{ steps.meta.outputs.sense_zip }}
+            ./dist/${{ steps.meta.outputs.qwen_zip }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
