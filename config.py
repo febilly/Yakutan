@@ -76,7 +76,7 @@ DOUBAO_ASR_MAX_BUFFER_SECONDS = 60
 # 本地 ASR 引擎
 # 可选: 'sensevoice', 'qwen3-asr'（已移除 Fun-ASR-Nano）
 # sensevoice：INT8 ONNX，固定 CPU（约 1.5–2.5GB 内存；发布版可内置模型）
-# qwen3-asr：固定尝试 GPU（ONNX DirectML + Vulkan），约需 1.6GB 显存
+# qwen3-asr：ONNX 编码默认 CPU；可选 DirectML（LOCAL_QWEN_ENCODER_USE_DML）。GGUF 解码可走 Vulkan，约需显存视配置而定
 LOCAL_ASR_ENGINE = 'sensevoice'
 _VALID_LOCAL_ASR_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
 if LOCAL_ASR_ENGINE not in _VALID_LOCAL_ASR_ENGINES:
@@ -101,6 +101,11 @@ LOCAL_INTERIM_INTERVAL = 2.0
 LOCAL_QWEN_ASR_N_CTX = 2048
 # 传入 LLM system 区的背景/滚动文本：按模型分词后最多保留的 token 数（取尾部）。
 LOCAL_QWEN_CONTEXT_MAX_TOKENS = 1024
+# 是否在每条识别后打印 Qwen3-ASR 各阶段耗时（ONNX 编码 / LLM prefill / 生成），使用 INFO 级别。环境变量 LOCAL_QWEN_LOG_PIPELINE_TIMING=0 可关闭。
+# 需在 config.LOG_LEVEL 为 INFO/DEBUG 时才能在终端看到（默认 ERROR 时不会输出）。
+LOCAL_QWEN_LOG_PIPELINE_TIMING = _get_env_bool('LOCAL_QWEN_LOG_PIPELINE_TIMING', True)
+# ONNX 音频编码（前后端）是否使用 DirectML；False 时仅用 CPUExecutionProvider（Mel 本就为 CPU）。
+LOCAL_QWEN_ENCODER_USE_DML = _get_env_bool('LOCAL_QWEN_ENCODER_USE_DML', False)
 
 # ============================================================================
 # 音频参数配置

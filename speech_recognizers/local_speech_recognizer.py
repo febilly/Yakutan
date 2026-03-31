@@ -31,6 +31,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         callback: SpeechRecognitionCallback,
         sample_rate: int = 16000,
         source_language: str = "auto",
+        corpus_text: str | None = None,
     ) -> None:
         self._callback = callback
         self._sample_rate = sample_rate
@@ -52,6 +53,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         self._last_partial_time = 0.0
         self._last_request_id = f"local-{self._engine_name}"
         self._stream_id = 0
+        self._corpus_text = (corpus_text or "").strip()
 
     def _input_cap_samples(self) -> int:
         sec = float(getattr(config, "LOCAL_VAD_MAX_SPEECH_DURATION", 30.0))
@@ -101,7 +103,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         elif self._engine_name == "qwen3-asr":
             from local_asr.asr_qwen3 import Qwen3ASREngine
 
-            engine = Qwen3ASREngine(use_dml=True)
+            engine = Qwen3ASREngine(corpus_text=self._corpus_text or None)
         else:
             raise RuntimeError(f"未知的本地识别引擎: {self._engine_name}")
 

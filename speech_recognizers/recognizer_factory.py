@@ -115,7 +115,7 @@ def create_recognizer(
         audio_format: 音频格式
         source_language: 源语言，'auto' 表示自动检测
         vocabulary_id: DashScope 热词表 ID（仅 dashscope 后端使用）
-        corpus_text: Qwen 语料文本（仅 qwen 后端使用）
+        corpus_text: Qwen 语料文本（qwen 与 local 且 Qwen3-ASR 引擎使用）
         enable_vad: 是否启用VAD（仅 qwen 后端使用）
         vad_threshold: VAD阈值（仅 qwen 后端使用）
         vad_silence_duration_ms: VAD静音持续时间（仅 qwen 后端使用）
@@ -254,6 +254,7 @@ def create_recognizer(
             callback=callback,
             sample_rate=sample_rate,
             source_language=getattr(config, 'LOCAL_ASR_LANGUAGE', source_language),
+            corpus_text=corpus_text,
         )
         return MonoAudioSpeechRecognizer(recognizer, input_channels=input_channels)
 

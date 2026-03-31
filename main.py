@@ -271,8 +271,8 @@ async def main(keep_oscquery_alive: bool = False):
     # 初始化翻译器
     reinitialize_translator(state)
 
-    # 初始化热词（仅 qwen / dashscope）
-    if config.ENABLE_HOT_WORDS and backend in {'qwen', 'dashscope'}:
+    # 初始化热词（在线：qwen 语料 / dashscope 热词表；本地：Qwen3-ASR 走与在线 Qwen 相同的语料注入）
+    if config.ENABLE_HOT_WORDS and backend in {'qwen', 'dashscope', 'local'}:
         print('\n[热词] 初始化热词资源...')
         try:
             hot_words_manager = HotWordsManager()
@@ -288,6 +288,23 @@ async def main(keep_oscquery_alive: bool = False):
                     print(f'[热词] 已生成 Qwen 语料文本，共 {len(words)} 条\n')
                 else:
                     print('[热词] 未加载到热词条目，跳过 Qwen 语料配置\n')
+            elif backend == 'local':
+                words = [
+                    entry.get('text')
+                    for entry in hot_words_manager.get_hot_words()
+                    if entry.get('text')
+                ]
+                local_engine = getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice')
+                if words and local_engine == 'qwen3-asr':
+                    corpus_text = "\n".join(words)
+                    print(f'[热词] 已生成本地 Qwen3-ASR 语料文本，共 {len(words)} 条\n')
+                elif words:
+                    print(
+                        f'[热词] 已加载 {len(words)} 条热词；当前本地引擎为 {local_engine}，'
+                        '仅 qwen3-asr 会使用语料注入\n'
+                    )
+                else:
+                    print('[热词] 未加载到热词条目，跳过本地语料配置\n')
             else:
                 state.vocabulary_id = hot_words_manager.create_vocabulary(
                     target_model='fun-asr-realtime',
