@@ -24,6 +24,9 @@ from pathlib import Path
 _silero_vad = Path('local_asr/models/silero_vad')
 if _silero_vad.is_dir():
     datas += [(str(_silero_vad), 'local_asr/models/silero_vad')]
+_qwen_gguf_vendor = Path('local_asr/vendor/qwen_asr_gguf')
+if _qwen_gguf_vendor.is_dir():
+    datas += [(str(_qwen_gguf_vendor), 'local_asr/vendor/qwen_asr_gguf')]
 _llama_dll_upx_exclude = []
 
 hiddenimports = [

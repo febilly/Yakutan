@@ -121,16 +121,24 @@ _QWEN3_VENDOR_URLS = {
 }
 
 
+def _qwen_vendor_files_complete(base_dir: Path) -> bool:
+    required = list(_QWEN3_VENDOR_URLS) + ["__init__.py", "inference/__init__.py"]
+    return all((base_dir / relative_path).is_file() for relative_path in required)
+
+
 def apply_cache_env() -> None:
     resolved = str(MODELS_DIR.resolve())
     os.environ["HF_HOME"] = os.path.join(resolved, "huggingface")
 
 
 def _qwen_vendor_package_dir() -> Path:
-    """Qwen 胶水代码目录：开发态在仓库 vendor；PyInstaller 单文件下放在 exe 同级的 local_asr_models/vendor（可写、可持久化）。"""
-    if getattr(sys, "frozen", False):
-        return MODELS_DIR / "vendor" / "qwen_asr_gguf"
-    return VENDOR_DIR / "qwen_asr_gguf"
+    """Qwen 胶水代码：开发态用仓库 vendor；冻结构建优先用打包进 _MEIPASS 的只读副本，完整则不再依赖 local_asr_models 或联网下载。"""
+    if not getattr(sys, "frozen", False):
+        return VENDOR_DIR / "qwen_asr_gguf"
+    bundle = VENDOR_DIR / "qwen_asr_gguf"
+    if bundle.is_dir() and _qwen_vendor_files_complete(bundle):
+        return bundle
+    return MODELS_DIR / "vendor" / "qwen_asr_gguf"
 
 
 def _seed_qwen_vendor_from_bundle(dest: Path) -> None:
@@ -287,7 +295,10 @@ def ensure_vendor_sources(engine: str) -> Path | None:
 
     if engine == "qwen3-asr":
         base_dir = _qwen_vendor_package_dir()
-        _seed_qwen_vendor_from_bundle(base_dir)
+        if _qwen_vendor_files_complete(base_dir):
+            return base_dir
+        if getattr(sys, "frozen", False):
+            _seed_qwen_vendor_from_bundle(base_dir)
         _ensure_qwen_vendor_scaffold(base_dir)
         for relative_path, url in _QWEN3_VENDOR_URLS.items():
             dest = base_dir / relative_path
@@ -302,9 +313,7 @@ def _vendor_ready(engine: str) -> bool:
     if engine == "sensevoice":
         return True
     if engine == "qwen3-asr":
-        base_dir = _qwen_vendor_package_dir()
-        required = list(_QWEN3_VENDOR_URLS) + ["__init__.py", "inference/__init__.py"]
-        return all((base_dir / relative_path).exists() for relative_path in required)
+        return _qwen_vendor_files_complete(_qwen_vendor_package_dir())
     return False
 
 
