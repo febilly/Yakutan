@@ -19,14 +19,11 @@ _pykakasi_spec = importlib.util.find_spec('pykakasi')
 if _pykakasi_spec is not None and getattr(_pykakasi_spec, 'submodule_search_locations', None):
     datas += collect_data_files('pykakasi')
 
-# CI prefetch before PyInstaller: Silero, SenseVoice ONNX。Qwen 的 Vulkan DLL 与 GGUF 一并由 Release 的 Qwen zip 或 UI 下载写入 local_asr_models。
+# CI prefetch before PyInstaller: 仅 Silero VAD。SenseVoice / Qwen 权重与 Vulkan 运行时由单独手动 workflow 发布的资源 zip 或 UI 下载写入 local_asr_models。
 from pathlib import Path
 _silero_vad = Path('local_asr/models/silero_vad')
 if _silero_vad.is_dir():
     datas += [(str(_silero_vad), 'local_asr/models/silero_vad')]
-_sensevoice = Path('local_asr/models/sensevoice-onnx')
-if _sensevoice.is_dir():
-    datas += [(str(_sensevoice), 'local_asr/models/sensevoice-onnx')]
 _llama_dll_upx_exclude = []
 
 hiddenimports = [

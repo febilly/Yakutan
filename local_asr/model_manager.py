@@ -85,7 +85,7 @@ QWEN3_ASR_FILES = [
 
 QWEN3_ASR_DIR_NAME = "qwen3-asr"
 
-# HaujetZhao/Qwen3-ASR-GGUF zip 内仅有 Encoder ONNX×2 + Decoder GGUF；llama.cpp Vulkan DLL 由 download_qwen3_asr() / CI prefetch_llama_cpp_vulkan_for_pyinstaller_bundle() 从 ggml-org 拉取，不进 Git。
+# HaujetZhao/Qwen3-ASR-GGUF zip 内仅有 Encoder ONNX×2 + Decoder GGUF；llama.cpp Vulkan DLL 由 download_qwen3_asr() / prefetch_llama_cpp_vulkan_for_pyinstaller_bundle() 从 ggml-org 拉取，不进 Git（手动 workflow「Pack Local ASR model bundles」或本机运行同上函数下载）。
 QWEN3_ASR_MODEL_URL = (
     "https://github.com/HaujetZhao/Qwen3-ASR-GGUF/releases/download/models/"
     "Qwen3-ASR-1.7B-gguf.zip"
@@ -202,14 +202,14 @@ def _ensure_llama_cpp_vulkan_to(bin_dir: Path) -> None:
 
 
 def prefetch_llama_cpp_vulkan_for_pyinstaller_bundle() -> None:
-    """CI：将 llama.cpp Vulkan DLL 写入 local_asr/models/qwen_llama_vulkan_bin，随 Qwen 资源 zip 分发。"""
+    """将 llama.cpp Vulkan DLL 写入 local_asr/models/qwen_llama_vulkan_bin，供 Qwen3 资源 zip（手动 workflow）或本机缓存。"""
     apply_cache_env()
     ensure_vendor_sources("qwen3-asr")
     _ensure_llama_cpp_vulkan_to(_qwen_llama_vulkan_user_bin())
 
 
 def prefetch_sensevoice_for_pyinstaller_bundle() -> None:
-    """Fetch INT8 SenseVoice ONNX into local_asr/models/... for packaged builds (CI)."""
+    """将 SenseVoice INT8 ONNX 下载到 local_asr/models/sensevoice-onnx，供 SenseVoice 资源 zip（手动 workflow）或本机开发打包。"""
     apply_cache_env()
     dest = _sensevoice_onnx_bundle_dir()
     if _sensevoice_onnx_ready(dest):
