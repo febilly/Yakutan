@@ -87,7 +87,7 @@ jobs:
           - `Yakutan-*.exe`: 标准版单文件
           - `Yakutan-LocalASR-*.exe`: 本地识别版单文件；内置 Silero VAD 与 Qwen 推理胶水代码。**SenseVoice / Qwen3 离线资源**：**Pack Local ASR model bundles** 工作流单独发布
           
-          **离线语音识别资源**：可从 [https://github.com/febilly/Yakutan/releases/tag/untagged-1a0522a8c7f4c560a615](https://github.com/febilly/Yakutan/releases/tag/untagged-1a0522a8c7f4c560a615) 下载，也可以在 **WebUI** 中下载。
+          **离线语音识别资源**：可从 [https://github.com/febilly/Yakutan/releases/tag/yakutan-local-asr-models-20260331-213152-fbc9d71](https://github.com/febilly/Yakutan/releases/tag/yakutan-local-asr-models-20260331-213152-fbc9d71) 下载，也可以在 **WebUI** 中下载。
         files: ./dist/${{ steps.commit_info.outputs.exe_name }}
         draft: true
         prerelease: true
