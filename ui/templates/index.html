@@ -436,12 +436,9 @@
                                     <option value="qwen3-asr" data-i18n="localAsr.engine.qwen3">Qwen3-ASR（准确、GPU）</option>
                                 </select>
                                 <small id="local-asr-engine-hint" class="form-text"></small>
-                            </div>
-                            <div class="form-group">
-                                <label for="local-asr-language" data-i18n="label.localAsrLanguage">语言提示</label>
-                                <input type="text" id="local-asr-language" class="form-control" placeholder="auto"
-                                    onchange="onLocalAsrSettingChange(this)" onblur="onLocalAsrSettingChange(this)"
-                                    data-restart-required="true">
+                                <small class="form-text" data-i18n="hint.localAsrUsesGlobalSourceLang">
+                                    识别语言与上方「语音识别」中的源语言一致；留空或 auto 为自动检测。
+                                </small>
                             </div>
                             <div class="form-group">
                                 <label for="local-vad-mode" data-i18n="label.localVadMode">本地 VAD 模式</label>

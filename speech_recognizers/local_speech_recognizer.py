@@ -107,7 +107,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         else:
             raise RuntimeError(f"未知的本地识别引擎: {self._engine_name}")
 
-        engine.set_language(self._source_language or getattr(config, "LOCAL_ASR_LANGUAGE", "auto"))
+        engine.set_language(self._source_language or "auto")
         self._engine = engine
         return engine
 

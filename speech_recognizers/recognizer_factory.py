@@ -31,6 +31,16 @@ except ImportError:  # pragma: no cover
     WEBSOCKETS_AVAILABLE = False
 
 
+def _normalize_local_asr_language(source_language: Optional[str]) -> str:
+    """本地 ASR 与全局 SOURCE_LANGUAGE 一致；空或 auto 表示自动检测。"""
+    if not source_language:
+        return 'auto'
+    s = source_language.strip()
+    if not s or s.lower() in ('auto', 'auto-detect'):
+        return 'auto'
+    return s
+
+
 def _normalize_qwen_language(lang: Optional[str]) -> Optional[str]:
     """Normalize language code to Qwen ASR 2-letter hint.
     Returns None when no valid hint (auto or empty)."""
@@ -253,7 +263,7 @@ def create_recognizer(
         recognizer = LocalSpeechRecognizer(
             callback=callback,
             sample_rate=sample_rate,
-            source_language=getattr(config, 'LOCAL_ASR_LANGUAGE', source_language),
+            source_language=_normalize_local_asr_language(source_language),
             corpus_text=corpus_text,
         )
         return MonoAudioSpeechRecognizer(recognizer, input_channels=input_channels)

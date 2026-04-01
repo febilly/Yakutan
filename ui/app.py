@@ -104,7 +104,6 @@ def _get_feature_flags() -> dict:
 def _local_asr_config_dict() -> dict:
     return {
         'engine': getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice'),
-        'language': getattr(config, 'LOCAL_ASR_LANGUAGE', 'auto'),
         'vad_mode': getattr(config, 'LOCAL_VAD_MODE', 'silero'),
         'vad_threshold': getattr(config, 'LOCAL_VAD_THRESHOLD', 0.50),
         'min_speech_duration': getattr(config, 'LOCAL_VAD_MIN_SPEECH_DURATION', 1.0),
@@ -337,8 +336,6 @@ def update_config(config_data):
                 if _eng not in LOCAL_ASR_ENGINES:
                     _eng = 'sensevoice'
                 config.LOCAL_ASR_ENGINE = _eng
-            if 'language' in local_asr:
-                config.LOCAL_ASR_LANGUAGE = str(local_asr['language'] or 'auto')
             if 'vad_mode' in local_asr:
                 config.LOCAL_VAD_MODE = str(local_asr['vad_mode'] or 'silero')
             if 'vad_threshold' in local_asr:

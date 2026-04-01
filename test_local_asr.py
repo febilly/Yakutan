@@ -106,7 +106,6 @@ class LocalAsrTests(unittest.TestCase):
     def setUp(self) -> None:
         self._original_values = {
             "LOCAL_ASR_ENGINE": config.LOCAL_ASR_ENGINE,
-            "LOCAL_ASR_LANGUAGE": config.LOCAL_ASR_LANGUAGE,
             "LOCAL_INCREMENTAL_ASR": config.LOCAL_INCREMENTAL_ASR,
             "LOCAL_INTERIM_INTERVAL": config.LOCAL_INTERIM_INTERVAL,
             "LOCAL_VAD_MODE": config.LOCAL_VAD_MODE,
@@ -116,7 +115,6 @@ class LocalAsrTests(unittest.TestCase):
             "LOCAL_VAD_SILENCE_DURATION": config.LOCAL_VAD_SILENCE_DURATION,
         }
         config.LOCAL_ASR_ENGINE = "sensevoice"
-        config.LOCAL_ASR_LANGUAGE = "auto"
         config.LOCAL_INCREMENTAL_ASR = True
         config.LOCAL_INTERIM_INTERVAL = 1.5
         config.LOCAL_VAD_MODE = "silero"

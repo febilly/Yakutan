@@ -110,7 +110,6 @@ function isLocalAsrUiEnabled() {
 function getLocalAsrConfigFromForm() {
     return {
         engine: document.getElementById('local-asr-engine')?.value || 'sensevoice',
-        language: (document.getElementById('local-asr-language')?.value || '').trim() || 'auto',
         vad_mode: document.getElementById('local-vad-mode')?.value || 'silero',
         vad_threshold: parseFloat(document.getElementById('local-vad-threshold')?.value || '0.5'),
         min_speech_duration: parseFloat(document.getElementById('local-min-speech-duration')?.value || '1'),
@@ -125,9 +124,6 @@ function applyLocalAsrConfig(config) {
     if (!config) return;
     if (document.getElementById('local-asr-engine')) {
         document.getElementById('local-asr-engine').value = config.engine || 'sensevoice';
-    }
-    if (document.getElementById('local-asr-language')) {
-        document.getElementById('local-asr-language').value = config.language || 'auto';
     }
     if (document.getElementById('local-vad-mode')) {
         document.getElementById('local-vad-mode').value = config.vad_mode || 'silero';
@@ -1883,7 +1879,6 @@ function loadDefaultConfig() {
     if (isLocalAsrUiEnabled()) {
         applyLocalAsrConfig({
             engine: 'sensevoice',
-            language: 'auto',
             vad_mode: 'silero',
             vad_threshold: 0.50,
             min_speech_duration: 1.0,

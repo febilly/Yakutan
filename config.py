@@ -82,9 +82,6 @@ _VALID_LOCAL_ASR_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
 if LOCAL_ASR_ENGINE not in _VALID_LOCAL_ASR_ENGINES:
     LOCAL_ASR_ENGINE = 'sensevoice'
 
-# 本地 ASR 语言提示
-LOCAL_ASR_LANGUAGE = 'auto'
-
 # 本地 VAD 配置（默认值沿用 LiveTranslate VADProcessor.__init__）
 LOCAL_VAD_MODE = 'silero'  # 可选: 'silero', 'energy', 'disabled'
 LOCAL_VAD_THRESHOLD = 0.50
