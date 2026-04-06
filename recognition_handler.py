@@ -256,12 +256,15 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             if secondary_future is not None:
                 secondary_translated_text = await secondary_future
 
+            # 在锁下原子读取所有排序状态，避免 TOCTOU 竞态
             with self._translate_ordering_lock:
                 latest_partial = self._latest_partial_request_id
+                current_finalized_seq = self._finalized_seq
+                current_final_output_version = self._final_output_version
             if (
                 request_id != latest_partial
-                or finalized_seq != self._finalized_seq
-                or final_output_version != self._final_output_version
+                or finalized_seq != current_finalized_seq
+                or final_output_version != current_final_output_version
             ):
                 return
             success = True
@@ -329,9 +332,28 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 else:
                     display_text = translation_display
 
+            # 最终检查：确保在发送OSC之前finalized_seq没有改变
+            # 防止迟到的partial覆盖已经显示的final结果
+            with self._translate_ordering_lock:
+                if (
+                    request_id != self._latest_partial_request_id
+                    or finalized_seq != self._finalized_seq
+                    or final_output_version != self._final_output_version
+                ):
+                    return
+
             await osc_manager.send_text(display_text, ongoing=True)
 
             current_reverse_trans = s.subtitles_state.get("reverse_translated", "")
+
+            # 再次检查：防止在await期间finalized_seq改变
+            with self._translate_ordering_lock:
+                if (
+                    request_id != self._latest_partial_request_id
+                    or finalized_seq != self._finalized_seq
+                    or final_output_version != self._final_output_version
+                ):
+                    return
 
             if use_secondary_output and actual_secondary_target is not None:
                 s.update_subtitles(
