@@ -769,6 +769,41 @@ input:checked + .slider:before {
     margin-bottom: 15px;
 }
 
+/* 新消息覆盖旧消息时的强调动画（文案相同时也能感知刷新） */
+@keyframes message-replace-nudge {
+    0% {
+        transform: translateY(0);
+        filter: brightness(1);
+    }
+    22% {
+        transform: translateY(-4px);
+        filter: brightness(1.14);
+    }
+    55% {
+        transform: translateY(0);
+        filter: brightness(1.06);
+    }
+    100% {
+        transform: translateY(0);
+        filter: brightness(1);
+    }
+}
+
+.message.success.message-replace-flash,
+.message.warning.message-replace-flash,
+.message.error.message-replace-flash {
+    animation: message-replace-nudge 0.48s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .message.success.message-replace-flash,
+    .message.warning.message-replace-flash,
+    .message.error.message-replace-flash {
+        animation: none;
+    }
+}
+
 footer {
     text-align: center;
     padding: 20px;

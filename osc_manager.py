@@ -7,11 +7,15 @@ import logging
 import time
 import threading
 import os
-from typing import Optional
+from typing import Optional, Tuple
 from dataclasses import dataclass
-from vrchat_oscquery.common import dict_to_dispatcher, vrc_client
+from pythonosc.udp_client import SimpleUDPClient
+
+from vrchat_oscquery.common import dict_to_dispatcher
 import vrchat_oscquery.common as vrchat_osc_common
 from vrchat_oscquery.threaded import vrc_osc
+
+import config as app_config
 
 __all__ = ["OSCManager", "osc_manager"]
 
@@ -81,7 +85,8 @@ class OSCManager:
             self._message_history: list[HistoryMessage] = []
             self._history_ttl_seconds = 10.0
             self._header_line = TRANSLATION_HEADER
-            
+            self._udp_send_target: Optional[Tuple[str, int]] = None
+
             self._emit("[OSC] OSC manager initialized")
         if truncate_messages is not None:
             self._truncate_enabled = bool(truncate_messages)
@@ -115,10 +120,18 @@ class OSCManager:
         self._emit("[OSC] Mute callback cleared")
     
     def get_udp_client(self):
-        """获取OSC UDP客户端实例（用于发送消息）"""
-        if self._client is None:
-            self._client = vrc_client()
-            self._emit("[OSC] UDP client created")
+        """获取 OSC UDP 客户端（发往 VRChat；端口来自 config.OSC_SEND_TARGET_PORT）。"""
+        host = (getattr(app_config, "OSC_CLIENT_IP", None) or "127.0.0.1").strip() or "127.0.0.1"
+        try:
+            port = int(getattr(app_config, "OSC_SEND_TARGET_PORT", 9000))
+        except (TypeError, ValueError):
+            port = 9000
+        port = max(1, min(65535, port))
+        target = (host, port)
+        if self._client is None or self._udp_send_target != target:
+            self._client = SimpleUDPClient(host, port)
+            self._udp_send_target = target
+            self._emit(f"[OSC] UDP client -> {host}:{port}")
         return self._client
 
     def _notify_mute_callback(self, mute_value: bool):

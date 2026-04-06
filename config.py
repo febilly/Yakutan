@@ -14,6 +14,17 @@ def _get_env_bool(name: str, default: bool = False) -> bool:
         return default
     return value.strip().lower() not in {'', '0', 'false', 'no', 'off'}
 
+
+def _get_env_int(name: str, default: int, *, min_v: int = 1, max_v: int = 65535) -> int:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == '':
+        return default
+    try:
+        v = int(str(raw).strip(), 10)
+        return max(min_v, min(max_v, v))
+    except ValueError:
+        return default
+
 # ============================================================================
 # 语音识别后端配置
 # ============================================================================
@@ -316,6 +327,12 @@ OSC_SERVER_PORT = 9000
 # OSC 客户端配置
 OSC_CLIENT_IP = '127.0.0.1'
 OSC_CLIENT_PORT = 9001
+
+# 发往 VRChat 的 OSC（如聊天框）使用的目标 UDP 端口，默认与游戏一致为 9000
+OSC_SEND_TARGET_PORT = _get_env_int('OSC_SEND_TARGET_PORT', 9000)
+
+# 是否绕过「VRChat OSC 所用 UDP 端口」占用检测（可由网页高级设置或环境变量覆盖）
+BYPASS_OSC_UDP_PORT_CHECK = _get_env_bool('BYPASS_OSC_UDP_PORT_CHECK', False)
 
 # ============================================================================
 # 线程池配置

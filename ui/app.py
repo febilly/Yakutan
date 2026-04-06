@@ -16,6 +16,7 @@ import os
 # 添加父目录到路径以导入config和main
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from udp_port_check import get_non_vrchat_udp_port_occupants
 try:
     from local_asr import (
         LOCAL_ASR_DISPLAY_NAMES,
@@ -111,6 +112,30 @@ def _local_asr_config_dict() -> dict:
         'silence_duration': getattr(config, 'LOCAL_VAD_SILENCE_DURATION', 0.8),
         'incremental_asr': getattr(config, 'LOCAL_INCREMENTAL_ASR', True),
         'interim_interval': getattr(config, 'LOCAL_INTERIM_INTERVAL', 2.0),
+    }
+
+
+def _osc_udp_port() -> int:
+    """与游戏接收 OSC 的端口一致，用于占用检测；优先使用 OSC_SEND_TARGET_PORT。"""
+    try:
+        p = int(
+            getattr(config, "OSC_SEND_TARGET_PORT", None)
+            or getattr(config, "OSC_SERVER_PORT", 9000)
+            or 9000
+        )
+        return max(1, min(65535, p))
+    except (TypeError, ValueError):
+        return 9000
+
+
+def _osc_udp_port_status_payload() -> dict:
+    """本机 OSC 目标 UDP 端口占用情况（供独立检测接口与启动前校验）。"""
+    port = _osc_udp_port()
+    conflicts = get_non_vrchat_udp_port_occupants(port)
+    return {
+        "osc_udp_port": port,
+        "udp_port_conflicts": conflicts,
+        "port_clear": len(conflicts) == 0,
     }
 
 
@@ -216,6 +241,8 @@ def get_config_dict():
             'server_port': config.OSC_SERVER_PORT,
             'client_ip': config.OSC_CLIENT_IP,
             'client_port': config.OSC_CLIENT_PORT,
+            'send_target_port': int(getattr(config, 'OSC_SEND_TARGET_PORT', 9000)),
+            'bypass_udp_port_check': bool(getattr(config, 'BYPASS_OSC_UDP_PORT_CHECK', False)),
         },
         'local_asr': _local_asr_config_dict() if is_local_asr_ui_enabled() else None,
         'config_applied_at_ms': int(getattr(config, 'CONFIG_APPLIED_AT_MS', 0) or 0),
@@ -328,6 +355,17 @@ def update_config(config_data):
             panel = config_data['panel']
             if 'width' in panel:
                 config.PANEL_WIDTH = max(300, int(panel['width']))
+
+        if 'osc' in config_data:
+            osc = config_data['osc']
+            if 'bypass_udp_port_check' in osc:
+                config.BYPASS_OSC_UDP_PORT_CHECK = bool(osc['bypass_udp_port_check'])
+            if 'send_target_port' in osc:
+                try:
+                    p = int(osc['send_target_port'])
+                except (TypeError, ValueError):
+                    p = 9000
+                config.OSC_SEND_TARGET_PORT = max(1, min(65535, p))
 
         if is_local_asr_ui_enabled() and 'local_asr' in config_data and config_data['local_asr']:
             local_asr = config_data['local_asr']
@@ -721,6 +759,12 @@ def list_input_devices():
         return jsonify({'devices': [], 'default_index': None, 'default_name': None, 'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None), 'error': str(e)}), 500
 
 
+@app.route('/api/udp-port-check', methods=['GET'])
+def udp_port_check():
+    """独立接口：检测本机 VRChat OSC 所用 UDP 端口是否被非 VRChat 进程占用。"""
+    return jsonify({'success': True, **_osc_udp_port_status_payload()})
+
+
 @app.route('/api/service/start', methods=['POST'])
 def start_service():
     """启动服务"""
@@ -728,10 +772,26 @@ def start_service():
     
     if service_status['running']:
         return jsonify({'success': False, 'message_id': 'msg.serviceAlreadyRunning', 'message': '服务已在运行中'})
-    
+
+    data = request.json or {}
+    bypass_udp = (
+        bool(data.get('bypass_osc_udp_port_check'))
+        if 'bypass_osc_udp_port_check' in data
+        else bool(getattr(config, 'BYPASS_OSC_UDP_PORT_CHECK', False))
+    )
+    if not bypass_udp:
+        udp_status = _osc_udp_port_status_payload()
+        if not udp_status['port_clear']:
+            return jsonify({
+                'success': False,
+                'message_id': 'msg.udpPortOccupied',
+                'message': 'UDP 端口被占用，无法启动服务',
+                'osc_udp_port': udp_status['osc_udp_port'],
+                'udp_port_conflicts': udp_status['udp_port_conflicts'],
+            })
+
     try:
         # 从请求中获取 API Keys
-        data = request.json or {}
         api_keys = data.get('api_keys', {})
         
         # 设置 API Keys 到环境变量
@@ -754,7 +814,11 @@ def start_service():
         service_thread.start()
         service_status['running'] = True
         service_status['backend'] = _sanitize_preferred_backend(config.PREFERRED_ASR_BACKEND)
-        return jsonify({'success': True, 'message_id': 'msg.serviceStarted', 'message': '服务已启动'})
+        return jsonify({
+            'success': True,
+            'message_id': 'msg.serviceStarted',
+            'message': '服务已启动',
+        })
     except Exception as e:
         print(f'Error starting service: {e}')
         return jsonify({'success': False, 'message_id': 'msg.startFailed', 'message': '启动失败'}), 500
@@ -796,7 +860,18 @@ def restart_service():
     
     if not service_status['running']:
         return jsonify({'success': False, 'message_id': 'msg.noRestartNeeded', 'message': '服务未运行，无需重启'})
-    
+
+    if not bool(getattr(config, 'BYPASS_OSC_UDP_PORT_CHECK', False)):
+        udp_status = _osc_udp_port_status_payload()
+        if not udp_status['port_clear']:
+            return jsonify({
+                'success': False,
+                'message_id': 'msg.udpPortOccupied',
+                'message': 'UDP 端口被占用，无法重启服务',
+                'osc_udp_port': udp_status['osc_udp_port'],
+                'udp_port_conflicts': udp_status['udp_port_conflicts'],
+            })
+
     try:
         # 从 main 模块获取最新的 stop_event
         import main
@@ -817,8 +892,12 @@ def restart_service():
         service_thread = threading.Thread(target=run_service_async, daemon=True)
         service_thread.start()
         service_status['running'] = True
-        
-        return jsonify({'success': True, 'message_id': 'msg.serviceRestarted', 'message': '服务已重启'})
+
+        return jsonify({
+            'success': True,
+            'message_id': 'msg.serviceRestarted',
+            'message': '服务已重启',
+        })
     except Exception as e:
         print(f'Error restarting service: {e}')
         return jsonify({'success': False, 'message_id': 'msg.restartFailed', 'message': '重启失败'}), 500

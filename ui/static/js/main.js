@@ -934,6 +934,15 @@ function getNormalizedPanelWidth() {
     return normalizedValue;
 }
 
+function getOscSendTargetPortFromForm() {
+    const input = document.getElementById('osc-send-target-port');
+    if (!input) return 9000;
+    const raw = parseInt(input.value, 10);
+    const p = Math.max(1, Math.min(65535, Number.isFinite(raw) ? raw : 9000));
+    input.value = p;
+    return p;
+}
+
 function applyLLMTemplate(templateName) {
     const previousTemplateName = detectActiveLLMTemplate();
     const baseUrlInput = document.getElementById('llm-base-url');
@@ -1797,6 +1806,20 @@ function loadConfigFromLocalStorage() {
                 getNormalizedPanelWidth();
             }
 
+            const bypassOscEl = document.getElementById('bypass-osc-udp-port-check');
+            if (bypassOscEl && config.osc) {
+                bypassOscEl.checked = config.osc.bypass_udp_port_check ?? false;
+            }
+            const oscPortEl = document.getElementById('osc-send-target-port');
+            if (oscPortEl && config.osc) {
+                const stp = config.osc.send_target_port;
+                const p =
+                    stp == null || stp === ''
+                        ? 9000
+                        : Math.max(1, Math.min(65535, parseInt(stp, 10) || 9000));
+                oscPortEl.value = String(p);
+            }
+
             console.log('✓ 已从浏览器加载配置');
         } else {
             // 如果没有保存的配置，使用前端默认值（由页面初始化处再拉取服务器并 / 或对账）
@@ -1896,6 +1919,15 @@ function loadDefaultConfig() {
     // 小面板
     document.getElementById('panel-width').value = 600;
 
+    const bypassOscDefault = document.getElementById('bypass-osc-udp-port-check');
+    if (bypassOscDefault) {
+        bypassOscDefault.checked = false;
+    }
+    const oscPortDefault = document.getElementById('osc-send-target-port');
+    if (oscPortDefault) {
+        oscPortDefault.value = '9000';
+    }
+
     console.log('✓ 已加载前端默认配置');
     updateOpenRouterStreamingUi();
     updateFuriganaVisibility();
@@ -1985,6 +2017,19 @@ function applyServerConfigPayload(config) {
     applyAutoLanguageDetectorIfNeeded();
     document.getElementById('panel-width').value = (config.panel && config.panel.width) || 600;
     getNormalizedPanelWidth();
+    const bypassOscEl = document.getElementById('bypass-osc-udp-port-check');
+    if (bypassOscEl && config.osc) {
+        bypassOscEl.checked = config.osc.bypass_udp_port_check ?? false;
+    }
+    const oscPortApply = document.getElementById('osc-send-target-port');
+    if (oscPortApply && config.osc) {
+        const stp = config.osc.send_target_port;
+        const p =
+            stp == null || stp === ''
+                ? 9000
+                : Math.max(1, Math.min(65535, parseInt(stp, 10) || 9000));
+        oscPortApply.value = String(p);
+    }
     if (isLocalAsrUiEnabled()) {
         applyLocalAsrConfig(config.local_asr || {});
     }
@@ -2111,6 +2156,11 @@ function saveConfigToLocalStorage() {
             },
             panel: {
                 width: getNormalizedPanelWidth(),
+            },
+            osc: {
+                send_target_port: getOscSendTargetPortFromForm(),
+                bypass_udp_port_check:
+                    document.getElementById('bypass-osc-udp-port-check')?.checked === true,
             },
             local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
         };
@@ -2304,6 +2354,11 @@ async function saveConfig(autoSave = false) {
             panel: {
                 width: getNormalizedPanelWidth(),
             },
+            osc: {
+                send_target_port: getOscSendTargetPortFromForm(),
+                bypass_udp_port_check:
+                    document.getElementById('bypass-osc-udp-port-check')?.checked === true,
+            },
             local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
             api_keys: {
                 llm: document.getElementById('llm-api-key').value.trim(),
@@ -2384,6 +2439,33 @@ async function updateStatus() {
     }
 }
 
+/** 根据 /api/udp-port-check 或带 udp_port_conflicts 的响应构建 UDP 端口冲突提示（无冲突则返回空字符串）。 */
+function buildUdpPortConflictWarning(payload, t) {
+    if (!payload || !Array.isArray(payload.udp_port_conflicts) || !payload.udp_port_conflicts.length) {
+        return '';
+    }
+    const oscPort = payload.osc_udp_port ?? 9000;
+    const programs = payload.udp_port_conflicts.map((p) => `${p.name} (PID ${p.pid})`).join(', ');
+    return t('msg.udpPortConflictWarning', { port: oscPort, programs });
+}
+
+/** 冲突详情 + 已取消操作说明（供错误提示使用）。 */
+function buildUdpPortBlockUserMessage(payload, t) {
+    const detail = buildUdpPortConflictWarning(payload, t);
+    if (!detail) {
+        return '';
+    }
+    return `${detail} ${t('msg.udpPortBlockedCancel')}`;
+}
+
+async function fetchOscUdpPortCheck() {
+    const res = await fetch(`${API_BASE}/udp-port-check`);
+    if (!res.ok) {
+        throw new Error(`udp-port-check HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
 // 启动服务
 async function startService() {
     const startBtn = document.getElementById('start-btn');
@@ -2394,6 +2476,22 @@ async function startService() {
     startBtn.disabled = true;
     startBtn.textContent = t('btn.starting');
     pendingWarningMessage = null;
+
+    const bypassOscUdp = document.getElementById('bypass-osc-udp-port-check')?.checked === true;
+    if (!bypassOscUdp) {
+        try {
+            const udpPayload = await fetchOscUdpPortCheck();
+            const blockMsg = buildUdpPortBlockUserMessage(udpPayload, t);
+            if (blockMsg) {
+                showMessage('❌ ' + blockMsg, 'error');
+                startBtn.disabled = false;
+                startBtn.textContent = t('btn.startService');
+                return;
+            }
+        } catch (e) {
+            console.warn('OSC UDP port check failed:', e);
+        }
+    }
 
     try {
         const asrBackend = document.getElementById('asr-backend').value;
@@ -2569,7 +2667,11 @@ async function startService() {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ api_keys: apiKeys }),
+            body: JSON.stringify({
+                api_keys: apiKeys,
+                bypass_osc_udp_port_check:
+                    document.getElementById('bypass-osc-udp-port-check')?.checked === true,
+            }),
         });
 
         const result = await response.json();
@@ -2583,8 +2685,13 @@ async function startService() {
             }
             setTimeout(updateStatus, 500);
         } else {
-            const localizedMsg = localizeBackendMessage(result.message_id, result.message);
-            showMessage('❌ ' + t('msg.serviceStartFailed') + localizedMsg, 'error');
+            if (Array.isArray(result.udp_port_conflicts) && result.udp_port_conflicts.length) {
+                const blockMsg = buildUdpPortBlockUserMessage(result, t);
+                showMessage('❌ ' + (blockMsg || localizeBackendMessage(result.message_id, result.message)), 'error');
+            } else {
+                const localizedMsg = localizeBackendMessage(result.message_id, result.message);
+                showMessage('❌ ' + t('msg.serviceStartFailed') + localizedMsg, 'error');
+            }
             startBtn.disabled = false;
         }
     } catch (error) {
@@ -2632,6 +2739,21 @@ async function stopService() {
 // 重启服务
 async function restartService() {
     try {
+        const tr = window.i18n ? window.i18n.t : (key) => key;
+        const bypassOscRestart = document.getElementById('bypass-osc-udp-port-check')?.checked === true;
+        if (!bypassOscRestart) {
+            try {
+                const udpPayload = await fetchOscUdpPortCheck();
+                const blockMsg = buildUdpPortBlockUserMessage(udpPayload, tr);
+                if (blockMsg) {
+                    showMessage('❌ ' + blockMsg, 'error');
+                    return;
+                }
+            } catch (e) {
+                console.warn('OSC UDP port check failed:', e);
+            }
+        }
+
         const response = await fetch(`${API_BASE}/service/restart`, {
             method: 'POST',
         });
@@ -2640,7 +2762,14 @@ async function restartService() {
 
         if (result.success) {
             console.log('服务已重启');
+            showMessage('✅ ' + tr('msg.serviceRestarted'), 'success');
             setTimeout(updateStatus, 500);
+        } else if (Array.isArray(result.udp_port_conflicts) && result.udp_port_conflicts.length) {
+            const blockMsg = buildUdpPortBlockUserMessage(result, tr);
+            showMessage('❌ ' + (blockMsg || localizeBackendMessage(result.message_id, result.message)), 'error');
+        } else {
+            const localizedMsg = localizeBackendMessage(result.message_id, result.message);
+            showMessage('❌ ' + localizedMsg, 'error');
         }
     } catch (error) {
         console.error('重启服务失败:', error);
@@ -2689,16 +2818,23 @@ async function resetToDefaults() {
     }
 }
 
-// 显示消息
+// 显示消息（不自动消失，仅被后续 showMessage 覆盖）
 function showMessage(text, type) {
     const messageEl = document.getElementById('message');
+    if (messageEl._replaceFlashTimer != null) {
+        clearTimeout(messageEl._replaceFlashTimer);
+        messageEl._replaceFlashTimer = null;
+    }
     messageEl.textContent = text;
     messageEl.className = 'message ' + type;
-
-    // 5秒后自动隐藏
-    setTimeout(() => {
-        messageEl.className = 'message';
-    }, 5000);
+    messageEl.classList.remove('message-replace-flash');
+    /* 强制重排以便连续相同文案也能重播动画 */
+    void messageEl.offsetWidth;
+    messageEl.classList.add('message-replace-flash');
+    messageEl._replaceFlashTimer = setTimeout(() => {
+        messageEl.classList.remove('message-replace-flash');
+        messageEl._replaceFlashTimer = null;
+    }, 520);
 }
 
 // 显示本地化消息（使用消息ID）

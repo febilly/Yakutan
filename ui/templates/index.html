@@ -704,6 +704,31 @@
                             </div>
                         </div>
 
+                        <!-- OSC / 端口 -->
+                        <div class="subsection">
+                            <h3 data-i18n="subsection.oscNetwork">OSC</h3>
+                            <div class="form-group">
+                                <label for="osc-send-target-port" data-i18n="label.oscSendTargetPort">OSC
+                                    发送目标端口</label>
+                                <input type="number" id="osc-send-target-port" class="form-control" min="1"
+                                    max="65535" step="1" value="9000" onchange="onSettingChange()">
+                                <small class="form-text" data-i18n="hint.oscSendTargetPort">VRChat 接收 OSC 的 UDP
+                                    端口，默认 9000。非必要请勿修改；错误端口将导致聊天框等消息无法送达。</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.bypassOscUdpPortCheck">绕过 VRChat OSC 端口占用检查</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="bypass-osc-udp-port-check"
+                                            onchange="onSettingChange(this)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" data-i18n="hint.bypassOscUdpPortCheck">开启后启动/重启服务时不再检查 UDP
+                                    端口占用（可能影响游戏接收 OSC，仅在知情时使用）</small>
+                            </div>
+                        </div>
+
                         <!-- 语言检测器设置 -->
                         <div class="subsection">
                             <h3 data-i18n="subsection.langDetector">语言检测器设置</h3>
