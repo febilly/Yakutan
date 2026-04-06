@@ -2677,12 +2677,21 @@ async function startService() {
         const result = await response.json();
 
         if (result.success) {
-            if (pendingWarningMessage) {
-                showMessage('⚠️ ' + pendingWarningMessage + ' ' + t('msg.serviceStartSuccess'), 'warning');
-                pendingWarningMessage = null;
-            } else {
-                showMessage('✅ ' + t('msg.serviceStartSuccess'), 'success');
+            const acceleratorWarning = localizeBackendMessage(
+                result.accelerator_warning_message_id,
+                result.accelerator_warning_message,
+            );
+            const hasPendingWarning = !!pendingWarningMessage;
+            const startMessageLines = [];
+            if (hasPendingWarning) {
+                startMessageLines.push('⚠️ ' + pendingWarningMessage);
             }
+            startMessageLines.push('✅ ' + t('msg.serviceStartSuccess'));
+            if (acceleratorWarning) {
+                startMessageLines.push('⚠️ ' + acceleratorWarning);
+            }
+            showMessage(startMessageLines.join('\n'), hasPendingWarning ? 'warning' : 'success');
+            pendingWarningMessage = null;
             setTimeout(updateStatus, 500);
         } else {
             if (Array.isArray(result.udp_port_conflicts) && result.udp_port_conflicts.length) {

@@ -3,10 +3,12 @@ Web UI for VRChat Translator
 提供配置管理和服务控制的Web界面
 """
 import asyncio
+import ctypes
 import json
 import threading
 import logging
-from typing import Optional
+from ctypes import wintypes
+from typing import List, Optional
 from urllib.parse import urlencode
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
@@ -136,6 +138,59 @@ def _osc_udp_port_status_payload() -> dict:
         "osc_udp_port": port,
         "udp_port_conflicts": conflicts,
         "port_clear": len(conflicts) == 0,
+    }
+
+
+def _find_window_titles_containing(keyword: str) -> List[str]:
+    """枚举顶层窗口标题，返回包含指定关键字的窗口标题。"""
+    if os.name != 'nt' or not keyword:
+        return []
+
+    matches: List[str] = []
+    seen = set()
+
+    try:
+        user32 = ctypes.windll.user32
+        enum_windows_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        @enum_windows_proc
+        def _enum_proc(hwnd, _lparam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+
+            title_length = user32.GetWindowTextLengthW(hwnd)
+            if title_length <= 0:
+                return True
+
+            buffer = ctypes.create_unicode_buffer(title_length + 1)
+            user32.GetWindowTextW(hwnd, buffer, len(buffer))
+            title = buffer.value.strip()
+            if title and keyword in title and title not in seen:
+                seen.add(title)
+                matches.append(title)
+            return True
+
+        user32.EnumWindows(_enum_proc, 0)
+    except Exception as exc:
+        print(f'[UI] Failed to scan window titles for "{keyword}": {exc}')
+
+    return matches
+
+
+def _accelerator_window_warning_payload() -> dict:
+    """检测是否存在标题含“加速器”的窗口，并返回前端提示所需字段。"""
+    matched_titles = _find_window_titles_containing('加速器')
+    detected = len(matched_titles) > 0
+    return {
+        'accelerator_window_detected': detected,
+        'accelerator_window_titles': matched_titles,
+        'accelerator_warning_message_id': (
+            'msg.acceleratorProcessModeWarning' if detected else None
+        ),
+        'accelerator_warning_message': (
+            '检测到疑似有加速器正在运行，如您在使用加速器，请确保加速器当前模式不是“进程模式”。'
+            if detected else ''
+        ),
     }
 
 
@@ -809,6 +864,8 @@ def start_service():
 
         if 'doubao' in api_keys and api_keys['doubao']:
             os.environ['DOUBAO_API_KEY'] = api_keys['doubao']
+
+        accelerator_warning = _accelerator_window_warning_payload()
         
         service_thread = threading.Thread(target=run_service_async, daemon=True)
         service_thread.start()
@@ -818,6 +875,7 @@ def start_service():
             'success': True,
             'message_id': 'msg.serviceStarted',
             'message': '服务已启动',
+            **accelerator_warning,
         })
     except Exception as e:
         print(f'Error starting service: {e}')

@@ -733,6 +733,7 @@ input:checked + .slider:before {
     padding: 0 15px;
     border-radius: 4px;
     font-size: 14px;
+    white-space: pre-line;
     max-height: 0;
     opacity: 0;
     overflow: hidden;
@@ -743,7 +744,7 @@ input:checked + .slider:before {
     background-color: #d4edda;
     color: #155724;
     border: 1px solid #c3e6cb;
-    max-height: 200px;
+    max-height: 260px;
     opacity: 1;
     padding: 10px 15px;
     margin-bottom: 15px;
@@ -753,7 +754,7 @@ input:checked + .slider:before {
     background-color: #fff8db;
     color: #8a6d3b;
     border: 1px solid #ffe58f;
-    max-height: 200px;
+    max-height: 260px;
     opacity: 1;
     padding: 10px 15px;
     margin-bottom: 15px;
@@ -763,7 +764,7 @@ input:checked + .slider:before {
     background-color: #f8d7da;
     color: #721c24;
     border: 1px solid #f5c6cb;
-    max-height: 200px;
+    max-height: 260px;
     opacity: 1;
     padding: 10px 15px;
     margin-bottom: 15px;
