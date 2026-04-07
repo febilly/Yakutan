@@ -337,6 +337,9 @@ OSC_SEND_TARGET_PORT = _get_env_int('OSC_SEND_TARGET_PORT', 9000)
 # 是否绕过「VRChat OSC 所用 UDP 端口」占用检测（可由网页高级设置或环境变量覆盖）
 BYPASS_OSC_UDP_PORT_CHECK = _get_env_bool('BYPASS_OSC_UDP_PORT_CHECK', False)
 
+# 出错时是否仍将错误消息发送到 OSC（小面板始终显示错误，不受此项影响）
+OSC_SEND_ERROR_MESSAGES = _get_env_bool('OSC_SEND_ERROR_MESSAGES', False)
+
 # ============================================================================
 # 线程池配置
 # ============================================================================

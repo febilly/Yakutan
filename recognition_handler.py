@@ -117,6 +117,50 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         normalized_segment = segment.strip().rstrip("。？！，、.?!,… ")
         return len(normalized_segment) >= min_chars
 
+    @staticmethod
+    def _has_error_text(text: Optional[str]) -> bool:
+        return bool(text) and "[ERROR]" in str(text)
+
+    @staticmethod
+    def _filter_error_lines_for_osc(
+        default_display_text: Optional[str],
+        primary_raw_text: Optional[str] = None,
+        primary_display_text: Optional[str] = None,
+        primary_language: Optional[str] = None,
+        secondary_raw_text: Optional[str] = None,
+        secondary_display_text: Optional[str] = None,
+        secondary_language: Optional[str] = None,
+    ) -> Optional[str]:
+        if not default_display_text:
+            return default_display_text
+        if getattr(config, 'OSC_SEND_ERROR_MESSAGES', False):
+            return default_display_text
+
+        primary_has_error = VRChatRecognitionCallback._has_error_text(primary_raw_text)
+        secondary_has_error = VRChatRecognitionCallback._has_error_text(secondary_raw_text)
+        if not primary_has_error and not secondary_has_error:
+            return default_display_text
+
+        visible_lines = []
+        visible_languages = []
+        if primary_display_text and not primary_has_error:
+            visible_lines.append(primary_display_text)
+            visible_languages.append(primary_language)
+        if secondary_display_text and not secondary_has_error:
+            visible_lines.append(secondary_display_text)
+            visible_languages.append(secondary_language)
+
+        if len(visible_lines) >= 2:
+            return build_dual_output_display(
+                visible_lines[0],
+                visible_lines[1],
+                visible_languages[0],
+                visible_languages[1],
+            )
+        if len(visible_lines) == 1:
+            return build_dual_output_display(visible_lines[0], None)
+        return None
+
     def _cancel_partial_debounce(self) -> None:
         """取消尚未触发的流式翻译消抖定时器。"""
 
@@ -257,6 +301,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             if secondary_future is not None:
                 secondary_translated_text = await secondary_future
 
+            raw_translated_text = translated_text
+            raw_secondary_translated_text = secondary_translated_text
+
             # 在锁下原子读取所有排序状态，避免 TOCTOU 竞态
             with self._translate_ordering_lock:
                 latest_partial = self._latest_partial_request_id
@@ -333,6 +380,26 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 else:
                     display_text = translation_display
 
+            osc_text = self._filter_error_lines_for_osc(
+                display_text,
+                primary_raw_text=raw_translated_text if primary_should_translate else None,
+                primary_display_text=translation_display,
+                primary_language=actual_target if primary_should_translate else detected_lang,
+                secondary_raw_text=(
+                    raw_secondary_translated_text
+                    if use_secondary_output and secondary_should_translate
+                    else None
+                ),
+                secondary_display_text=(
+                    secondary_translation_display
+                    if use_secondary_output and actual_secondary_target is not None
+                    else None
+                ),
+                secondary_language=(
+                    actual_secondary_target if secondary_should_translate else detected_lang
+                ) if use_secondary_output and actual_secondary_target is not None else None,
+            )
+
             # 最终检查：确保在发送OSC之前finalized_seq没有改变
             # 防止迟到的partial覆盖已经显示的final结果
             with self._translate_ordering_lock:
@@ -343,7 +410,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 ):
                     return
 
-            await osc_manager.send_text(display_text, ongoing=True)
+            if osc_text:
+                await osc_manager.send_text(osc_text, ongoing=True)
 
             current_reverse_trans = s.subtitles_state.get("reverse_translated", "")
 
@@ -647,6 +715,26 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         if display_text is None:
             return
 
+        osc_text = display_text
+        if is_translated:
+            osc_text = self._filter_error_lines_for_osc(
+                display_text,
+                primary_raw_text=translated_text if primary_should_translate else None,
+                primary_display_text=display_translated_text,
+                primary_language=(
+                    actual_target if primary_should_translate else source_lang
+                ) if actual_target is not None else None,
+                secondary_raw_text=(
+                    secondary_translated_text
+                    if use_secondary_output and secondary_should_translate
+                    else None
+                ),
+                secondary_display_text=secondary_display_translated_text,
+                secondary_language=(
+                    actual_secondary_target if secondary_should_translate else source_lang
+                ) if use_secondary_output else None,
+            )
+
         if is_translated:
             if use_secondary_output and secondary_display_translated_text is not None:
                 s.update_subtitles(
@@ -666,10 +754,11 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
         if self.loop:
             if _should_send:
-                asyncio.run_coroutine_threadsafe(
-                    osc_manager.send_text(display_text, ongoing=is_ongoing),
-                    self.loop,
-                )
+                if osc_text:
+                    asyncio.run_coroutine_threadsafe(
+                        osc_manager.send_text(osc_text, ongoing=is_ongoing),
+                        self.loop,
+                    )
             elif is_ongoing:
                 asyncio.run_coroutine_threadsafe(
                     osc_manager.set_typing(is_ongoing),

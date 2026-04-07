@@ -188,6 +188,8 @@ const translations = {
         'label.oscSendTargetPort': 'OSC 发送目标端口',
         'hint.oscSendTargetPort':
             'VRChat 接收 OSC 的 UDP 端口，默认 9000。请务必谨慎修改：端口错误会导致聊天框等消息无法送达；仅在与游戏或网络环境实际监听端口一致时调整。',
+        'label.oscSendErrorMessages': '报错时将错误消息发送到 OSC',
+        'hint.oscSendErrorMessages': '默认关闭。关闭后错误仍会显示在小窗口，但不会发送到游戏 OSC。',
         'subsection.langDetector': '语言检测器设置',
         'label.detectorType': '检测器类型',
         'detector.cjke': '中日韩英检测器（推荐）',
@@ -462,6 +464,8 @@ const translations = {
         'label.oscSendTargetPort': 'OSC send target UDP port',
         'hint.oscSendTargetPort':
             'UDP port where VRChat listens for OSC (default 9000). Change with care: a wrong port prevents chatbox and similar messages from arriving; only set if it matches your game or network setup.',
+        'label.oscSendErrorMessages': 'Send error messages to OSC',
+        'hint.oscSendErrorMessages': 'Off by default. Errors still appear in the mini panel, but will not be sent to in-game OSC.',
         'subsection.langDetector': 'Language Detector Settings',
         'label.detectorType': 'Detector Type',
         'detector.cjke': 'CJK-English Detector (Recommended)',
@@ -728,6 +732,8 @@ const translations = {
         'label.oscSendTargetPort': 'OSC 送信先 UDP ポート',
         'hint.oscSendTargetPort':
             'VRChat が OSC を受信する UDP ポート（既定 9000）。変更は慎重に：誤ったポートではチャットボックス等が届きません。ゲームや環境の実際の待受ポートと一致するときのみ変更してください。',
+        'label.oscSendErrorMessages': 'エラー時も OSC に送信',
+        'hint.oscSendErrorMessages': '既定ではオフです。オフでもエラーはミニパネルに表示されますが、ゲームの OSC には送信しません。',
         'subsection.langDetector': '言語検出器設定',
         'label.detectorType': '検出器タイプ',
         'detector.cjke': 'CJK-英語検出器（推奨）',
@@ -990,6 +996,8 @@ const translations = {
         'label.oscSendTargetPort': 'OSC 전송 대상 UDP 포트',
         'hint.oscSendTargetPort':
             'VRChat이 OSC를 수신하는 UDP 포트(기본 9000). 변경은 신중히: 잘못된 포트면 채팅 상자 등이 전달되지 않습니다. 게임/환경에서 실제로 열어둔 포트와 같을 때만 바꾸세요.',
+        'label.oscSendErrorMessages': '오류 메시지도 OSC로 전송',
+        'hint.oscSendErrorMessages': '기본값은 꺼짐입니다. 꺼져 있어도 오류는 미니 패널에 계속 표시되지만 게임 OSC로는 보내지 않습니다.',
         'subsection.langDetector': '언어 감지기 설정',
         'label.detectorType': '감지기 유형',
         'detector.cjke': 'CJK-영어 감지기 (권장)',

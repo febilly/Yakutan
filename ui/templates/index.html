@@ -737,6 +737,17 @@
                                 <small class="form-text" data-i18n="hint.bypassOscUdpPortCheck">开启后启动/重启服务时不再检查 UDP
                                     端口占用（可能影响游戏接收 OSC，仅在知情时使用）</small>
                             </div>
+                            <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.oscSendErrorMessages">报错时将错误消息发送到 OSC</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="osc-send-error-messages"
+                                            onchange="onSettingChange(this)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" data-i18n="hint.oscSendErrorMessages">默认关闭。关闭后错误仍会显示在小窗口，但不会发送到游戏 OSC。</small>
+                            </div>
                         </div>
 
                         <!-- 语言检测器设置 -->

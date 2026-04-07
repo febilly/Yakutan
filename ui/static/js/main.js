@@ -1766,6 +1766,21 @@ function loadConfigFromLocalStorage() {
                 }
             }
 
+            if (config.osc) {
+                const bypassOscEl = document.getElementById('bypass-osc-udp-port-check');
+                if (bypassOscEl) {
+                    bypassOscEl.checked = config.osc.bypass_udp_port_check ?? false;
+                }
+                const oscPortEl = document.getElementById('osc-send-target-port');
+                if (oscPortEl) {
+                    oscPortEl.value = config.osc.send_target_port ?? 9000;
+                }
+                const oscSendErrorsEl = document.getElementById('osc-send-error-messages');
+                if (oscSendErrorsEl) {
+                    oscSendErrorsEl.checked = config.osc.send_error_messages ?? false;
+                }
+            }
+
             if (config.mic_control) {
                 document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control ?? true;
                 document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds || 0.2;
@@ -1925,6 +1940,10 @@ function loadDefaultConfig() {
     if (bypassOscDefault) {
         bypassOscDefault.checked = false;
     }
+    const oscSendErrorsDefault = document.getElementById('osc-send-error-messages');
+    if (oscSendErrorsDefault) {
+        oscSendErrorsDefault.checked = false;
+    }
     const oscPortDefault = document.getElementById('osc-send-target-port');
     if (oscPortDefault) {
         oscPortDefault.value = '9000';
@@ -2023,6 +2042,10 @@ function applyServerConfigPayload(config) {
     const bypassOscEl = document.getElementById('bypass-osc-udp-port-check');
     if (bypassOscEl && config.osc) {
         bypassOscEl.checked = config.osc.bypass_udp_port_check ?? false;
+    }
+    const oscSendErrorsEl = document.getElementById('osc-send-error-messages');
+    if (oscSendErrorsEl && config.osc) {
+        oscSendErrorsEl.checked = config.osc.send_error_messages ?? false;
     }
     const oscPortApply = document.getElementById('osc-send-target-port');
     if (oscPortApply && config.osc) {
@@ -2165,6 +2188,8 @@ function saveConfigToLocalStorage() {
                 send_target_port: getOscSendTargetPortFromForm(),
                 bypass_udp_port_check:
                     document.getElementById('bypass-osc-udp-port-check')?.checked === true,
+                send_error_messages:
+                    document.getElementById('osc-send-error-messages')?.checked === true,
             },
             local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
         };
@@ -2363,6 +2388,8 @@ async function saveConfig(autoSave = false) {
                 send_target_port: getOscSendTargetPortFromForm(),
                 bypass_udp_port_check:
                     document.getElementById('bypass-osc-udp-port-check')?.checked === true,
+                send_error_messages:
+                    document.getElementById('osc-send-error-messages')?.checked === true,
             },
             local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
             api_keys: {

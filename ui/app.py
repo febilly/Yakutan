@@ -299,6 +299,7 @@ def get_config_dict():
             'client_port': config.OSC_CLIENT_PORT,
             'send_target_port': int(getattr(config, 'OSC_SEND_TARGET_PORT', 9000)),
             'bypass_udp_port_check': bool(getattr(config, 'BYPASS_OSC_UDP_PORT_CHECK', False)),
+            'send_error_messages': bool(getattr(config, 'OSC_SEND_ERROR_MESSAGES', False)),
         },
         'local_asr': _local_asr_config_dict() if is_local_asr_ui_enabled() else None,
         'config_applied_at_ms': int(getattr(config, 'CONFIG_APPLIED_AT_MS', 0) or 0),
@@ -418,6 +419,8 @@ def update_config(config_data):
             osc = config_data['osc']
             if 'bypass_udp_port_check' in osc:
                 config.BYPASS_OSC_UDP_PORT_CHECK = bool(osc['bypass_udp_port_check'])
+            if 'send_error_messages' in osc:
+                config.OSC_SEND_ERROR_MESSAGES = bool(osc['send_error_messages'])
             if 'send_target_port' in osc:
                 try:
                     p = int(osc['send_target_port'])
@@ -1000,6 +1003,11 @@ def get_defaults():
         },
         'panel': {
             'width': 600,
+        },
+        'osc': {
+            'send_target_port': 9000,
+            'bypass_udp_port_check': False,
+            'send_error_messages': False,
         },
         'local_asr': _local_asr_config_dict() if is_local_asr_ui_enabled() else None,
     })
