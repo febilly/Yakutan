@@ -114,6 +114,18 @@ def _sanitize_output_line(text: str) -> str:
     return " ".join(part.strip() for part in normalized.split('\n') if part.strip())
 
 
+def remove_trailing_sentence_period_if_needed(text: str) -> str:
+    """Optionally remove a single trailing sentence-final period."""
+    sanitized = _sanitize_output_line(text)
+    if not sanitized or not getattr(config, 'REMOVE_TRAILING_PERIOD', False):
+        return sanitized
+
+    trimmed = sanitized.rstrip()
+    if trimmed.endswith(("。", ".", "．")):
+        return trimmed[:-1].rstrip()
+    return trimmed
+
+
 def _normalize_language_base(language: Optional[str]) -> str:
     if language is None:
         return ""
@@ -197,7 +209,7 @@ def build_dual_output_display(
 
 
 def build_streaming_output_line(text: str) -> str:
-    formatted_text = _sanitize_output_line(text)
+    formatted_text = remove_trailing_sentence_period_if_needed(text)
     if formatted_text:
         return f"{formatted_text}……"
     return "……"
@@ -336,4 +348,5 @@ def add_pinyin_if_needed(text: str, language: str) -> str:
 def get_display_translation_text(translated_text: str, target_language: str) -> str:
     """为翻译结果添加假名/拼音标注。"""
     display_text = add_furigana_if_needed(translated_text, target_language)
-    return add_pinyin_if_needed(display_text, target_language)
+    display_text = add_pinyin_if_needed(display_text, target_language)
+    return remove_trailing_sentence_period_if_needed(display_text)

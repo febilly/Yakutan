@@ -22,6 +22,7 @@ from text_processor import (
     get_display_translation_text,
     build_streaming_output_line,
     build_dual_output_display,
+    remove_trailing_sentence_period_if_needed,
 )
 from translation_pipeline import (
     is_streaming_deepl_hybrid_mode,
@@ -299,7 +300,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             )
             translation_display = build_streaming_output_line(display_translation)
             current_original_display = (
-                s.subtitles_state.get("original", "") or f"{segment.strip()}……"
+                s.subtitles_state.get("original", "") or build_streaming_output_line(segment)
             )
 
             if use_secondary_output and actual_secondary_target is not None:
@@ -408,10 +409,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
         if is_ongoing:
             print(f'部分：{text}', end='\r')
-            display_text = text
+            display_text = remove_trailing_sentence_period_if_needed(text)
             current_trans = s.subtitles_state.get("translated", "")
             current_reverse_trans = s.subtitles_state.get("reverse_translated", "")
-            s.update_subtitles(text, current_trans, True, current_reverse_trans)
+            s.update_subtitles(display_text, current_trans, True, current_reverse_trans)
 
             if config.ENABLE_TRANSLATION and getattr(config, 'TRANSLATE_PARTIAL_RESULTS', False):
                 segment = self._extract_streaming_segment(text)
@@ -437,6 +438,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 source_lang = source_lang_info['language']
                 display_text = add_furigana_if_needed(text, source_lang)
                 display_text = add_pinyin_if_needed(display_text, source_lang)
+                display_text = remove_trailing_sentence_period_if_needed(display_text)
                 print(f'识别：{display_text}')
                 s.update_subtitles(display_text, "", is_ongoing, "")
             else:
@@ -584,6 +586,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
                 display_source_text = add_furigana_if_needed(text, source_lang)
                 display_source_text = add_pinyin_if_needed(display_source_text, source_lang)
+                display_source_text = remove_trailing_sentence_period_if_needed(display_source_text)
 
                 primary_translated = primary_should_translate
                 is_translated = primary_should_translate or secondary_should_translate

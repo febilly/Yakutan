@@ -274,6 +274,7 @@ def get_config_dict():
             'show_partial_results': config.SHOW_PARTIAL_RESULTS,
             'enable_furigana': getattr(config, 'ENABLE_JA_FURIGANA', False),
             'enable_pinyin': getattr(config, 'ENABLE_ZH_PINYIN', False),
+            'remove_trailing_period': getattr(config, 'REMOVE_TRAILING_PERIOD', False),
             'enable_reverse_translation': config.ENABLE_REVERSE_TRANSLATION,
             'show_original_and_lang_tag': getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True),
         },
@@ -381,6 +382,8 @@ def update_config(config_data):
                 config.ENABLE_JA_FURIGANA = trans['enable_furigana']
             if 'enable_pinyin' in trans:
                 config.ENABLE_ZH_PINYIN = trans['enable_pinyin']
+            if 'remove_trailing_period' in trans:
+                config.REMOVE_TRAILING_PERIOD = bool(trans['remove_trailing_period'])
             if 'enable_reverse_translation' in trans:
                 config.ENABLE_REVERSE_TRANSLATION = trans['enable_reverse_translation']
             if 'show_original_and_lang_tag' in trans:
@@ -984,6 +987,8 @@ def get_defaults():
             'llm_parallel_fastest_mode': 'off',
             'show_partial_results': False,
             'enable_furigana': False,
+            'enable_pinyin': False,
+            'remove_trailing_period': False,
             'enable_reverse_translation': True,
         },
         'mic_control': {

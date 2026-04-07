@@ -221,6 +221,9 @@ ENABLE_JA_FURIGANA = False
 # 是否为中文添加拼音标注（带声调）
 ENABLE_ZH_PINYIN = False
 
+# 是否去除文本句尾句号（仅移除末尾单个 。 / . / ．）
+REMOVE_TRAILING_PERIOD = False
+
 # 是否启用反向翻译功能
 ENABLE_REVERSE_TRANSLATION = True  # True: 翻译后再反向翻译回源语言
                                     # False: 不进行反向翻译
