@@ -464,12 +464,20 @@ function applyAutoLanguageDetectorIfNeeded() {
 const LLM_PARALLEL_FASTEST_MODES = ['off', 'final_only', 'all'];
 
 const LLM_TEMPLATE_CONFIGS = {
-    'dashscope-qwen35': {
+    'dashscope-qwen35-flash': {
+        baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        model: 'qwen3.5-flash',
+        extraBody: '{"enable_thinking": false}',
+        parallelFastestMode: 'off',
+        providerLabelKey: 'btn.llmTemplateDashscopeQwenFlash',
+        copyDashscopeKey: true,
+    },
+    'dashscope-qwen35-plus': {
         baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         model: 'qwen3.5-plus',
         extraBody: '{"enable_thinking": false}',
         parallelFastestMode: 'off',
-        providerLabelKey: 'btn.llmTemplateDashscopeQwen',
+        providerLabelKey: 'btn.llmTemplateDashscopeQwenPlus',
         copyDashscopeKey: true,
     },
     openrouter: {
@@ -525,8 +533,18 @@ let activeLLMTemplate = null;
 
 function detectActiveLLMTemplate() {
     const baseUrl = (document.getElementById('llm-base-url')?.value || '').trim();
+    const model = (document.getElementById('llm-model')?.value || '').trim();
 
     for (const [templateName, templateConfig] of Object.entries(LLM_TEMPLATE_CONFIGS)) {
+        if (baseUrl !== templateConfig.baseUrl) {
+            continue;
+        }
+        if (Object.prototype.hasOwnProperty.call(templateConfig, 'model')) {
+            if (model === templateConfig.model) {
+                return templateName;
+            }
+            continue;
+        }
         if (baseUrl === templateConfig.baseUrl) {
             return templateName;
         }
@@ -685,7 +703,7 @@ function resolveLLMTemplateKeySource(templateName) {
     if (!templateConfig) return null;
 
     let url = '';
-    if (templateName === 'dashscope-qwen35') {
+    if (templateName === 'dashscope-qwen35-flash' || templateName === 'dashscope-qwen35-plus') {
         url = useInternationalEndpoint
             ? 'https://modelstudio.console.aliyun.com/ap-southeast-1?tab=doc#/api-key'
             : 'https://bailian.console.aliyun.com/cn-beijing/?tab=model#/api-key';
