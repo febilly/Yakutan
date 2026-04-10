@@ -74,10 +74,12 @@ log.setLevel(logging.ERROR)
 
 # 全局状态
 service_status = {
+    'lifecycle': 'stopped',
     'running': False,
     'recognition_active': False,
     'backend': config.PREFERRED_ASR_BACKEND
 }
+service_status_lock = threading.Lock()
 
 service_thread: Optional[threading.Thread] = None
 service_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -89,6 +91,39 @@ local_asr_download_state = {
     'error': None,
 }
 local_asr_download_lock = threading.Lock()
+
+
+def _snapshot_service_status() -> dict:
+    with service_status_lock:
+        return dict(service_status)
+
+
+def _set_service_status(
+    *,
+    lifecycle: Optional[str] = None,
+    recognition_active: Optional[bool] = None,
+    backend: Optional[str] = None,
+) -> dict:
+    with service_status_lock:
+        if lifecycle is not None:
+            service_status['lifecycle'] = lifecycle
+            service_status['running'] = lifecycle == 'running'
+            if lifecycle != 'running' and recognition_active is None:
+                service_status['recognition_active'] = False
+        if recognition_active is not None:
+            service_status['recognition_active'] = bool(recognition_active)
+        if backend is not None:
+            service_status['backend'] = backend
+        return dict(service_status)
+
+
+def _get_service_lifecycle() -> str:
+    with service_status_lock:
+        return str(service_status.get('lifecycle') or 'stopped')
+
+
+def _is_service_active() -> bool:
+    return _get_service_lifecycle() in {'starting', 'running', 'stopping'}
 
 
 def set_or_clear_env_var(name: str, value: Optional[str]) -> None:
@@ -466,12 +501,23 @@ def run_service_async():
     # 创建新的事件循环
     service_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(service_loop)
+
+    def _lifecycle_callback(lifecycle: str, recognition_active: Optional[bool] = None):
+        _set_service_status(
+            lifecycle=lifecycle,
+            recognition_active=recognition_active,
+        )
     
     # 导入main模块并运行
     try:
         import main
         # 在 main() 函数内部会创建新的 stop_event，所以这里不需要清除
-        service_loop.run_until_complete(main.main(keep_oscquery_alive=True))
+        service_loop.run_until_complete(
+            main.main(
+                keep_oscquery_alive=True,
+                lifecycle_callback=_lifecycle_callback,
+            )
+        )
         # 运行完成后获取 main 模块中的 stop_event 引用
         stop_event = main.stop_event
     except Exception as e:
@@ -480,8 +526,7 @@ def run_service_async():
         service_loop.close()
         service_loop = None
         stop_event = None
-        service_status['running'] = False
-        service_status['recognition_active'] = False
+        _set_service_status(lifecycle='stopped', recognition_active=False)
 
 
 @app.route('/')
@@ -583,7 +628,7 @@ def update_config_api():
         if success:
             # 如果服务正在运行，通知主服务线程在下一次可行时重载翻译器实例（无需重启识别线程）
             try:
-                if service_status.get('running') and service_loop is not None:
+                if _get_service_lifecycle() == 'running' and service_loop is not None:
                     import main as main_module
                     # 在主服务的事件循环线程安全地调度重初始化操作
                     service_loop.call_soon_threadsafe(getattr(main_module, 'reinitialize_translator_compat', lambda: None))
@@ -607,7 +652,7 @@ def update_config_api():
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """获取服务状态"""
-    status = dict(service_status)
+    status = _snapshot_service_status()
     status['target_language'] = config.TARGET_LANGUAGE
     status['config_applied_at_ms'] = int(getattr(config, 'CONFIG_APPLIED_AT_MS', 0) or 0)
     status['backend_boot_ms'] = int(getattr(config, 'BACKEND_BOOT_MS', 0) or 0)
@@ -623,7 +668,9 @@ def get_subtitles():
             import main as m
             if hasattr(m, 'subtitles_state'):
                 state = m.subtitles_state.copy()
-                state['running'] = service_status['running']
+                snapshot = _snapshot_service_status()
+                state['running'] = snapshot['running']
+                state['lifecycle'] = snapshot['lifecycle']
                 state['show_reverse_translation'] = bool(getattr(config, 'ENABLE_REVERSE_TRANSLATION', False))
                 state['target_language'] = config.TARGET_LANGUAGE
                 state['config_applied_at_ms'] = int(getattr(config, 'CONFIG_APPLIED_AT_MS', 0) or 0)
@@ -638,7 +685,8 @@ def get_subtitles():
         "reverse_translated": "",
         "ongoing": False,
         "show_reverse_translation": bool(getattr(config, 'ENABLE_REVERSE_TRANSLATION', False)),
-        "running": service_status['running'],
+        "running": _snapshot_service_status()['running'],
+        "lifecycle": _snapshot_service_status()['lifecycle'],
         "target_language": config.TARGET_LANGUAGE,
         "config_applied_at_ms": int(getattr(config, 'CONFIG_APPLIED_AT_MS', 0) or 0),
         "backend_boot_ms": int(getattr(config, 'BACKEND_BOOT_MS', 0) or 0),
@@ -658,7 +706,7 @@ def set_target_language():
 
         # 如果服务正在运行，热加载翻译器
         try:
-            if service_status.get('running') and service_loop is not None:
+            if _get_service_lifecycle() == 'running' and service_loop is not None:
                 import main as main_module
                 service_loop.call_soon_threadsafe(getattr(main_module, 'reinitialize_translator_compat', lambda: None))
         except Exception as e:
@@ -831,7 +879,15 @@ def start_service():
     """启动服务"""
     global service_thread, service_status
     
-    if service_status['running']:
+    current_lifecycle = _get_service_lifecycle()
+    if current_lifecycle != 'stopped':
+        message_id = 'msg.serviceAlreadyRunning' if current_lifecycle == 'running' else 'msg.serviceBusy'
+        return jsonify({
+            'success': False,
+            'message_id': message_id,
+            'message': f'服务当前状态为 {current_lifecycle}，无法重复启动',
+            'lifecycle': current_lifecycle,
+        })
         return jsonify({'success': False, 'message_id': 'msg.serviceAlreadyRunning', 'message': '服务已在运行中'})
 
     data = request.json or {}
@@ -872,18 +928,24 @@ def start_service():
             os.environ['DOUBAO_API_KEY'] = api_keys['doubao']
 
         accelerator_warning = _accelerator_window_warning_payload()
+        backend = _sanitize_preferred_backend(config.PREFERRED_ASR_BACKEND)
+        _set_service_status(
+            lifecycle='starting',
+            recognition_active=False,
+            backend=backend,
+        )
         
         service_thread = threading.Thread(target=run_service_async, daemon=True)
         service_thread.start()
-        service_status['running'] = True
-        service_status['backend'] = _sanitize_preferred_backend(config.PREFERRED_ASR_BACKEND)
         return jsonify({
             'success': True,
-            'message_id': 'msg.serviceStarted',
+            'message_id': 'msg.serviceStarting',
+            'lifecycle': 'starting',
             'message': '服务已启动',
             **accelerator_warning,
         })
     except Exception as e:
+        _set_service_status(lifecycle='stopped', recognition_active=False)
         print(f'Error starting service: {e}')
         return jsonify({'success': False, 'message_id': 'msg.startFailed', 'message': '启动失败'}), 500
 
@@ -893,12 +955,22 @@ def stop_service():
     """停止服务"""
     global service_thread, service_status, service_loop, stop_event
     
-    if not service_status['running']:
+    current_lifecycle = _get_service_lifecycle()
+    if current_lifecycle == 'stopped':
+        return jsonify({'success': False, 'message_id': 'msg.serviceNotRunning', 'message': '服务未运行'})
+    if current_lifecycle == 'stopping':
+        return jsonify({
+            'success': True,
+            'message_id': 'msg.serviceStopping',
+            'message': '服务正在停止',
+            'lifecycle': 'stopping',
+        })
         return jsonify({'success': False, 'message_id': 'msg.serviceNotRunning', 'message': '服务未运行'})
     
     try:
         # 从 main 模块获取最新的 stop_event
         import main
+        _set_service_status(lifecycle='stopping', recognition_active=False)
         current_stop_event = main.stop_event
         
         if current_stop_event and service_loop:
@@ -908,9 +980,24 @@ def stop_service():
         if service_thread:
             service_thread.join(timeout=10)
         
-        service_status['running'] = False
-        service_status['recognition_active'] = False
-        stop_event = None
+        still_alive = bool(service_thread and service_thread.is_alive())
+        if not still_alive:
+            _set_service_status(lifecycle='stopped', recognition_active=False)
+            stop_event = None
+            return jsonify({
+                'success': True,
+                'message_id': 'msg.serviceStopped',
+                'message': '服务已停止',
+                'lifecycle': 'stopped',
+            })
+        else:
+            _set_service_status(lifecycle='stopping', recognition_active=False)
+            return jsonify({
+                'success': True,
+                'message_id': 'msg.serviceStopping',
+                'message': '服务正在停止',
+                'lifecycle': 'stopping',
+            })
         return jsonify({'success': True, 'message_id': 'msg.serviceStopped', 'message': '服务已停止'})
     except Exception as e:
         print(f'Error stopping service: {e}')
@@ -922,7 +1009,7 @@ def restart_service():
     """重启服务"""
     global service_thread, service_status, service_loop, stop_event
     
-    if not service_status['running']:
+    if _get_service_lifecycle() != 'running':
         return jsonify({'success': False, 'message_id': 'msg.noRestartNeeded', 'message': '服务未运行，无需重启'})
 
     if not bool(getattr(config, 'BYPASS_OSC_UDP_PORT_CHECK', False)):
@@ -939,6 +1026,7 @@ def restart_service():
     try:
         # 从 main 模块获取最新的 stop_event
         import main
+        _set_service_status(lifecycle='stopping', recognition_active=False)
         current_stop_event = main.stop_event
         
         # 先停止
@@ -948,21 +1036,26 @@ def restart_service():
         if service_thread:
             service_thread.join(timeout=10)
         
-        service_status['running'] = False
-        service_status['recognition_active'] = False
         stop_event = None
+        backend = _sanitize_preferred_backend(config.PREFERRED_ASR_BACKEND)
+        _set_service_status(
+            lifecycle='starting',
+            recognition_active=False,
+            backend=backend,
+        )
         
         # 再启动
         service_thread = threading.Thread(target=run_service_async, daemon=True)
         service_thread.start()
-        service_status['running'] = True
 
         return jsonify({
             'success': True,
             'message_id': 'msg.serviceRestarted',
+            'lifecycle': 'starting',
             'message': '服务已重启',
         })
     except Exception as e:
+        _set_service_status(lifecycle='stopped', recognition_active=False)
         print(f'Error restarting service: {e}')
         return jsonify({'success': False, 'message_id': 'msg.restartFailed', 'message': '重启失败'}), 500
 

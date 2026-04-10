@@ -12,7 +12,7 @@ import os
 import logging
 import signal
 import asyncio
-from typing import Optional
+from typing import Callable, Optional
 
 # Allow PyTorch and DirectML/ONNX stacks to coexist in one process.
 os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
@@ -227,13 +227,21 @@ def signal_handler(sig, frame):
 
 # ============ 主入口 ============
 
-async def main(keep_oscquery_alive: bool = False):
+async def main(
+    keep_oscquery_alive: bool = False,
+    lifecycle_callback: Optional[Callable[[str, Optional[bool]], None]] = None,
+):
     """主异步函数"""
     global subtitles_state, stop_event
+
+    def emit_lifecycle(lifecycle: str, recognition_active: Optional[bool] = None):
+        if lifecycle_callback is not None:
+            lifecycle_callback(lifecycle, recognition_active)
 
     # 创建并注册 AppState
     state = AppState()
     set_state(state)
+    emit_lifecycle('starting', False)
 
     state.update_subtitles("", "", False)
     _sync_subtitles_to_module()
@@ -394,6 +402,8 @@ async def main(keep_oscquery_alive: bool = False):
         print('[ASR] 语音识别已启动')
 
     # 创建音频捕获任务
+    emit_lifecycle('running', state.recognition_active)
+
     capture_task = asyncio.create_task(
         audio_capture_task(state, state.recognition_instance)
     )
@@ -412,6 +422,7 @@ async def main(keep_oscquery_alive: bool = False):
 
     try:
         await state.stop_event.wait()
+        emit_lifecycle('stopping', state.recognition_active)
 
         capture_task.cancel()
         sync_task.cancel()
@@ -446,6 +457,7 @@ async def main(keep_oscquery_alive: bool = False):
                 print(f'[Metric] 获取统计信息失败: {e}')
 
     finally:
+        emit_lifecycle('stopping', state.recognition_active)
         osc_manager.clear_mute_callback()
         osc_manager.reset_runtime_state()
 
@@ -465,6 +477,7 @@ async def main(keep_oscquery_alive: bool = False):
             await osc_manager.stop_server()
 
         await loop.run_in_executor(None, state.executor.shutdown, False)
+        emit_lifecycle('stopped', False)
 
 
 # main function

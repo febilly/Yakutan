@@ -231,11 +231,88 @@
 
     <script>
         let isRunning = false;
+        let pendingServiceAction = null;
+        let pendingServiceActionStartedAt = 0;
         let lastShowReverseTranslation = null;
         let currentTargetLanguage = '';
         let switchingLanguage = false;
         const QUICK_LANG_DEFAULTS = ['en', 'zh-CN', 'ja', 'ko'];
         const QUICK_LANG_BAR_HEIGHT = 27;
+        const SERVICE_ACTION_TIMEOUT_MS = 30000;
+
+        function renderToggleButton(state) {
+            const btn = document.getElementById('toggle-btn');
+            if (!btn) return;
+
+            if (state === 'starting' || state === 'stopping') {
+                btn.disabled = true;
+                btn.className = 'btn btn-disabled';
+                btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" fill="white"><circle cx="10" cy="10" r="2" opacity="0.6"/></svg>';
+                return;
+            }
+
+            btn.disabled = false;
+            if (state === 'running') {
+                btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" fill="white"><rect x="3" y="3" width="14" height="14" rx="2"/></svg>';
+                btn.className = 'btn btn-danger';
+                return;
+            }
+
+            btn.innerHTML = '<svg width="22" height="22" viewBox="0 0 20 20" fill="white"><polygon points="5,2 18,10 5,18"/></svg>';
+            btn.className = 'btn btn-success';
+        }
+
+        function clearPendingServiceAction() {
+            pendingServiceAction = null;
+            pendingServiceActionStartedAt = 0;
+        }
+
+        function setPendingServiceAction(action) {
+            pendingServiceAction = action;
+            pendingServiceActionStartedAt = Date.now();
+            renderToggleButton(action);
+        }
+
+        function getEffectiveToggleState(lifecycle) {
+            const actualLifecycle = lifecycle || (isRunning ? 'running' : 'stopped');
+
+            if (
+                pendingServiceAction &&
+                Date.now() - pendingServiceActionStartedAt > SERVICE_ACTION_TIMEOUT_MS
+            ) {
+                clearPendingServiceAction();
+            }
+
+            if (pendingServiceAction === 'starting') {
+                if (actualLifecycle === 'running') {
+                    clearPendingServiceAction();
+                    return 'running';
+                }
+                if (actualLifecycle === 'stopping') {
+                    clearPendingServiceAction();
+                    return 'stopping';
+                }
+                return 'starting';
+            }
+
+            if (pendingServiceAction === 'stopping') {
+                if (actualLifecycle === 'stopped') {
+                    clearPendingServiceAction();
+                    return 'stopped';
+                }
+                if (actualLifecycle === 'running') {
+                    clearPendingServiceAction();
+                    return 'running';
+                }
+                return 'stopping';
+            }
+
+            if (actualLifecycle === 'starting' || actualLifecycle === 'stopping') {
+                return actualLifecycle;
+            }
+
+            return actualLifecycle === 'running' ? 'running' : 'stopped';
+        }
 
         function getLangDisplayName(code) {
             return code;
@@ -472,21 +549,14 @@
                 const subRes = await fetch('/api/subtitles');
                 const subData = await subRes.json();
 
-                isRunning = statusData.running;
-                const btn = document.getElementById('toggle-btn');
+                const lifecycle = statusData.lifecycle || (statusData.running ? 'running' : 'stopped');
+                isRunning = lifecycle === 'running';
+                renderToggleButton(getEffectiveToggleState(lifecycle));
                 await applyReverseTranslationMode(!!subData.show_reverse_translation);
 
                 if (subData.target_language && subData.target_language !== currentTargetLanguage) {
                     currentTargetLanguage = subData.target_language;
                     updateQuickLangActiveState();
-                }
-
-                if (isRunning) {
-                    btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" fill="white"><rect x="3" y="3" width="14" height="14" rx="2"/></svg>';
-                    btn.className = 'btn btn-danger';
-                } else {
-                    btn.innerHTML = '<svg width="22" height="22" viewBox="0 0 20 20" fill="white"><polygon points="5,2 18,10 5,18"/></svg>';
-                    btn.className = 'btn btn-success';
                 }
 
                 const elOrig = document.getElementById('speech-text');
@@ -533,7 +603,7 @@
             }
         }
 
-        async function toggleService() {
+        async function toggleServiceLegacy() {
             const btn = document.getElementById('toggle-btn');
             btn.className = 'btn btn-disabled';
             btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" fill="white"><circle cx="10" cy="10" r="2" opacity="0.6"/></svg>';
@@ -550,6 +620,40 @@
             }
             // Trigger an immediate fetch to update UI quickly
             setTimeout(fetchState, 500);
+        }
+
+        async function toggleService() {
+            if (pendingServiceAction) {
+                return;
+            }
+
+            const wasRunning = isRunning;
+            setPendingServiceAction(wasRunning ? 'stopping' : 'starting');
+
+            try {
+                let response;
+                if (wasRunning) {
+                    response = await fetch('/api/service/stop', { method: 'POST' });
+                } else {
+                    response = await fetch('/api/service/start', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ api_keys: {} })
+                    });
+                }
+
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok || payload.success === false) {
+                    clearPendingServiceAction();
+                    renderToggleButton(wasRunning ? 'running' : 'stopped');
+                }
+            } catch (err) {
+                console.error('Failed to toggle service:', err);
+                clearPendingServiceAction();
+                renderToggleButton(wasRunning ? 'running' : 'stopped');
+            }
+
+            void fetchState();
         }
 
         document.addEventListener('keydown', async (event) => {
@@ -570,6 +674,7 @@
         // 初始化
         renderQuickLangButtons();
         initResizeHandles();
+        renderToggleButton('stopped');
         setInterval(fetchState, 300);
         fetchState();
     </script>

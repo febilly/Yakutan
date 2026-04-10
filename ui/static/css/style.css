@@ -108,6 +108,16 @@ header h1 {
     animation: pulse 2s infinite;
 }
 
+.status-dot.starting {
+    background-color: var(--warning-color);
+    animation: pulse 1s infinite;
+}
+
+.status-dot.stopping {
+    background-color: var(--danger-color);
+    animation: pulse 1s infinite;
+}
+
 @keyframes pulse {
     0%, 100% {
         opacity: 1;

@@ -1465,7 +1465,7 @@ async function maybeRestartForNewSystemDefaultMic() {
     try {
         const statusRes = await fetch(`${API_BASE}/status`);
         const status = await statusRes.json();
-        if (!status.running) return;
+        if (getServiceLifecycle(status) !== 'running') return;
         const ok = await saveConfig(true);
         if (!ok) return;
         await restartService();
@@ -2448,29 +2448,63 @@ async function saveConfig(autoSave = false) {
 }
 
 // 更新服务状态
+function getServiceLifecycle(status) {
+    return status?.lifecycle || (status?.running ? 'running' : 'stopped');
+}
+
+function renderServiceLifecycle(status, t) {
+    const lifecycle = getServiceLifecycle(status);
+    const statusText = document.getElementById('status-text');
+    const statusDot = document.getElementById('status-dot');
+    const startBtn = document.getElementById('start-btn');
+    const stopBtn = document.getElementById('stop-btn');
+
+    statusDot.classList.remove('running', 'starting', 'stopping');
+
+    if (lifecycle === 'running') {
+        statusText.textContent = t('status.running');
+        statusDot.classList.add('running');
+        startBtn.disabled = true;
+        startBtn.textContent = t('btn.startService');
+        stopBtn.disabled = false;
+        stopBtn.textContent = t('btn.stopService');
+        return;
+    }
+
+    if (lifecycle === 'starting') {
+        statusText.textContent = t('status.starting');
+        statusDot.classList.add('starting');
+        startBtn.disabled = true;
+        startBtn.textContent = t('btn.starting');
+        stopBtn.disabled = true;
+        stopBtn.textContent = t('btn.stopService');
+        return;
+    }
+
+    if (lifecycle === 'stopping') {
+        statusText.textContent = t('status.stopping');
+        statusDot.classList.add('stopping');
+        startBtn.disabled = true;
+        startBtn.textContent = t('btn.startService');
+        stopBtn.disabled = true;
+        stopBtn.textContent = t('btn.stopping');
+        return;
+    }
+
+    statusText.textContent = t('status.notRunning');
+    startBtn.disabled = false;
+    startBtn.textContent = t('btn.startService');
+    stopBtn.disabled = true;
+    stopBtn.textContent = t('btn.stopService');
+}
+
 async function updateStatus() {
     try {
         const response = await fetch(`${API_BASE}/status`);
         const status = await response.json();
 
-        const statusText = document.getElementById('status-text');
-        const statusDot = document.getElementById('status-dot');
-        const startBtn = document.getElementById('start-btn');
-        const stopBtn = document.getElementById('stop-btn');
-
         const t = window.i18n ? window.i18n.t : (key) => key;
-
-        if (status.running) {
-            statusText.textContent = t('status.running');
-            statusDot.classList.add('running');
-            startBtn.disabled = true;
-            stopBtn.disabled = false;
-        } else {
-            statusText.textContent = t('status.notRunning');
-            statusDot.classList.remove('running');
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-        }
+        renderServiceLifecycle(status, t);
 
         // 后端时间戳比大面板记录更新 → 有人（小面板等）在别处改了配置 → 拉到大面板
         const serverTs = Number(status.config_applied_at_ms) || 0;
@@ -2736,12 +2770,13 @@ async function startService() {
             if (hasPendingWarning) {
                 startMessageLines.push('⚠️ ' + pendingWarningMessage);
             }
-            startMessageLines.push('✅ ' + t('msg.serviceStartSuccess'));
+            startMessageLines.push('✅ ' + t('msg.serviceStarting'));
             if (acceleratorWarning) {
                 startMessageLines.push('⚠️ ' + acceleratorWarning);
             }
             showMessage(startMessageLines.join('\n'), hasPendingWarning ? 'warning' : 'success');
             pendingWarningMessage = null;
+            await updateStatus();
             setTimeout(updateStatus, 500);
         } else {
             if (Array.isArray(result.udp_port_conflicts) && result.udp_port_conflicts.length) {
@@ -2759,7 +2794,6 @@ async function startService() {
         startBtn.disabled = false;
     } finally {
         pendingWarningMessage = null;
-        startBtn.textContent = t('btn.startService');
     }
 }
 
@@ -2779,7 +2813,11 @@ async function stopService() {
         const result = await response.json();
 
         if (result.success) {
-            showMessage(t('msg.serviceStopSuccess'), 'success');
+            const stopMessageKey = getServiceLifecycle(result) === 'stopped'
+                ? 'msg.serviceStopSuccess'
+                : 'msg.serviceStopping';
+            showMessage(t(stopMessageKey), 'success');
+            await updateStatus();
             setTimeout(updateStatus, 500);
         } else {
             const localizedMsg = localizeBackendMessage(result.message_id, result.message);
@@ -2790,8 +2828,6 @@ async function stopService() {
         console.error('停止服务失败:', error);
         showMessage(t('msg.stopServiceFailed'), 'error');
         stopBtn.disabled = false;
-    } finally {
-        stopBtn.textContent = t('btn.stopService');
     }
 }
 
