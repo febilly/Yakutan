@@ -736,13 +736,15 @@ function updateLLMTemplateKeySourceHint(templateName = activeLLMTemplate) {
     const container = document.getElementById('llm-template-key-source-hint');
     const label = document.getElementById('llm-template-key-source-label');
     const link = document.getElementById('llm-template-key-source-link');
+    const rotationHint = document.getElementById('llm-template-key-rotation-hint');
     const t = window.i18n ? window.i18n.t : (key) => key;
 
-    if (!container || !label || !link) return;
+    if (!container || !label || !link || !rotationHint) return;
 
     const source = resolveLLMTemplateKeySource(templateName);
     if (!source) {
         container.style.display = 'none';
+        rotationHint.style.display = 'none';
         label.textContent = '';
         link.textContent = '';
         link.removeAttribute('href');
@@ -756,6 +758,7 @@ function updateLLMTemplateKeySourceHint(templateName = activeLLMTemplate) {
     link.textContent = source.url;
     link.title = source.url;
     container.style.display = 'block';
+    rotationHint.style.display = templateName === 'cerebras' ? 'block' : 'none';
 }
 
 function syncLLMTemplateKeySourceHintFromInputs() {

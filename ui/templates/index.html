@@ -211,7 +211,7 @@
                                             data-i18n="btn.llmTemplateMercury2">Mercury 2（免费）</button>
                                             <button type="button" class="btn btn-subtle btn-small"
                                             onclick="applyLLMTemplate('cerebras')"
-                                            data-i18n="btn.llmTemplateCerebras">Cerebras</button>
+                                            data-i18n="btn.llmTemplateCerebras">Cerebras（免费）</button>
                                             <button type="button" class="btn btn-subtle btn-small"
                                             onclick="applyLLMTemplate('openrouter')"
                                             data-i18n="btn.llmTemplateOpenRouter">OpenRouter</button>
@@ -222,6 +222,8 @@
                                         <span id="llm-template-key-source-label"></span>
                                         <a id="llm-template-key-source-link" href="#" target="_blank" rel="noopener noreferrer"></a>
                                     </small>
+                                    <small class="form-text" id="llm-template-key-rotation-hint" style="display: none;"
+                                        data-i18n="hint.llmTemplateCerebrasKeyRotation">支持在下方 LLM API Key 填写多个 key 轮询使用，请用英文逗号 `,` 分隔。</small>
                                     <small class="form-text" data-i18n="hint.sensitiveWordsRisk">请注意敏感词问题，必要时请切换到 DeepL
                                         或 Google 翻译</small>
                                 </div>
