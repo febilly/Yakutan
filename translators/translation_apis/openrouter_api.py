@@ -93,7 +93,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
     def __init__(
         self,
         model: Optional[str] = None,
-        temperature: float = 0.2,
+        temperature: Optional[float] = None,
         timeout: int = 30,
         max_retries: int = 3,
         streaming_mode: bool = False,
@@ -103,13 +103,17 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
 
         Args:
             model: 使用的模型名称
-            temperature: 采样温度
+            temperature: 采样温度（为 None 时读取 config.LLM_TRANSLATION_TEMPERATURE）
             timeout: 请求超时时间（秒）
             max_retries: 最大重试次数
             streaming_mode: 是否使用流式翻译模式（支持 previous_translation 和 is_partial）
         """
         self.model = model or config.LLM_MODEL
-        self.temperature = temperature
+        self.temperature = (
+            config.LLM_TRANSLATION_TEMPERATURE
+            if temperature is None
+            else temperature
+        )
         self.timeout = timeout
         self.max_retries = max_retries
         self.streaming_mode = streaming_mode
@@ -468,7 +472,7 @@ class OpenRouterStreamingAPI(OpenRouterAPI):
     def __init__(
         self,
         model: Optional[str] = None,
-        temperature: float = 0.2,
+        temperature: Optional[float] = None,
         timeout: int = 30,
         max_retries: int = 3,
     ) -> None:
