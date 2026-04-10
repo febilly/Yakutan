@@ -5,16 +5,13 @@ Gemini
 Deepseek
 VRChat
 VRC
+VRC plus
 Avatar
 World
-Friend
 VR headset
-Meta Quest 2
-Meta Quest 3
-Meta Quest 3S
+Meta Quest
 Pico 4
 Pat
-VRC plus
 Booth
 Japan Shrine
 FUJIYAMA
@@ -22,20 +19,22 @@ Tutorial World
 Poppy Street
 Chinese Bar
 Kipfel
+Mamehinata
 Manuka
 Shinano
 rurune
-Mamehinata
+Mafuyu
 Chocolat
 Chiffon
-Mafuyu
 Mizuki
 Rindo
 Rusk
 Karin
+Lime
+Plum
+Eku
 Deltaflair
 emo
 MMD
 DeepL
-VAD
-ASR
+Unity
