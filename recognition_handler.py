@@ -68,6 +68,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self._finalized_seq = 0
         self._final_output_version = 0
         self._final_translate_request_seq = 0
+        self._async_result_seq = 0
+        self._latest_applied_async_result_seq = 0
+        self._session_generation = 0
         self._translate_ordering_lock = threading.Lock()
         self.partial_translation_update_count = 0
         self._prefer_deepl_on_next_final = False
@@ -174,8 +177,72 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         else:
             _cancel()
 
+    def _next_async_result_seq(self) -> int:
+        """为异步翻译结果分配一个全局递增序号。"""
+        with self._translate_ordering_lock:
+            self._async_result_seq += 1
+            return self._async_result_seq
+
+    def _get_session_generation(self) -> int:
+        with self._translate_ordering_lock:
+            return self._session_generation
+
+    def _is_session_generation_current(self, session_generation: int) -> bool:
+        with self._translate_ordering_lock:
+            return session_generation == self._session_generation
+
+    def _is_latest_partial_request(
+        self,
+        request_id: int,
+        finalized_seq: int,
+        final_output_version: int,
+        session_generation: int,
+    ) -> bool:
+        with self._translate_ordering_lock:
+            return (
+                request_id == self._latest_partial_request_id
+                and finalized_seq == self._finalized_seq
+                and final_output_version == self._final_output_version
+                and session_generation == self._session_generation
+            )
+
+    def _try_adopt_async_result(
+        self, async_result_seq: int, session_generation: int,
+    ) -> bool:
+        with self._translate_ordering_lock:
+            if session_generation != self._session_generation:
+                return False
+            if async_result_seq <= self._latest_applied_async_result_seq:
+                return False
+            self._latest_applied_async_result_seq = async_result_seq
+            return True
+
+    def _is_async_result_current(
+        self, async_result_seq: int, session_generation: int,
+    ) -> bool:
+        with self._translate_ordering_lock:
+            return (
+                session_generation == self._session_generation
+                and async_result_seq == self._latest_applied_async_result_seq
+            )
+
+    def _reset_partial_translation_state(self) -> None:
+        self.last_partial_translation = None
+        self.last_partial_translation_secondary = None
+        self.last_partial_source_segment = None
+        self.pending_partial_segment = None
+        self._latest_partial_request_id = 0
+        self.partial_translation_update_count = 0
+        self._prefer_deepl_on_next_final = False
+
     def _schedule_partial_translation_with_debounce(
-        self, segment, request_id, finalized_seq, final_output_version,
+        self,
+        segment,
+        request_id,
+        finalized_seq,
+        final_output_version,
+        async_result_seq,
+        session_generation,
     ) -> None:
         """对流式翻译请求做消抖。"""
         if not self.loop:
@@ -186,15 +253,18 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
         def _dispatch() -> None:
             self._partial_debounce_handle = None
-            if (
-                request_id != self._latest_partial_request_id
-                or finalized_seq != self._finalized_seq
-                or final_output_version != self._final_output_version
+            if not self._is_latest_partial_request(
+                request_id, finalized_seq, final_output_version, session_generation,
             ):
                 return
             asyncio.create_task(
                 self._translate_partial_task(
-                    segment, request_id, finalized_seq, final_output_version,
+                    segment,
+                    request_id,
+                    finalized_seq,
+                    final_output_version,
+                    async_result_seq,
+                    session_generation,
                 )
             )
 
@@ -207,40 +277,86 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
         self.loop.call_soon_threadsafe(_schedule)
 
+    def _schedule_final_translation_task(
+        self,
+        *,
+        text: str,
+        source_lang: str,
+        normalized_source: str,
+        actual_target: Optional[str],
+        actual_secondary_target: Optional[str],
+        primary_should_translate: bool,
+        secondary_should_translate: bool,
+        use_secondary_output: bool,
+        use_deepl_final: bool,
+        previous_translation: Optional[str],
+        previous_translation_secondary: Optional[str],
+        previous_source_segment: Optional[str],
+        request_id: int,
+        async_result_seq: int,
+        session_generation: int,
+    ) -> bool:
+        if not self.loop or not self.loop.is_running():
+            return False
+
+        def _dispatch() -> None:
+            asyncio.create_task(
+                self._translate_final_task(
+                    text=text,
+                    source_lang=source_lang,
+                    normalized_source=normalized_source,
+                    actual_target=actual_target,
+                    actual_secondary_target=actual_secondary_target,
+                    primary_should_translate=primary_should_translate,
+                    secondary_should_translate=secondary_should_translate,
+                    use_secondary_output=use_secondary_output,
+                    use_deepl_final=use_deepl_final,
+                    previous_translation=previous_translation,
+                    previous_translation_secondary=previous_translation_secondary,
+                    previous_source_segment=previous_source_segment,
+                    request_id=request_id,
+                    async_result_seq=async_result_seq,
+                    session_generation=session_generation,
+                )
+            )
+
+        self.loop.call_soon_threadsafe(_dispatch)
+        return True
+
     def on_session_started(self) -> None:
         logger.info('Speech recognizer session opened.')
         self._cancel_partial_debounce()
-        self.last_partial_translation = None
-        self.last_partial_translation_secondary = None
-        self.last_partial_source_segment = None
-        self.pending_partial_segment = None
-        self._latest_partial_request_id = 0
-        self.partial_translation_update_count = 0
-        self._prefer_deepl_on_next_final = False
+        self._reset_partial_translation_state()
         self._final_output_version = 0
         self._final_translate_request_seq = 0
+        with self._translate_ordering_lock:
+            self._session_generation += 1
 
     def on_session_stopped(self) -> None:
         self._cancel_partial_debounce()
+        with self._translate_ordering_lock:
+            self._session_generation += 1
         logger.info('Speech recognizer session closed.')
 
     def on_error(self, error: Exception) -> None:
         logger.error('Speech recognizer failed: %s', error)
 
     async def _translate_partial_task(
-        self, segment, request_id, finalized_seq, final_output_version,
+        self,
+        segment,
+        request_id,
+        finalized_seq,
+        final_output_version,
+        async_result_seq,
+        session_generation,
     ):
         """异步流式翻译任务"""
         s = self.state
         self._partial_inflight += 1
         self.translating_partial = True
-        success = False
         try:
-            if finalized_seq != self._finalized_seq:
+            if not self._is_session_generation_current(session_generation):
                 return
-            with self._translate_ordering_lock:
-                if request_id != self._latest_partial_request_id:
-                    return
             detected_lang_info = s.language_detector.detect(segment)
             detected_lang = detected_lang_info['language']
             actual_target = resolve_output_target_language(detected_lang, config.TARGET_LANGUAGE)
@@ -304,18 +420,11 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             raw_translated_text = translated_text
             raw_secondary_translated_text = secondary_translated_text
 
-            # 在锁下原子读取所有排序状态，避免 TOCTOU 竞态
-            with self._translate_ordering_lock:
-                latest_partial = self._latest_partial_request_id
-                current_finalized_seq = self._finalized_seq
-                current_final_output_version = self._final_output_version
-            if (
-                request_id != latest_partial
-                or finalized_seq != current_finalized_seq
-                or final_output_version != current_final_output_version
-            ):
+            if not self._is_session_generation_current(session_generation):
                 return
-            success = True
+
+            if not self._try_adopt_async_result(async_result_seq, session_generation):
+                return
 
             if primary_should_translate or secondary_should_translate:
                 self.partial_translation_update_count += 1
@@ -340,6 +449,8 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             else:
                 self.last_partial_translation_secondary = None
                 secondary_translated_text = segment if use_secondary_output else ""
+
+            self.last_partial_source_segment = segment
 
             display_translation = get_display_translation_text(
                 translated_text,
@@ -400,29 +511,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 ) if use_secondary_output and actual_secondary_target is not None else None,
             )
 
-            # 最终检查：确保在发送OSC之前finalized_seq没有改变
-            # 防止迟到的partial覆盖已经显示的final结果
-            with self._translate_ordering_lock:
-                if (
-                    request_id != self._latest_partial_request_id
-                    or finalized_seq != self._finalized_seq
-                    or final_output_version != self._final_output_version
-                ):
-                    return
-
-            if osc_text:
-                await osc_manager.send_text(osc_text, ongoing=True)
-
             current_reverse_trans = s.subtitles_state.get("reverse_translated", "")
 
-            # 再次检查：防止在await期间finalized_seq改变
-            with self._translate_ordering_lock:
-                if (
-                    request_id != self._latest_partial_request_id
-                    or finalized_seq != self._finalized_seq
-                    or final_output_version != self._final_output_version
-                ):
-                    return
+            if not self._is_async_result_current(async_result_seq, session_generation):
+                return
 
             if use_secondary_output and actual_secondary_target is not None:
                 s.update_subtitles(
@@ -439,27 +531,253 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     current_reverse_trans,
                 )
 
+            if not self._is_async_result_current(async_result_seq, session_generation):
+                return
+
+            if osc_text:
+                await osc_manager.send_text(osc_text, ongoing=True)
+
         except Exception:
             pass
         finally:
             self._partial_inflight = max(0, self._partial_inflight - 1)
             self.translating_partial = self._partial_inflight > 0
-            with self._translate_ordering_lock:
-                latest_partial = self._latest_partial_request_id
-            if (
-                request_id == latest_partial
-                and finalized_seq == self._finalized_seq
-                and final_output_version == self._final_output_version
+            if self._is_latest_partial_request(
+                request_id, finalized_seq, final_output_version, session_generation,
             ):
                 self.pending_partial_segment = None
-                if success:
-                    self.last_partial_source_segment = segment
+
+    async def _translate_final_task(
+        self,
+        *,
+        text: str,
+        source_lang: str,
+        normalized_source: str,
+        actual_target: Optional[str],
+        actual_secondary_target: Optional[str],
+        primary_should_translate: bool,
+        secondary_should_translate: bool,
+        use_secondary_output: bool,
+        use_deepl_final: bool,
+        previous_translation: Optional[str],
+        previous_translation_secondary: Optional[str],
+        previous_source_segment: Optional[str],
+        request_id: int,
+        async_result_seq: int,
+        session_generation: int,
+    ) -> None:
+        s = self.state
+        try:
+            if not self._is_session_generation_current(session_generation):
+                return
+
+            loop = asyncio.get_running_loop()
+            translated_text = text
+            secondary_translated_text = text if use_secondary_output else None
+
+            primary_future = None
+            secondary_future = None
+            if primary_should_translate:
+                primary_future = loop.run_in_executor(
+                    s.executor,
+                    lambda: translate_with_backend(
+                        s.translator,
+                        s.deepl_fallback_translator,
+                        text,
+                        actual_target,
+                        previous_translation,
+                        use_deepl_final,
+                        previous_source_segment,
+                        source_lang,
+                        False,
+                    ),
+                )
+            if use_secondary_output and secondary_should_translate:
+                secondary_future = loop.run_in_executor(
+                    s.executor,
+                    lambda: translate_with_backend(
+                        s.secondary_translator,
+                        s.secondary_deepl_fallback_translator,
+                        text,
+                        actual_secondary_target,
+                        previous_translation_secondary,
+                        use_deepl_final,
+                        previous_source_segment,
+                        source_lang,
+                        False,
+                    ),
+                )
+
+            if primary_future is not None:
+                translated_text = await primary_future
+            if secondary_future is not None:
+                secondary_translated_text = await secondary_future
+
+            if not self._is_session_generation_current(session_generation):
+                return
+
+            if not self._try_adopt_async_result(async_result_seq, session_generation):
+                return
+
+            if primary_should_translate and translated_text and not str(
+                translated_text,
+            ).startswith("[ERROR]"):
+                s.translator.append_history_entry(text, translated_text, actual_target)
+            if (
+                use_secondary_output
+                and secondary_should_translate
+                and secondary_translated_text
+                and not str(secondary_translated_text).startswith("[ERROR]")
+            ):
+                s.secondary_translator.append_history_entry(
+                    text, secondary_translated_text, actual_secondary_target,
+                )
+
+            display_source_text = add_furigana_if_needed(text, source_lang)
+            display_source_text = add_pinyin_if_needed(display_source_text, source_lang)
+            display_source_text = remove_trailing_sentence_period_if_needed(
+                display_source_text,
+            )
+
+            if not self._is_async_result_current(async_result_seq, session_generation):
+                return
+
+            is_translated = primary_should_translate or secondary_should_translate
+            display_translated_text = None
+            secondary_display_translated_text = None
+            display_text = None
+
+            if not is_translated:
+                print(f'识别：{display_source_text}')
+                display_text = display_source_text
+                s.update_subtitles(display_source_text, "", False, "")
+            else:
+                print(f'主目标语言：{actual_target}')
+
+                primary_display_language = (
+                    actual_target if primary_should_translate else source_lang
+                )
+                display_translated_text = get_display_translation_text(
+                    translated_text,
+                    primary_display_language,
+                )
+                print(f'主译文：{display_translated_text}')
+
+                if use_secondary_output and actual_secondary_target is not None:
+                    print(f'第二目标语言：{actual_secondary_target}')
+                    secondary_display_language = (
+                        actual_secondary_target
+                        if secondary_should_translate
+                        else source_lang
+                    )
+                    secondary_display_translated_text = get_display_translation_text(
+                        secondary_translated_text,
+                        secondary_display_language,
+                    )
+                    print(f'第二译文：{secondary_display_translated_text}')
+
+                if (
+                    use_secondary_output
+                    and secondary_display_translated_text is not None
+                ):
+                    display_text = build_dual_output_display(
+                        display_translated_text,
+                        secondary_display_translated_text,
+                        actual_target,
+                        actual_secondary_target,
+                    )
+                    subtitles_translated = (
+                        f"{display_translated_text}\n"
+                        f"{secondary_display_translated_text}"
+                    )
+                else:
+                    show_tag = primary_should_translate and getattr(
+                        config, 'SHOW_ORIGINAL_AND_LANG_TAG', True,
+                    )
+                    if show_tag:
+                        tag_src = language_code_for_osc_tag(source_lang)
+                        tag_tgt = language_code_for_osc_tag(actual_target)
+                        display_text = (
+                            f"[{tag_src}→{tag_tgt}] "
+                            f"{display_translated_text} ({display_source_text})"
+                        )
+                        if len(display_text) > 144:
+                            display_text = f"[{tag_src}→{tag_tgt}] {display_translated_text}"
+                    else:
+                        display_text = str(display_translated_text)
+                    subtitles_translated = str(display_translated_text)
+
+                s.update_subtitles(
+                    display_source_text,
+                    subtitles_translated,
+                    False,
+                    "",
+                )
+
+            if not self._is_async_result_current(async_result_seq, session_generation):
+                return
+
+            osc_text = display_text
+            if is_translated:
+                osc_text = self._filter_error_lines_for_osc(
+                    display_text,
+                    primary_raw_text=translated_text if primary_should_translate else None,
+                    primary_display_text=display_translated_text,
+                    primary_language=(
+                        actual_target if primary_should_translate else source_lang
+                    ) if actual_target is not None else None,
+                    secondary_raw_text=(
+                        secondary_translated_text
+                        if use_secondary_output and secondary_should_translate
+                        else None
+                    ),
+                    secondary_display_text=secondary_display_translated_text,
+                    secondary_language=(
+                        actual_secondary_target if secondary_should_translate else source_lang
+                    ) if use_secondary_output else None,
+                )
+
+            if osc_text:
+                await osc_manager.send_text(osc_text, ongoing=False)
+
+            if (
+                primary_should_translate
+                and config.ENABLE_REVERSE_TRANSLATION
+                and self._is_async_result_current(async_result_seq, session_generation)
+            ):
+                reverse_translated_text = await loop.run_in_executor(
+                    s.executor,
+                    lambda: reverse_translation(
+                        s.backwards_translator,
+                        translated_text,
+                        actual_target,
+                        normalized_source,
+                    ),
+                )
+                if (
+                    reverse_translated_text is not None
+                    and self._is_async_result_current(
+                        async_result_seq, session_generation,
+                    )
+                ):
+                    current_original = s.subtitles_state.get("original", "")
+                    current_translated = s.subtitles_state.get("translated", "")
+                    current_ongoing = s.subtitles_state.get("ongoing", False)
+                    s.update_subtitles(
+                        current_original,
+                        current_translated,
+                        current_ongoing,
+                        str(reverse_translated_text),
+                    )
+        except Exception:
+            logger.exception("Final translation task failed")
 
     def on_result(self, event: RecognitionEvent) -> None:
         s = self.state
         text = event.text
         if not text:
             return
+        session_generation = self._get_session_generation()
 
         is_translated = False
         display_text = None
@@ -494,10 +812,16 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         self._partial_request_seq += 1
                         request_id = self._partial_request_seq
                         self._latest_partial_request_id = request_id
+                    async_result_seq = self._next_async_result_seq()
                     self.pending_partial_segment = segment
                     final_output_version = self._final_output_version
                     self._schedule_partial_translation_with_debounce(
-                        segment, request_id, self._finalized_seq, final_output_version,
+                        segment,
+                        request_id,
+                        self._finalized_seq,
+                        final_output_version,
+                        async_result_seq,
+                        session_generation,
                     )
 
         else:
@@ -571,39 +895,58 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         self._final_translate_request_seq += 1
                         my_final_tid = self._final_translate_request_seq
 
+                previous_translation = self.last_partial_translation
+                previous_translation_secondary = self.last_partial_translation_secondary
+                previous_source_segment = self.last_partial_source_segment
+                async_result_seq = self._next_async_result_seq()
+                self._reset_partial_translation_state()
+
+                if my_final_tid is not None and self._schedule_final_translation_task(
+                    text=text,
+                    source_lang=source_lang,
+                    normalized_source=normalized_source,
+                    actual_target=actual_target,
+                    actual_secondary_target=actual_secondary_target,
+                    primary_should_translate=primary_should_translate,
+                    secondary_should_translate=secondary_should_translate,
+                    use_secondary_output=use_secondary_output,
+                    use_deepl_final=use_deepl_final,
+                    previous_translation=previous_translation,
+                    previous_translation_secondary=previous_translation_secondary,
+                    previous_source_segment=previous_source_segment,
+                    request_id=my_final_tid,
+                    async_result_seq=async_result_seq,
+                    session_generation=session_generation,
+                ):
+                    return
+
                 if use_secondary_output:
-                    primary_future = None
-                    secondary_future = None
+                    translated_text = text
+                    secondary_translated_text = text
                     if primary_should_translate:
-                        primary_future = s.executor.submit(
-                            translate_with_backend,
+                        translated_text = translate_with_backend(
                             s.translator,
                             s.deepl_fallback_translator,
                             text,
                             actual_target,
-                            self.last_partial_translation,
+                            previous_translation,
                             use_deepl_final,
-                            self.last_partial_source_segment,
+                            previous_source_segment,
                             source_lang,
                             False,
                         )
                     if secondary_should_translate:
-                        secondary_future = s.executor.submit(
-                            translate_with_backend,
+                        secondary_translated_text = translate_with_backend(
                             s.secondary_translator,
                             s.secondary_deepl_fallback_translator,
                             text,
                             actual_secondary_target,
-                            self.last_partial_translation_secondary,
+                            previous_translation_secondary,
                             use_deepl_final,
-                            self.last_partial_source_segment,
+                            previous_source_segment,
                             source_lang,
                             False,
                         )
-                    translated_text = primary_future.result() if primary_future is not None else text
-                    secondary_translated_text = (
-                        secondary_future.result() if secondary_future is not None else text
-                    )
                 else:
                     if primary_should_translate:
                         translated_text = translate_with_backend(
@@ -611,21 +954,15 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             s.deepl_fallback_translator,
                             text,
                             actual_target,
-                            self.last_partial_translation,
+                            previous_translation,
                             use_deepl_final,
-                            self.last_partial_source_segment,
+                            previous_source_segment,
                             source_lang,
                             False,
                         )
                     else:
                         translated_text = text
                     secondary_translated_text = None
-
-                if my_final_tid is not None:
-                    with self._translate_ordering_lock:
-                        latest_final = self._final_translate_request_seq
-                    if my_final_tid != latest_final:
-                        return
 
                 if primary_should_translate and translated_text and not str(
                     translated_text,
@@ -642,15 +979,6 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     s.secondary_translator.append_history_entry(
                         text, secondary_translated_text, actual_secondary_target,
                     )
-
-                # 重置流式翻译状态
-                self.last_partial_translation = None
-                self.last_partial_translation_secondary = None
-                self.last_partial_source_segment = None
-                self.pending_partial_segment = None
-                self._latest_partial_request_id = 0
-                self.partial_translation_update_count = 0
-                self._prefer_deepl_on_next_final = False
 
                 display_source_text = add_furigana_if_needed(text, source_lang)
                 display_source_text = add_pinyin_if_needed(display_source_text, source_lang)

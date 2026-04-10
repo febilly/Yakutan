@@ -499,6 +499,13 @@ const LLM_TEMPLATE_CONFIGS = {
         parallelFastestMode: 'off',
         providerLabelKey: 'btn.llmTemplateMercury2',
     },
+    cerebras: {
+        baseUrl: 'https://api.cerebras.ai/v1',
+        model: 'qwen-3-235b-a22b-instruct-2507',
+        extraBody: '',
+        parallelFastestMode: 'off',
+        providerLabelKey: 'btn.llmTemplateCerebras',
+    },
 };
 
 function resolveLLMParallelFastestModeFromStoredTranslation(trans) {
@@ -713,6 +720,8 @@ function resolveLLMTemplateKeySource(templateName) {
         url = 'https://longcat.chat/platform/api_keys';
     } else if (templateName === 'mercury2') {
         url = 'https://platform.inceptionlabs.ai/dashboard/api-keys';
+    } else if (templateName === 'cerebras') {
+        url = 'https://cloud.cerebras.ai/platform';
     }
 
     if (!url) return null;
