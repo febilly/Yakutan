@@ -9,9 +9,9 @@ v12 smart-hybrid 策略：
   翻译做补救，再通过 merge_with_draft 合并保留稳定前缀。
 """
 
+import re
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import json
-import re
 from typing import Optional, List, Dict
 
 from .base_translation_api import BaseTranslationAPI
@@ -194,9 +194,12 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         """构建系统提示词（所有模式通用）"""
         return (
             f"You are a VRChat voice chat translator. "
-            f"Translate the user's message into natural {target_descriptor}. "
-            f"Use casual and friendly spoken style, like friends chatting, but also maintain basic courtesy. Avoid robotic or textbook phrasing. "
-            f"Output only the translation in {target_descriptor}. No source text, labels, notes, or commentary."
+            f"Translate the user's message into {target_descriptor}.\n\n"
+            f"- Output ONLY in {target_descriptor}. No source-language words.\n"
+            "- Translate EVERY part completely. Never skip or shorten.\n"
+            "- Use casual and friendly spoken style, like friends chatting, but also maintain basic courtesy. Avoid robotic or textbook phrasing.\n"
+            "- For idioms/slang: translate the meaning naturally.\n"
+            "- Output the translation only. No labels, notes, or commentary."
         )
 
     def _build_context_block(
@@ -256,20 +259,21 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         if previous_translation:
             if is_partial:
                 user_parts.append(
-                    f"Previous partial translation: {previous_translation.strip()}\n"
+                    f"Your previous translation: {previous_translation.strip()}\n"
                     "Source text has been updated below. Translate the full updated text. "
                     "Keep wording consistent where meaning hasn't changed."
                 )
             else:
-                # Final: continuation framing — 保持前缀一致，但避免重复/给出第二种说法
+                # Final: continuation framing — 强调 "继续" 而非 "修改"
                 user_parts.append(
-                    f"Previous partial translation: {previous_translation.strip()}\n"
-                    "Now the full source sentence is available. "
-                    "Translate the full source text as one natural complete sentence. "
-                    "Keep the beginning consistent with the partial translation."
+                    f"You previously translated part of this as: {previous_translation.strip()}\n"
+                    "Now the complete sentence has arrived. "
+                    "Translate the COMPLETE source text below. "
+                    "Start your translation the same way as your previous version, "
+                    "then continue translating the rest of the sentence."
                 )
 
-        user_parts.append(f"\nTranslate this: {text}")
+        user_parts.append(f"Translate this: {text}")
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -370,6 +374,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             )
 
         return False, ""
+
     @classmethod
     def _merge_dicts(cls, base: Dict, override: Dict) -> Dict:
         merged = dict(base)
