@@ -186,6 +186,13 @@ LLM_TRANSLATION_TEMPERATURE = 0.2
 LLM_TRANSLATION_TIMEOUT = 30
 LLM_TRANSLATION_MAX_RETRIES = 3
 
+# LLM 翻译正式程度
+# 可选: 'low', 'medium', 'high', 'customer_service'
+# 默认保持接近当前偏口语、轻礼貌的风格
+LLM_TRANSLATION_FORMALITY = (
+    os.getenv('LLM_TRANSLATION_FORMALITY', 'low').strip().lower() or 'low'
+)
+
 # OpenAI 兼容翻译接口的 extra_body 控制
 # 留空表示不发送 extra_body，由用户在网页中按需填写 JSON 对象
 OPENAI_COMPAT_EXTRA_BODY_JSON = ''

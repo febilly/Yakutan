@@ -806,10 +806,12 @@ function updateLLMSettingsVisibility(apiType = null, expandPanel = false) {
         ? document.getElementById('translation-api-type').value
         : 'qwen_mt');
     const wrapper = document.getElementById('llm-settings-wrapper');
-    if (!wrapper) return;
+    const formalityGroup = document.getElementById('llm-translation-formality-group');
+    if (!wrapper || !formalityGroup) return;
 
     const shouldShow = shouldShowLLMSettings(actualApiType);
     wrapper.style.display = shouldShow ? 'block' : 'none';
+    formalityGroup.style.display = shouldShow ? 'block' : 'none';
 
     if (shouldShow && expandPanel) {
         ensureCollapsibleExpanded('llm-settings');
@@ -1779,6 +1781,7 @@ function loadConfigFromLocalStorage() {
                 }
                 document.getElementById('llm-base-url').value = config.translation.llm_base_url || '';
                 document.getElementById('llm-model').value = config.translation.llm_model || '';
+                document.getElementById('llm-translation-formality').value = config.translation.llm_translation_formality || 'low';
                 document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
                 setLLMParallelFastestModeSelect(
                     resolveLLMParallelFastestModeFromStoredTranslation(config.translation)
@@ -1924,6 +1927,7 @@ function loadDefaultConfig() {
     setLLMParallelFastestModeSelect('off');
     document.getElementById('llm-base-url').value = '';
     document.getElementById('llm-model').value = '';
+    document.getElementById('llm-translation-formality').value = 'low';
     document.getElementById('openai-compat-extra-body-json').value = '';
 
     const showTag = document.getElementById('show-original-and-lang-tag');
@@ -2031,6 +2035,7 @@ function applyServerConfigPayload(config) {
     }
     document.getElementById('llm-base-url').value = config.translation.llm_base_url || '';
     document.getElementById('llm-model').value = config.translation.llm_model || '';
+    document.getElementById('llm-translation-formality').value = config.translation.llm_translation_formality || 'low';
     document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
     setLLMParallelFastestModeSelect(
         resolveLLMParallelFastestModeFromStoredTranslation(config.translation),
@@ -2179,6 +2184,7 @@ function saveConfigToLocalStorage() {
                 api_type: actualApiType,
                 llm_base_url: document.getElementById('llm-base-url').value.trim(),
                 llm_model: document.getElementById('llm-model').value.trim(),
+                llm_translation_formality: document.getElementById('llm-translation-formality').value || 'low',
                 openai_compat_extra_body_json: document.getElementById('openai-compat-extra-body-json').value.trim(),
                 llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
                 source_language: getSourceLanguageEffective(),
@@ -2380,6 +2386,7 @@ async function saveConfig(autoSave = false) {
                 api_type: actualApiType,
                 llm_base_url: document.getElementById('llm-base-url').value.trim(),
                 llm_model: document.getElementById('llm-model').value.trim(),
+                llm_translation_formality: document.getElementById('llm-translation-formality').value || 'low',
                 openai_compat_extra_body_json: document.getElementById('openai-compat-extra-body-json').value.trim(),
                 llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
                 source_language: getSourceLanguageEffective(),

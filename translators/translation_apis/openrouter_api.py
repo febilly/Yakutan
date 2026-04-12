@@ -90,6 +90,71 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         "fil": "FILIPINO/TAGALOG",
     }
 
+    GENERIC_FORMALITY_STYLE_GUIDES = {
+        "low": (
+            "Keep the spoken style casual and relaxed, like close friends chatting. "
+            "Use plain everyday wording with light courtesy, and avoid businesslike or overly polite phrasing unless the source clearly requires it."
+        ),
+        "medium": (
+            "Keep the spoken style natural and friendly, but shift to everyday polite wording. "
+            "Sound respectful and smooth for normal conversation with acquaintances or strangers, without becoming stiff or service-like."
+        ),
+        "high": (
+            "Keep the translation natural and spoken, but use clearly polite, refined, and respectful wording instead of casual friend-chat phrasing. "
+            "When the target language has politeness levels, choose the higher polite forms naturally, without becoming overly ceremonial unless the source requires it."
+        ),
+        "customer_service": (
+            "Keep the translation easy to understand, but use very high customer-service politeness. "
+            "Prefer the courteous, considerate, professional phrasing used by reception or support staff, softening requests and sounding attentive and reassuring."
+        ),
+    }
+
+    JAPANESE_FORMALITY_STYLE_GUIDES = {
+        "low": (
+            "For Japanese, use casual spoken Japanese in plain form, like friends chatting. "
+            "Prefer short, natural wording and avoid です/ます unless the source clearly needs politeness. "
+            "Examples: 「ちょっと待って。確認するね。わかった。」"
+        ),
+        "medium": (
+            "For Japanese, use standard everyday polite speech in basic です/ます style. "
+            "Sound natural and friendly, suitable for normal conversation with people you are not especially close to. "
+            "Examples: 「少し待ってください。確認します。わかりました。」"
+        ),
+        "high": (
+            "For Japanese, use clearly polite and refined 丁寧語. "
+            "Prefer respectful spoken wording such as more careful requests and humble verbs when natural, while keeping it conversational rather than ceremonial. "
+            "Examples: 「少々お待ちください。確認いたします。承知しました。」"
+        ),
+        "customer_service": (
+            "For Japanese, use customer-service style Japanese with 接客敬語 and soft cushion phrases when natural. "
+            "Prefer very courteous, considerate expressions, often in です/ます plus respectful or humble wording, and allow slightly fuller phrasing if needed to sound natural. "
+            "Examples: 「恐れ入りますが、少々お待ちいただけますと幸いです。ただいま確認のうえ、改めてご案内いたします。かしこまりました。」"
+        ),
+    }
+
+    KOREAN_FORMALITY_STYLE_GUIDES = {
+        "low": (
+            "For Korean, use casual spoken Korean in a close-friend tone. "
+            "Prefer relaxed conversational endings rather than formal polite endings, and avoid stiff honorific phrasing unless the source clearly needs it. "
+            "Examples: \"잠깐만. 확인해볼게. 알겠어.\""
+        ),
+        "medium": (
+            "For Korean, use everyday polite spoken Korean in 해요체. "
+            "Prefer natural polite endings such as -아요/-어요/-해요, suitable for ordinary conversation with strangers or acquaintances without sounding too formal. "
+            "Examples: \"잠시만 기다려 주세요. 확인해 볼게요. 알겠어요.\""
+        ),
+        "high": (
+            "For Korean, use clearly formal polite Korean, mainly in 합니다체 and polite request forms. "
+            "Prefer endings such as -습니다/-겠습니다 and formal requests when natural, while keeping the line smooth and spoken. "
+            "Examples: \"잠시만 기다려 주십시오. 확인하겠습니다. 알겠습니다.\""
+        ),
+        "customer_service": (
+            "For Korean, use customer-support style Korean with very high courtesy and service phrasing. "
+            "Prefer soft, professional wording such as apologies, appreciation, and 안내드리겠습니다 style expressions when natural, and allow slightly fuller phrasing to sound considerate. "
+            "Examples: \"불편을 드려 죄송하지만 잠시만 기다려 주시면 감사하겠습니다. 지금 확인한 뒤 다시 안내드리겠습니다. 잘 알겠습니다.\""
+        ),
+    }
+
     def __init__(
         self,
         model: Optional[str] = None,
@@ -175,7 +240,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
     ) -> str:
         """标准翻译模式"""
         target_descriptor = self._describe_language(target_language)
-        system_prompt = self._build_system_prompt(target_descriptor)
+        system_prompt = self._build_system_prompt(target_descriptor, target_language)
         context_block = self._build_context_block(context, context_pairs)
 
         user_parts = []
@@ -190,17 +255,37 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
 
         return self._call_api(messages, is_partial=False)
 
-    def _build_system_prompt(self, target_descriptor: str) -> str:
+    def _build_system_prompt(self, target_descriptor: str, target_language: str) -> str:
         """构建系统提示词（所有模式通用）"""
+        style_guide = self._get_formality_style_guide(target_language)
         return (
             f"You are a VRChat voice chat translator. "
             f"Translate the user's message into {target_descriptor}.\n\n"
             f"- Output ONLY in {target_descriptor}. No source-language words.\n"
             "- Translate EVERY part completely. Never skip or shorten.\n"
-            "- Use casual and friendly spoken style, like friends chatting, but also maintain basic courtesy. Avoid robotic or textbook phrasing.\n"
+            "- Use friendly spoken style. Avoid robotic or textbook phrasing.\n"
+            f"- Formality guide: {style_guide}\n"
             "- For idioms/slang: translate the meaning naturally.\n"
             "- Output the translation only. No labels, notes, or commentary."
         )
+
+    @classmethod
+    def _get_formality_style_guide(cls, target_language: str) -> str:
+        formality = str(getattr(config, "LLM_TRANSLATION_FORMALITY", "low") or "low").strip().lower()
+        style_guide_map = cls._get_formality_style_guide_map_for_language(target_language)
+        return style_guide_map.get(
+            formality,
+            style_guide_map["low"],
+        )
+
+    @classmethod
+    def _get_formality_style_guide_map_for_language(cls, target_language: str) -> Dict[str, str]:
+        normalized = (target_language or "").strip().lower()
+        if normalized.startswith("ja"):
+            return cls.JAPANESE_FORMALITY_STYLE_GUIDES
+        if normalized.startswith("ko"):
+            return cls.KOREAN_FORMALITY_STYLE_GUIDES
+        return cls.GENERIC_FORMALITY_STYLE_GUIDES
 
     def _build_context_block(
         self,
@@ -248,7 +333,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         detected_source_language = kwargs.get("detected_source_language", "auto")
         target_descriptor = self._describe_language(target_language)
 
-        system_prompt = self._build_system_prompt(target_descriptor)
+        system_prompt = self._build_system_prompt(target_descriptor, target_language)
         context_block = self._build_context_block(context, context_pairs)
 
         # ── Step 1: 构建 v11 continuation prompt（同时适用于 partial 和 final）──

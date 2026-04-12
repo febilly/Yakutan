@@ -68,6 +68,8 @@ app = Flask(__name__,
             static_folder=static_folder)
 CORS(app)
 
+VALID_LLM_TRANSLATION_FORMALITY = ('low', 'medium', 'high', 'customer_service')
+
 # 禁用Flask的请求日志
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
@@ -298,6 +300,9 @@ def get_config_dict():
             'api_type': config.TRANSLATION_API_TYPE,
             'llm_base_url': getattr(config, 'LLM_BASE_URL', ''),
             'llm_model': getattr(config, 'LLM_MODEL', ''),
+            'llm_translation_formality': getattr(
+                config, 'LLM_TRANSLATION_FORMALITY', 'low'
+            ),
             'openai_compat_extra_body_json': getattr(config, 'OPENAI_COMPAT_EXTRA_BODY_JSON', ''),
             'llm_parallel_fastest_mode': getattr(
                 config, 'LLM_PARALLEL_FASTEST_MODE', 'off'
@@ -392,6 +397,15 @@ def update_config(config_data):
                 config.LLM_BASE_URL = (trans['llm_base_url'] or '').strip()
             if 'llm_model' in trans:
                 config.LLM_MODEL = (trans['llm_model'] or '').strip()
+            if 'llm_translation_formality' in trans:
+                formality = str(trans['llm_translation_formality'] or 'low').strip().lower()
+                if formality not in VALID_LLM_TRANSLATION_FORMALITY:
+                    return (
+                        False,
+                        'msg.invalidLlmTranslationFormality',
+                        'LLM 翻译正式程度必须是 low、medium、high 或 customer_service',
+                    )
+                config.LLM_TRANSLATION_FORMALITY = formality
             if 'openai_compat_extra_body_json' in trans:
                 raw_extra_body = (trans['openai_compat_extra_body_json'] or '').strip()
                 if raw_extra_body:

@@ -187,6 +187,17 @@
                             <small class="form-text" data-i18n="hint.streamingMode">启用后会边说边翻译，不用等整句话说完才出结果。请注意这会大幅增加 token 用量。</small>
                         </div>
 
+                        <div class="form-group" id="llm-translation-formality-group" style="display: none;">
+                            <label for="llm-translation-formality" data-i18n="label.llmTranslationFormality">翻译正式程度</label>
+                            <select id="llm-translation-formality" class="form-control" onchange="onSettingChange()">
+                                <option value="low" data-i18n="option.llmTranslationFormality.low">低（朋友之间聊天）</option>
+                                <option value="medium" data-i18n="option.llmTranslationFormality.medium">中（与人初次见面）</option>
+                                <option value="high" data-i18n="option.llmTranslationFormality.high">高（非常礼貌）</option>
+                                <option value="customer_service" data-i18n="option.llmTranslationFormality.customerService">客服（礼貌过头了）</option>
+                            </select>
+                            <small class="form-text" data-i18n="hint.llmTranslationFormality">仅影响 LLM 译文的语气和礼貌程度。低更随意，中更自然礼貌，高更郑重正式，客服则接近前台/客服用语。</small>
+                        </div>
+
                         <div class="subsection llm-settings-wrapper" id="llm-settings-wrapper" style="display: none;">
                             <div class="collapsible-header llm-settings-header"
                                 onclick="toggleCollapsible('llm-settings')">
