@@ -769,6 +769,25 @@ function shouldShowLLMSettings(apiType) {
     return apiType === 'openrouter' || apiType === 'openrouter_streaming_deepl_hybrid';
 }
 
+const VALID_LLM_TRANSLATION_FORMALITY = ['low', 'medium', 'high'];
+const VALID_LLM_TRANSLATION_STYLE = ['standard', 'light'];
+const DEFAULT_LLM_TRANSLATION_FORMALITY = 'medium';
+const DEFAULT_LLM_TRANSLATION_STYLE = 'light';
+
+function sanitizeLLMTranslationFormality(value) {
+    const normalized = (value || DEFAULT_LLM_TRANSLATION_FORMALITY).trim().toLowerCase();
+    return VALID_LLM_TRANSLATION_FORMALITY.includes(normalized)
+        ? normalized
+        : DEFAULT_LLM_TRANSLATION_FORMALITY;
+}
+
+function sanitizeLLMTranslationStyle(value) {
+    const normalized = (value || DEFAULT_LLM_TRANSLATION_STYLE).trim().toLowerCase();
+    return VALID_LLM_TRANSLATION_STYLE.includes(normalized)
+        ? normalized
+        : DEFAULT_LLM_TRANSLATION_STYLE;
+}
+
 /** LLM 地址、模型、Key 是否已就绪（与启动校验一致：Key 可为环境/后端已设置而输入框为空）。 */
 function isLLMConnectionFieldsComplete() {
     const base = (document.getElementById('llm-base-url')?.value || '').trim();
@@ -807,11 +826,15 @@ function updateLLMSettingsVisibility(apiType = null, expandPanel = false) {
         : 'qwen_mt');
     const wrapper = document.getElementById('llm-settings-wrapper');
     const formalityGroup = document.getElementById('llm-translation-formality-group');
-    if (!wrapper || !formalityGroup) return;
+    const styleGroup = document.getElementById('llm-translation-style-group');
+    const toneGrid = document.getElementById('llm-tone-grid');
+    if (!wrapper || !formalityGroup || !styleGroup || !toneGrid) return;
 
     const shouldShow = shouldShowLLMSettings(actualApiType);
     wrapper.style.display = shouldShow ? 'block' : 'none';
+    toneGrid.style.display = shouldShow ? 'grid' : 'none';
     formalityGroup.style.display = shouldShow ? 'block' : 'none';
+    styleGroup.style.display = shouldShow ? 'block' : 'none';
 
     if (shouldShow && expandPanel) {
         ensureCollapsibleExpanded('llm-settings');
@@ -1781,7 +1804,10 @@ function loadConfigFromLocalStorage() {
                 }
                 document.getElementById('llm-base-url').value = config.translation.llm_base_url || '';
                 document.getElementById('llm-model').value = config.translation.llm_model || '';
-                document.getElementById('llm-translation-formality').value = config.translation.llm_translation_formality || 'low';
+                document.getElementById('llm-translation-formality').value =
+                    sanitizeLLMTranslationFormality(config.translation.llm_translation_formality);
+                document.getElementById('llm-translation-style').value =
+                    sanitizeLLMTranslationStyle(config.translation.llm_translation_style);
                 document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
                 setLLMParallelFastestModeSelect(
                     resolveLLMParallelFastestModeFromStoredTranslation(config.translation)
@@ -1927,7 +1953,8 @@ function loadDefaultConfig() {
     setLLMParallelFastestModeSelect('off');
     document.getElementById('llm-base-url').value = '';
     document.getElementById('llm-model').value = '';
-    document.getElementById('llm-translation-formality').value = 'low';
+    document.getElementById('llm-translation-formality').value = DEFAULT_LLM_TRANSLATION_FORMALITY;
+    document.getElementById('llm-translation-style').value = DEFAULT_LLM_TRANSLATION_STYLE;
     document.getElementById('openai-compat-extra-body-json').value = '';
 
     const showTag = document.getElementById('show-original-and-lang-tag');
@@ -2035,7 +2062,10 @@ function applyServerConfigPayload(config) {
     }
     document.getElementById('llm-base-url').value = config.translation.llm_base_url || '';
     document.getElementById('llm-model').value = config.translation.llm_model || '';
-    document.getElementById('llm-translation-formality').value = config.translation.llm_translation_formality || 'low';
+    document.getElementById('llm-translation-formality').value =
+        sanitizeLLMTranslationFormality(config.translation.llm_translation_formality);
+    document.getElementById('llm-translation-style').value =
+        sanitizeLLMTranslationStyle(config.translation.llm_translation_style);
     document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
     setLLMParallelFastestModeSelect(
         resolveLLMParallelFastestModeFromStoredTranslation(config.translation),
@@ -2184,7 +2214,12 @@ function saveConfigToLocalStorage() {
                 api_type: actualApiType,
                 llm_base_url: document.getElementById('llm-base-url').value.trim(),
                 llm_model: document.getElementById('llm-model').value.trim(),
-                llm_translation_formality: document.getElementById('llm-translation-formality').value || 'low',
+                llm_translation_formality: sanitizeLLMTranslationFormality(
+                    document.getElementById('llm-translation-formality').value
+                ),
+                llm_translation_style: sanitizeLLMTranslationStyle(
+                    document.getElementById('llm-translation-style').value
+                ),
                 openai_compat_extra_body_json: document.getElementById('openai-compat-extra-body-json').value.trim(),
                 llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
                 source_language: getSourceLanguageEffective(),
@@ -2386,7 +2421,12 @@ async function saveConfig(autoSave = false) {
                 api_type: actualApiType,
                 llm_base_url: document.getElementById('llm-base-url').value.trim(),
                 llm_model: document.getElementById('llm-model').value.trim(),
-                llm_translation_formality: document.getElementById('llm-translation-formality').value || 'low',
+                llm_translation_formality: sanitizeLLMTranslationFormality(
+                    document.getElementById('llm-translation-formality').value
+                ),
+                llm_translation_style: sanitizeLLMTranslationStyle(
+                    document.getElementById('llm-translation-style').value
+                ),
                 openai_compat_extra_body_json: document.getElementById('openai-compat-extra-body-json').value.trim(),
                 llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
                 source_language: getSourceLanguageEffective(),

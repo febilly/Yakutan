@@ -284,6 +284,17 @@ main {
     margin-bottom: 0;
 }
 
+.llm-tone-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 15px;
+    align-items: start;
+}
+
+.llm-tone-grid .form-group {
+    margin-bottom: 0;
+}
+
 .form-group label {
     display: block;
     margin-bottom: 5px;
@@ -865,6 +876,10 @@ footer a:hover {
         grid-template-columns: 1fr;
     }
 
+    .llm-tone-grid {
+        grid-template-columns: 1fr;
+    }
+
     .language-setting-item label {
         min-height: 0;
         white-space: normal;
@@ -927,6 +942,11 @@ footer a:hover {
     }
 
     .text-post-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .llm-tone-grid {
         grid-template-columns: 1fr;
         gap: 10px;
     }

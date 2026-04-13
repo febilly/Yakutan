@@ -187,10 +187,16 @@ LLM_TRANSLATION_TIMEOUT = 30
 LLM_TRANSLATION_MAX_RETRIES = 3
 
 # LLM 翻译正式程度
-# 可选: 'low', 'medium', 'high', 'customer_service'
+# 可选: 'low', 'medium', 'high'
 # 默认保持接近当前偏口语、轻礼貌的风格
 LLM_TRANSLATION_FORMALITY = (
-    os.getenv('LLM_TRANSLATION_FORMALITY', 'low').strip().lower() or 'low'
+    os.getenv('LLM_TRANSLATION_FORMALITY', 'medium').strip().lower() or 'medium'
+)
+
+# LLM 句子风格
+# 可选: 'standard', 'light'
+LLM_TRANSLATION_STYLE = (
+    os.getenv('LLM_TRANSLATION_STYLE', 'light').strip().lower() or 'light'
 )
 
 # OpenAI 兼容翻译接口的 extra_body 控制

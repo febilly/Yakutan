@@ -103,11 +103,10 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             "Keep the translation natural and spoken, but use clearly polite, refined, and respectful wording instead of casual friend-chat phrasing. "
             "When the target language has politeness levels, choose the higher polite forms naturally, without becoming overly ceremonial unless the source requires it."
         ),
-        "customer_service": (
-            "Keep the translation easy to understand, but use very high customer-service politeness. "
-            "Prefer the courteous, considerate, professional phrasing used by reception or support staff, softening requests and sounding attentive and reassuring."
-        ),
     }
+
+    DEFAULT_FORMALITY = "medium"
+    DEFAULT_SENTENCE_STYLE = "light"
 
     JAPANESE_FORMALITY_STYLE_GUIDES = {
         "low": (
@@ -124,11 +123,6 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             "For Japanese, use clearly polite and refined 丁寧語. "
             "Prefer respectful spoken wording such as more careful requests and humble verbs when natural, while keeping it conversational rather than ceremonial. "
             "Examples: 「少々お待ちください。確認いたします。承知しました。」"
-        ),
-        "customer_service": (
-            "For Japanese, use customer-service style Japanese with 接客敬語 and soft cushion phrases when natural. "
-            "Prefer very courteous, considerate expressions, often in です/ます plus respectful or humble wording, and allow slightly fuller phrasing if needed to sound natural. "
-            "Examples: 「恐れ入りますが、少々お待ちいただけますと幸いです。ただいま確認のうえ、改めてご案内いたします。かしこまりました。」"
         ),
     }
 
@@ -148,10 +142,16 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             "Prefer endings such as -습니다/-겠습니다 and formal requests when natural, while keeping the line smooth and spoken. "
             "Examples: \"잠시만 기다려 주십시오. 확인하겠습니다. 알겠습니다.\""
         ),
-        "customer_service": (
-            "For Korean, use customer-support style Korean with very high courtesy and service phrasing. "
-            "Prefer soft, professional wording such as apologies, appreciation, and 안내드리겠습니다 style expressions when natural, and allow slightly fuller phrasing to sound considerate. "
-            "Examples: \"불편을 드려 죄송하지만 잠시만 기다려 주시면 감사하겠습니다. 지금 확인한 뒤 다시 안내드리겠습니다. 잘 알겠습니다.\""
+    }
+
+    GENERIC_SENTENCE_STYLE_GUIDES = {
+        "standard": (
+            "Keep the sentence style natural, stable, and neutral for everyday conversation. "
+            "Do not add extra stylization beyond what is needed for fluent spoken language."
+        ),
+        "light": (
+            "Keep the sentence style lively and chatty, with a bit more conversational momentum and warmth. "
+            "Make it feel lighter and more animated than standard speech, but still natural and not exaggerated."
         ),
     }
 
@@ -258,6 +258,7 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
     def _build_system_prompt(self, target_descriptor: str, target_language: str) -> str:
         """构建系统提示词（所有模式通用）"""
         style_guide = self._get_formality_style_guide(target_language)
+        sentence_style_guide = self._get_sentence_style_guide(target_language)
         return (
             f"You are a VRChat voice chat translator. "
             f"Translate the user's message into {target_descriptor}.\n\n"
@@ -265,17 +266,23 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
             "- Translate EVERY part completely. Never skip or shorten.\n"
             "- Use friendly spoken style. Avoid robotic or textbook phrasing.\n"
             f"- Formality guide: {style_guide}\n"
+            f"- Sentence style guide: {sentence_style_guide}\n"
             "- For idioms/slang: translate the meaning naturally.\n"
             "- Output the translation only. No labels, notes, or commentary."
         )
 
     @classmethod
     def _get_formality_style_guide(cls, target_language: str) -> str:
-        formality = str(getattr(config, "LLM_TRANSLATION_FORMALITY", "low") or "low").strip().lower()
+        formality = str(
+            getattr(config, "LLM_TRANSLATION_FORMALITY", cls.DEFAULT_FORMALITY)
+            or cls.DEFAULT_FORMALITY
+        ).strip().lower()
         style_guide_map = cls._get_formality_style_guide_map_for_language(target_language)
+        if formality not in style_guide_map:
+            formality = cls.DEFAULT_FORMALITY
         return style_guide_map.get(
             formality,
-            style_guide_map["low"],
+            style_guide_map[cls.DEFAULT_FORMALITY],
         )
 
     @classmethod
@@ -286,6 +293,20 @@ class OpenRouterAPI(OpenAICompatClientBase, BaseTranslationAPI):
         if normalized.startswith("ko"):
             return cls.KOREAN_FORMALITY_STYLE_GUIDES
         return cls.GENERIC_FORMALITY_STYLE_GUIDES
+
+    @classmethod
+    def _get_sentence_style_guide(cls, target_language: str) -> str:
+        style = str(
+            getattr(config, "LLM_TRANSLATION_STYLE", cls.DEFAULT_SENTENCE_STYLE)
+            or cls.DEFAULT_SENTENCE_STYLE
+        ).strip().lower()
+        style_guide_map = cls.GENERIC_SENTENCE_STYLE_GUIDES
+        if style not in style_guide_map:
+            style = cls.DEFAULT_SENTENCE_STYLE
+        return style_guide_map.get(
+            style,
+            style_guide_map[cls.DEFAULT_SENTENCE_STYLE],
+        )
 
     def _build_context_block(
         self,

@@ -68,7 +68,24 @@ app = Flask(__name__,
             static_folder=static_folder)
 CORS(app)
 
-VALID_LLM_TRANSLATION_FORMALITY = ('low', 'medium', 'high', 'customer_service')
+VALID_LLM_TRANSLATION_FORMALITY = ('low', 'medium', 'high')
+VALID_LLM_TRANSLATION_STYLE = ('standard', 'light')
+DEFAULT_LLM_TRANSLATION_FORMALITY = 'medium'
+DEFAULT_LLM_TRANSLATION_STYLE = 'light'
+
+def _sanitize_llm_translation_formality(value: Optional[str]) -> str:
+    normalized = str(value or DEFAULT_LLM_TRANSLATION_FORMALITY).strip().lower()
+    if normalized not in VALID_LLM_TRANSLATION_FORMALITY:
+        return DEFAULT_LLM_TRANSLATION_FORMALITY
+    return normalized
+
+
+def _sanitize_llm_translation_style(value: Optional[str]) -> str:
+    normalized = str(value or DEFAULT_LLM_TRANSLATION_STYLE).strip().lower()
+    if normalized not in VALID_LLM_TRANSLATION_STYLE:
+        return DEFAULT_LLM_TRANSLATION_STYLE
+    return normalized
+
 
 # 禁用Flask的请求日志
 log = logging.getLogger('werkzeug')
@@ -300,8 +317,11 @@ def get_config_dict():
             'api_type': config.TRANSLATION_API_TYPE,
             'llm_base_url': getattr(config, 'LLM_BASE_URL', ''),
             'llm_model': getattr(config, 'LLM_MODEL', ''),
-            'llm_translation_formality': getattr(
-                config, 'LLM_TRANSLATION_FORMALITY', 'low'
+            'llm_translation_formality': _sanitize_llm_translation_formality(
+                getattr(config, 'LLM_TRANSLATION_FORMALITY', DEFAULT_LLM_TRANSLATION_FORMALITY)
+            ),
+            'llm_translation_style': _sanitize_llm_translation_style(
+                getattr(config, 'LLM_TRANSLATION_STYLE', DEFAULT_LLM_TRANSLATION_STYLE)
             ),
             'openai_compat_extra_body_json': getattr(config, 'OPENAI_COMPAT_EXTRA_BODY_JSON', ''),
             'llm_parallel_fastest_mode': getattr(
@@ -398,14 +418,13 @@ def update_config(config_data):
             if 'llm_model' in trans:
                 config.LLM_MODEL = (trans['llm_model'] or '').strip()
             if 'llm_translation_formality' in trans:
-                formality = str(trans['llm_translation_formality'] or 'low').strip().lower()
-                if formality not in VALID_LLM_TRANSLATION_FORMALITY:
-                    return (
-                        False,
-                        'msg.invalidLlmTranslationFormality',
-                        'LLM 翻译正式程度必须是 low、medium、high 或 customer_service',
-                    )
-                config.LLM_TRANSLATION_FORMALITY = formality
+                config.LLM_TRANSLATION_FORMALITY = _sanitize_llm_translation_formality(
+                    trans['llm_translation_formality']
+                )
+            if 'llm_translation_style' in trans:
+                config.LLM_TRANSLATION_STYLE = _sanitize_llm_translation_style(
+                    trans['llm_translation_style']
+                )
             if 'openai_compat_extra_body_json' in trans:
                 raw_extra_body = (trans['openai_compat_extra_body_json'] or '').strip()
                 if raw_extra_body:
