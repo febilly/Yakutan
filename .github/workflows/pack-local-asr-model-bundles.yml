@@ -101,7 +101,7 @@ jobs:
           }
           $qwenBinSrc = Join-Path "." "local_asr/models/qwen_llama_vulkan_bin"
           if (-not (Test-Path $qwenBinSrc)) { throw "缺少 Qwen Vulkan DLL 目录: $qwenBinSrc" }
-          foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll")) {
+          foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll", "libomp140.x86_64.dll")) {
             if (-not (Test-Path (Join-Path $qwenBinSrc $f))) { throw "缺少 llama Vulkan DLL: $f" }
           }
           $stageRoot = Join-Path "./dist" "_qwen_pack_layout"

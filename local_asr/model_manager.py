@@ -31,8 +31,11 @@ def _llama_vulkan_bin_has_core_dlls(path: Path) -> bool:
     if not path.is_dir():
         return False
     if sys.platform == "win32":
-        names = ("llama.dll", "ggml.dll", "ggml-base.dll")
+        # Windows: ggml CPU backend depends on OpenMP runtime in this folder.
+        names = ("llama.dll", "ggml.dll", "ggml-base.dll", "libomp140.x86_64.dll")
     else:
+        # Linux: OpenMP runtime (libgomp/libomp) is expected from system packages.
+        # We only require llama/ggml core .so files here for readiness checks.
         names = ("libllama.so", "libggml.so", "libggml-base.so")
     return all((path / n).is_file() for n in names)
 
@@ -216,7 +219,8 @@ def _ensure_llama_cpp_vulkan_to(bin_dir: Path) -> None:
         return
 
     required_dlls = ["llama.dll", "ggml.dll", "ggml-base.dll"]
-    if all((bin_dir / filename).is_file() for filename in required_dlls):
+    runtime_dlls = required_dlls + ["libomp140.x86_64.dll"]
+    if all((bin_dir / filename).is_file() for filename in runtime_dlls):
         return
 
     bin_dir.mkdir(parents=True, exist_ok=True)
@@ -233,6 +237,8 @@ def _ensure_llama_cpp_vulkan_to(bin_dir: Path) -> None:
             basename = os.path.basename(member)
             if basename in required_dlls or (
                 basename.startswith("ggml-") and basename.endswith(".dll")
+            ) or (
+                basename.startswith("libomp") and basename.endswith(".dll")
             ):
                 with archive.open(member) as src, open(bin_dir / basename, "wb") as dst:
                     shutil.copyfileobj(src, dst)
@@ -374,7 +380,8 @@ def is_qwen3_asr_ready() -> bool:
     bin_dir = _qwen3_llama_bin_dir()
     if not bin_dir.exists():
         return False
-    required = ["llama.dll", "ggml.dll", "ggml-base.dll"] if sys.platform == "win32" else [
+    # Keep platform-specific runtime checks aligned with _llama_vulkan_bin_has_core_dlls().
+    required = ["llama.dll", "ggml.dll", "ggml-base.dll", "libomp140.x86_64.dll"] if sys.platform == "win32" else [
         "libllama.so",
         "libggml.so",
         "libggml-base.so",
@@ -482,6 +489,7 @@ def download_qwen3_asr() -> None:
     if sys.platform == "win32":
         _ensure_llama_cpp_vulkan_to(bin_dir)
     else:
+        # Linux runtime still expects system OpenMP libraries (e.g. libgomp/libomp).
         required_so = ["libllama.so", "libggml.so", "libggml-base.so"]
         if any(not (bin_dir / filename).exists() for filename in required_so):
             logger.warning(

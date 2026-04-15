@@ -135,6 +135,7 @@ llama_get_logits_ith = None
 llama_get_embeddings = None
 llama_tokenize = None
 llama_vocab_n_tokens = None
+llama_vocab_bos = None
 llama_vocab_eos = None
 llama_token_to_piece = None
 llama_get_memory = None
@@ -191,7 +192,7 @@ def init_llama_lib():
     global llama_batch_init, llama_batch_free, llama_batch_get_one
     global llama_decode, llama_get_logits, llama_get_logits_ith, llama_get_embeddings, llama_tokenize
     global llama_get_memory, llama_memory_clear, llama_model_n_embd
-    global llama_vocab_n_tokens, llama_vocab_eos, llama_token_to_piece
+    global llama_vocab_n_tokens, llama_vocab_bos, llama_vocab_eos, llama_token_to_piece
     global llama_sampler_chain_default_params, llama_sampler_chain_init, llama_sampler_chain_add
     global llama_sampler_init_greedy, llama_sampler_init_dist, llama_sampler_init_temp
     global llama_sampler_init_top_k, llama_sampler_init_top_p, llama_sampler_sample, llama_sampler_free
@@ -324,6 +325,10 @@ def init_llama_lib():
     llama_vocab_n_tokens = llama.llama_vocab_n_tokens
     llama_vocab_n_tokens.argtypes = [ctypes.c_void_p]
     llama_vocab_n_tokens.restype = ctypes.c_int32
+
+    llama_vocab_bos = llama.llama_vocab_bos
+    llama_vocab_bos.argtypes = [ctypes.c_void_p]
+    llama_vocab_bos.restype = llama_token
 
     llama_vocab_eos = llama.llama_vocab_eos
     llama_vocab_eos.argtypes = [ctypes.c_void_p]
@@ -465,6 +470,8 @@ class LlamaModel:
     """模型的面向对象封装"""
     def __init__(self, path, n_gpu_layers=-1):
         self.ptr = load_model(path)
+        if not self.ptr:
+            raise RuntimeError(f"Failed to load llama model: {path}")
             
         self.vocab = llama_model_get_vocab(self.ptr)
         self.n_embd = llama_model_n_embd(self.ptr)
