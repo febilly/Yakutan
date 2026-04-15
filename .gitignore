@@ -36,3 +36,5 @@ local_asr/vendor/**/__pycache__/
 local_asr/vendor/**/*.dll
 local_asr/vendor/**/*.so
 local_asr/vendor/qwen_asr_gguf/inference_old/
+
+local_asr_models/

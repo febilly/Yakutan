@@ -54,11 +54,9 @@ def prepare_qwen_llama_runtime_env() -> None:
 
 
 def _default_models_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        from resource_path import get_user_data_path
+    from resource_path import get_user_data_path
 
-        return Path(get_user_data_path("local_asr_models"))
-    return PACKAGE_DIR / "models"
+    return Path(get_user_data_path("local_asr_models"))
 
 
 MODELS_DIR = _default_models_dir()
@@ -167,7 +165,11 @@ def _silero_onnx_bundle_path() -> Path:
 
 
 def _silero_onnx_user_path() -> Path:
-    return MODELS_DIR / SILERO_VAD_DIR_NAME / SILERO_VAD_ONNX_NAME
+    if getattr(sys, "frozen", False):
+        from resource_path import get_user_data_path
+
+        return Path(get_user_data_path(os.path.join("local_asr", "models", SILERO_VAD_DIR_NAME, SILERO_VAD_ONNX_NAME)))
+    return PACKAGE_DIR / "models" / SILERO_VAD_DIR_NAME / SILERO_VAD_ONNX_NAME
 
 
 def silero_onnx_path() -> Path:
