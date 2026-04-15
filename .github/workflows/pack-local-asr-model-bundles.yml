@@ -63,8 +63,17 @@ jobs:
       - name: Build SenseVoice bundle zip
         shell: pwsh
         run: |
-          $senseSrc = Join-Path "." "local_asr/models/sensevoice-onnx"
-          if (-not (Test-Path $senseSrc)) { throw "缺少 SenseVoice 目录: $senseSrc" }
+          $senseSrc = $null
+          foreach ($rel in @("local_asr/models/sensevoice-onnx", "local_asr_models/sensevoice-onnx")) {
+            $candidate = Join-Path "." $rel
+            if (Test-Path $candidate) {
+              $senseSrc = $candidate
+              break
+            }
+          }
+          if (-not $senseSrc) {
+            throw "缺少 SenseVoice 目录（已检查 local_asr/models/sensevoice-onnx 与 local_asr_models/sensevoice-onnx）"
+          }
           foreach ($f in @(
             "embedding.npy",
             "sense-voice-encoder-int8.onnx",
