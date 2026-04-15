@@ -47,6 +47,15 @@ jobs:
       if: matrix.variant == 'local-asr'
       run: |
         python -c "from local_asr.model_manager import apply_cache_env, download_silero, ensure_vendor_sources; apply_cache_env(); download_silero(); ensure_vendor_sources('qwen3-asr')"
+
+    - name: Exclude Silero from standard build
+      if: matrix.variant == 'standard'
+      shell: pwsh
+      run: |
+        $silero = Join-Path "." "local_asr/models/silero_vad"
+        if (Test-Path $silero) {
+          Remove-Item -Recurse -Force $silero
+        }
     
     - name: Build executable with PyInstaller
       run: |
