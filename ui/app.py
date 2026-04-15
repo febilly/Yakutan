@@ -18,6 +18,7 @@ import os
 # 添加父目录到路径以导入config和main
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from audio_runtime_guard import hold_portaudio
 from udp_port_check import get_non_vrchat_udp_port_occupants
 try:
     from local_asr import (
@@ -827,69 +828,70 @@ def list_input_devices():
         except Exception as e:  # pragma: no cover
             return jsonify({'devices': [], 'default_index': None, 'default_name': None, 'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None), 'error': str(e)})
 
-        pa = pyaudio.PyAudio()
-        devices = []
-        default_index = None
-        default_name = None
-        preferred_host_api_index = None
-        try:
+        with hold_portaudio("list_input_devices"):
+            pa = pyaudio.PyAudio()
+            devices = []
+            default_index = None
+            default_name = None
+            preferred_host_api_index = None
             try:
-                default_info = pa.get_default_input_device_info()
-                default_index = default_info.get('index')
-                default_name = str(default_info.get('name') or '').strip() or None
-            except Exception:
-                default_index = None
-                default_name = None
-
-            # 选择一个 Host API，避免同一设备被不同 Host API 重复枚举
-            # 优先 WASAPI（更贴近系统设备管理器的“启用/禁用”状态），否则用默认 Host API
-            try:
-                host_api_count = pa.get_host_api_count()
-                for host_api_idx in range(host_api_count):
-                    try:
-                        host_api_info = pa.get_host_api_info_by_index(host_api_idx)
-                    except Exception:
-                        continue
-                    name = str(host_api_info.get('name') or '')
-                    if 'wasapi' in name.lower():
-                        preferred_host_api_index = host_api_idx
-                        break
-            except Exception:
-                preferred_host_api_index = None
-
-            if preferred_host_api_index is None:
                 try:
-                    preferred_host_api_index = pa.get_default_host_api_info().get('index')
+                    default_info = pa.get_default_input_device_info()
+                    default_index = default_info.get('index')
+                    default_name = str(default_info.get('name') or '').strip() or None
+                except Exception:
+                    default_index = None
+                    default_name = None
+
+                # 选择一个 Host API，避免同一设备被不同 Host API 重复枚举
+                # 优先 WASAPI（更贴近系统设备管理器的“启用/禁用”状态），否则用默认 Host API
+                try:
+                    host_api_count = pa.get_host_api_count()
+                    for host_api_idx in range(host_api_count):
+                        try:
+                            host_api_info = pa.get_host_api_info_by_index(host_api_idx)
+                        except Exception:
+                            continue
+                        name = str(host_api_info.get('name') or '')
+                        if 'wasapi' in name.lower():
+                            preferred_host_api_index = host_api_idx
+                            break
                 except Exception:
                     preferred_host_api_index = None
 
-            count = pa.get_device_count()
-            seen_names = set()
-            for idx in range(count):
+                if preferred_host_api_index is None:
+                    try:
+                        preferred_host_api_index = pa.get_default_host_api_info().get('index')
+                    except Exception:
+                        preferred_host_api_index = None
+
+                count = pa.get_device_count()
+                seen_names = set()
+                for idx in range(count):
+                    try:
+                        info = pa.get_device_info_by_index(idx)
+                    except Exception:
+                        continue
+
+                    if preferred_host_api_index is not None and info.get('hostApi') != preferred_host_api_index:
+                        continue
+
+                    max_in = int(info.get('maxInputChannels', 0) or 0)
+                    if max_in <= 0:
+                        continue
+
+                    name = str(info.get('name') or f'Device {idx}')
+                    name_key = " ".join(name.strip().lower().split())
+                    if name_key in seen_names:
+                        continue
+                    seen_names.add(name_key)
+
+                    devices.append({'index': idx, 'name': name, 'max_input_channels': max_in})
+            finally:
                 try:
-                    info = pa.get_device_info_by_index(idx)
+                    pa.terminate()
                 except Exception:
-                    continue
-
-                if preferred_host_api_index is not None and info.get('hostApi') != preferred_host_api_index:
-                    continue
-
-                max_in = int(info.get('maxInputChannels', 0) or 0)
-                if max_in <= 0:
-                    continue
-
-                name = str(info.get('name') or f'Device {idx}')
-                name_key = " ".join(name.strip().lower().split())
-                if name_key in seen_names:
-                    continue
-                seen_names.add(name_key)
-
-                devices.append({'index': idx, 'name': name, 'max_input_channels': max_in})
-        finally:
-            try:
-                pa.terminate()
-            except Exception:
-                pass
+                    pass
 
         return jsonify({
             'devices': devices,
