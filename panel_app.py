@@ -18,14 +18,6 @@ def _parse_panel_width(raw_value):
         return DEFAULT_PANEL_WIDTH
 
 
-def _get_dpi_scale_factor():
-    """获取主显示器的 DPI 缩放因子（如 1.0, 1.25, 1.5, 2.25 等）"""
-    try:
-        return ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100.0
-    except Exception:
-        return 1.0
-
-
 def _should_show_quick_lang_bar(url):
     try:
         params = parse_qs(urlparse(url).query)
@@ -66,9 +58,6 @@ def main(argv=None):
         content_height = max(60, content_height - QUICK_LANG_BAR_HEIGHT)
     initial_height = content_height if floating_mode else content_height + WINDOW_TITLE_BAR_HEIGHT
 
-    scale = _get_dpi_scale_factor()
-    physical_width = int(panel_width * scale)
-    physical_height = int(initial_height * scale)
     panel_api = PanelApi()
 
     # 先隐藏创建，等 resize 到正确物理像素尺寸后再显示，避免闪烁
@@ -87,8 +76,8 @@ def main(argv=None):
 
     def on_started():
         # pywebview 的 AutoScaleMode.Dpi 缩放行为不一致，
-        # 这里用 resize() (直接调 SetWindowPos) 强制设为正确的物理像素尺寸
-        window.resize(physical_width, physical_height)
+        # 这里用 resize() (直接调 SetWindowPos) 强制设为正确的尺寸
+        window.resize(panel_width, initial_height)
         window.show()
 
     logging.getLogger('pywebview').setLevel(logging.ERROR)
