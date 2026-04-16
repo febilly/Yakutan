@@ -498,6 +498,11 @@
                                     step="0.1" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
                             </div>
                             <div class="form-group">
+                                <label for="local-pre-speech-duration" data-i18n="label.localPreSpeechDuration">起声预缓冲（秒）</label>
+                                <input type="number" id="local-pre-speech-duration" class="form-control" min="0" max="2"
+                                    step="0.05" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                            </div>
+                            <div class="form-group">
                                 <label class="switch-label">
                                     <span data-i18n="label.localIncrementalAsr">启用增量识别</span>
                                     <label class="switch">

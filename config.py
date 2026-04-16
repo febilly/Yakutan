@@ -100,6 +100,8 @@ LOCAL_VAD_MIN_SPEECH_DURATION = 1.0
 # 单段口语送入 VAD 的最长时长（秒）；超过后对本段仅送入静音块直至 VAD 静音或闭麦结束本段（不按时长强制切句）
 LOCAL_VAD_MAX_SPEECH_DURATION = 30.0
 LOCAL_VAD_SILENCE_DURATION = 0.8
+# 起声时拼接的预缓冲音频时长（秒），用于避免漏掉第一个字
+LOCAL_VAD_PRE_SPEECH_DURATION = 0.2
 
 # 本地增量识别（中间结果）
 LOCAL_INCREMENTAL_ASR = True

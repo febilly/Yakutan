@@ -115,6 +115,7 @@ function getLocalAsrConfigFromForm() {
         min_speech_duration: parseFloat(document.getElementById('local-min-speech-duration')?.value || '1'),
         max_speech_duration: parseFloat(document.getElementById('local-max-speech-duration')?.value || '30'),
         silence_duration: parseFloat(document.getElementById('local-silence-duration')?.value || '0.8'),
+        pre_speech_duration: parseFloat(document.getElementById('local-pre-speech-duration')?.value || '0.2'),
         incremental_asr: document.getElementById('local-incremental-asr')?.checked ?? true,
         interim_interval: parseFloat(document.getElementById('local-interim-interval')?.value || '2'),
     };
@@ -139,6 +140,9 @@ function applyLocalAsrConfig(config) {
     }
     if (document.getElementById('local-silence-duration')) {
         document.getElementById('local-silence-duration').value = config.silence_duration ?? 0.8;
+    }
+    if (document.getElementById('local-pre-speech-duration')) {
+        document.getElementById('local-pre-speech-duration').value = config.pre_speech_duration ?? 0.2;
     }
     if (document.getElementById('local-incremental-asr')) {
         document.getElementById('local-incremental-asr').checked = config.incremental_asr ?? true;
@@ -1985,6 +1989,7 @@ function loadDefaultConfig() {
             min_speech_duration: 1.0,
             max_speech_duration: 30.0,
             silence_duration: 0.8,
+            pre_speech_duration: 0.2,
             incremental_asr: true,
             interim_interval: 2.0,
         });

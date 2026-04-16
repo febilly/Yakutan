@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import logging
+import math
 import numpy as np
 
 from .model_manager import apply_cache_env, silero_onnx_path
@@ -77,6 +78,7 @@ class VADProcessor:
         threshold: float = 0.50,
         min_speech_duration: float = 1.0,
         chunk_duration: float = 0.032,
+        pre_speech_duration: float = 0.2,
     ) -> None:
         self.sample_rate = sample_rate
         self.threshold = threshold
@@ -94,10 +96,10 @@ class VADProcessor:
         self._is_speaking = False
         self._silence_counter = 0
 
-        self._pre_speech_chunks = 3
-        self._pre_buffer: collections.deque[np.ndarray] = collections.deque(
-            maxlen=self._pre_speech_chunks
-        )
+        self._pre_speech_duration = max(0.0, float(pre_speech_duration))
+        self._pre_speech_chunks = 0
+        self._pre_buffer: collections.deque[np.ndarray] = collections.deque(maxlen=1)
+        self._update_pre_speech_chunks(self._pre_speech_duration)
 
         self._silence_limit = self._seconds_to_chunks(0.8)
         self.last_confidence = 0.0
@@ -116,6 +118,25 @@ class VADProcessor:
     def _seconds_to_chunks(self, seconds: float) -> int:
         return max(1, round(seconds / self._chunk_duration))
 
+    def _update_pre_speech_chunks(self, seconds: float) -> None:
+        seconds = max(0.0, float(seconds))
+        chunks = int(math.ceil(seconds / self._chunk_duration)) if self._chunk_duration > 0 else 0
+        if seconds > 0 and chunks <= 0:
+            chunks = 1
+
+        self._pre_speech_duration = seconds
+        self._pre_speech_chunks = max(0, chunks)
+
+        if self._pre_speech_chunks <= 0:
+            self._pre_buffer = collections.deque(maxlen=1)
+            self._pre_buffer.clear()
+            return
+
+        old = list(self._pre_buffer)
+        self._pre_buffer = collections.deque(maxlen=self._pre_speech_chunks)
+        if old:
+            self._pre_buffer.extend(old[-self._pre_speech_chunks :])
+
     def update_settings(self, settings: dict) -> None:
         if "vad_mode" in settings:
             self.mode = settings["vad_mode"]
@@ -127,6 +148,8 @@ class VADProcessor:
             self.min_speech_samples = int(settings["min_speech_duration"] * self.sample_rate)
         if "silence_duration" in settings:
             self._silence_limit = self._seconds_to_chunks(float(settings["silence_duration"]))
+        if "pre_speech_duration" in settings:
+            self._update_pre_speech_chunks(float(settings["pre_speech_duration"]))
 
     def _silero_confidence(self, audio_chunk: np.ndarray) -> float:
         window_size = 512 if self.sample_rate == 16000 else 256
@@ -171,7 +194,8 @@ class VADProcessor:
             self._confidence_history.append(confidence)
             self._speech_samples += len(audio_chunk)
         else:
-            self._pre_buffer.append(audio_chunk)
+            if self._pre_speech_chunks > 0:
+                self._pre_buffer.append(audio_chunk)
 
         if self._is_speaking and self._silence_counter >= self._silence_limit:
             if self._speech_samples >= self.min_speech_samples:
