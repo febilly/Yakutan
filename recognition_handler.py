@@ -774,7 +774,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
     def on_result(self, event: RecognitionEvent) -> None:
         s = self.state
-        text = event.text
+        text = str(event.text or "").strip()
         if not text:
             return
         session_generation = self._get_session_generation()
