@@ -25,6 +25,8 @@ async def init_audio_stream(state):
         state: AppState 实例，音频设备信息将直接设置到其属性上。
     """
     loop = asyncio.get_event_loop()
+    state.ensure_audio_executor()
+    state.audio_closing = False
 
     def _init():
         with hold_portaudio("init_audio_stream"):
@@ -194,12 +196,13 @@ async def init_audio_stream(state):
             _init_debug_audio_recorders(state.input_sample_rate, target_rate)
             return state.stream
 
-    return await loop.run_in_executor(state.executor, _init)
+    return await loop.run_in_executor(state.audio_executor, _init)
 
 
 async def close_audio_stream(state):
     """异步关闭音频流。"""
     loop = asyncio.get_event_loop()
+    state.audio_closing = True
 
     def _close():
         with hold_portaudio("close_audio_stream"):
@@ -221,18 +224,20 @@ async def close_audio_stream(state):
             state.stream = None
             state.mic = None
 
-    await loop.run_in_executor(state.executor, _close)
+    await loop.run_in_executor(state.audio_executor, _close)
 
 
 async def read_audio_data(state):
     """异步读取音频数据。"""
-    if not state.stream:
+    if state.audio_closing or not state.stream:
         return None
 
     loop = asyncio.get_event_loop()
 
     def _read():
         try:
+            if state.audio_closing or state.stream is None:
+                return None
             data = state.stream.read(state.input_block_size, exception_on_overflow=False)
             if not data:
                 return None
@@ -266,7 +271,7 @@ async def read_audio_data(state):
             print(f'Error reading audio data: {e}')
             return None
 
-    return await loop.run_in_executor(state.executor, _read)
+    return await loop.run_in_executor(state.audio_executor, _read)
 
 
 async def send_audio_frame_async(state, recognizer, data: bytes):

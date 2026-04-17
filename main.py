@@ -251,6 +251,7 @@ async def main(
     stop_event = state.stop_event  # 向后兼容
 
     state.ensure_executor()
+    state.ensure_audio_executor()
 
     corpus_text: Optional[str] = None
 
@@ -476,6 +477,7 @@ async def main(
         if not keep_oscquery_alive:
             await osc_manager.stop_server()
 
+        await loop.run_in_executor(None, state.audio_executor.shutdown, True)
         await loop.run_in_executor(None, state.executor.shutdown, False)
         emit_lifecycle('stopped', False)
 

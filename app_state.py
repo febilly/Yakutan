@@ -24,10 +24,15 @@ class AppState:
         self.resampler = None             # AudioResampler | None
         self.debug_pre_audio_recorder = None   # WaveDebugRecorder | None
         self.debug_audio_recorder = None       # WaveDebugRecorder | None
+        self.audio_closing: bool = False
 
         # ---- 线程 / 异步 ----
         self.executor: ThreadPoolExecutor = ThreadPoolExecutor(
             max_workers=config.MAX_WORKERS
+        )
+        self.audio_executor: ThreadPoolExecutor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="yakutan-audio-io",
         )
         self.stop_event: Optional[asyncio.Event] = None
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -80,6 +85,14 @@ class AppState:
         """如果 executor 已关闭，重新创建。"""
         if self.executor._shutdown:
             self.executor = ThreadPoolExecutor(max_workers=config.MAX_WORKERS)
+
+    def ensure_audio_executor(self):
+        """如果 audio_executor 已关闭，重新创建。"""
+        if self.audio_executor._shutdown:
+            self.audio_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="yakutan-audio-io",
+            )
 
 
 # ---- 模块级单例访问 ----
