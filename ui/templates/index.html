@@ -735,21 +735,26 @@
                             </div>
                         </div>
 
-                        <!-- WebSocket保活设置 -->
-                        <div class="subsection">
-                            <h3 data-i18n="subsection.websocket">WebSocket保活设置 - 仅Qwen后端</h3>
-
-                            <div class="form-group">
-                                <label for="keepalive-interval" data-i18n="label.keepaliveInterval">心跳间隔（秒）</label>
-                                <input type="number" id="keepalive-interval" class="form-control" min="0" max="120"
-                                    step="5" value="30" onchange="onSettingChange()" data-restart-required="true">
-                                <small class="form-text" data-i18n="hint.keepaliveInterval">防止长时间闲置导致连接超时，设置为0禁用</small>
-                            </div>
-                        </div>
-
                         <!-- OSC / 端口 -->
                         <div class="subsection">
                             <h3 data-i18n="subsection.oscNetwork">OSC</h3>
+                            <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.oscCompatMode">兼容模式</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="osc-compat-mode"
+                                            onchange="updateOscCompatModeUi(); onSettingChange(this)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" data-i18n="hint.oscCompatMode">用于其他兼容OSC的游戏，如Resonite。</small>
+                            </div>
+                            <div class="form-group" id="osc-compat-listen-port-group" style="display: none;">
+                                <label for="osc-compat-listen-port" data-i18n="label.oscCompatListenPort">监听端口</label>
+                                <input type="number" id="osc-compat-listen-port" class="form-control" min="1"
+                                    max="65535" step="1" value="9001" onchange="onSettingChange()">
+                                <small class="form-text" data-i18n="hint.oscCompatListenPort">兼容模式开启时使用固定监听端口接收 OSC，默认 9001。</small>
+                            </div>
                             <div class="form-group">
                                 <label for="osc-send-target-port" data-i18n="label.oscSendTargetPort">OSC
                                     发送目标端口</label>
@@ -758,7 +763,7 @@
                                 <small class="form-text" data-i18n="hint.oscSendTargetPort">VRChat 接收 OSC 的 UDP
                                     端口，默认 9000。非必要请勿修改；错误端口将导致聊天框等消息无法送达。</small>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" id="bypass-osc-udp-port-check-group">
                                 <label class="switch-label">
                                     <span data-i18n="label.bypassOscUdpPortCheck">绕过 VRChat OSC 端口占用检查</span>
                                     <label class="switch">

@@ -7,14 +7,21 @@ import config
 
 # ============ 双语输出常量 ============
 DUAL_OUTPUT_SEPARATOR = "\n"
-DUAL_OUTPUT_TOTAL_MAX_CHARS = config.OSC_TEXT_MAX_LENGTH
-DUAL_OUTPUT_BODY_BUDGET = max(0, DUAL_OUTPUT_TOTAL_MAX_CHARS - len(DUAL_OUTPUT_SEPARATOR))
-DUAL_OUTPUT_MAX_CHARS_PER_RESULT = DUAL_OUTPUT_BODY_BUDGET // 2
 
 # 双语裁剪时：中日韩权重=1，其他语言权重=2。
 COMPACT_SCRIPT_LANGUAGE_BASES = {'zh', 'ja', 'ko'}
 COMPACT_SCRIPT_BUDGET_WEIGHT = 1
 ALPHABETIC_SCRIPT_BUDGET_WEIGHT = 2
+
+
+def _get_dual_output_limits() -> tuple[Optional[int], Optional[int], Optional[int]]:
+    total_max_chars = config.get_effective_osc_text_max_length()
+    if total_max_chars is None:
+        return None, None, None
+
+    body_budget = max(0, total_max_chars - len(DUAL_OUTPUT_SEPARATOR))
+    max_chars_per_result = body_budget // 2
+    return total_max_chars, body_budget, max_chars_per_result
 
 
 # ============ 语言代码工具函数 ============
@@ -148,8 +155,12 @@ def _get_language_budget_weight(language: Optional[str]) -> float:
 def _allocate_dual_output_budgets(
     primary_language: Optional[str],
     secondary_language: Optional[str],
-    total_chars: int = DUAL_OUTPUT_BODY_BUDGET,
+    total_chars: Optional[int] = None,
 ) -> tuple[int, int]:
+    if total_chars is None:
+        _, total_chars, _ = _get_dual_output_limits()
+    if total_chars is None:
+        return 0, 0
     if total_chars <= 0:
         return 0, 0
 
@@ -172,9 +183,13 @@ def _allocate_dual_output_budgets(
 
 def limit_dual_output_text(
     text: str,
-    max_chars: int = DUAL_OUTPUT_MAX_CHARS_PER_RESULT,
+    max_chars: Optional[int] = None,
 ) -> str:
     sanitized = _sanitize_output_line(text)
+    if max_chars is None:
+        _, _, max_chars = _get_dual_output_limits()
+    if max_chars is None:
+        return sanitized
     if len(sanitized) <= max_chars:
         return sanitized
     return sanitized[:max_chars].rstrip()
@@ -186,6 +201,7 @@ def build_dual_output_display(
     primary_language: Optional[str] = None,
     secondary_language: Optional[str] = None,
 ) -> str:
+    total_max_chars, body_budget, _ = _get_dual_output_limits()
     if secondary_text is None:
         return limit_dual_output_text(primary_text)
 
@@ -193,14 +209,17 @@ def build_dual_output_display(
     secondary_sanitized = _sanitize_output_line(secondary_text)
     full_text = DUAL_OUTPUT_SEPARATOR.join([primary_sanitized, secondary_sanitized])
 
+    if total_max_chars is None or body_budget is None:
+        return full_text
+
     # 能完整装下时不做任何裁剪。
-    if len(full_text) <= DUAL_OUTPUT_TOTAL_MAX_CHARS:
+    if len(full_text) <= total_max_chars:
         return full_text
 
     primary_budget, secondary_budget = _allocate_dual_output_budgets(
         primary_language,
         secondary_language,
-        total_chars=DUAL_OUTPUT_BODY_BUDGET,
+        total_chars=body_budget,
     )
 
     clipped_primary = limit_dual_output_text(primary_sanitized, max_chars=primary_budget)

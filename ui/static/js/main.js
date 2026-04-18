@@ -1002,6 +1002,47 @@ function getOscSendTargetPortFromForm() {
     return p;
 }
 
+function isOscCompatModeEnabled() {
+    return document.getElementById('osc-compat-mode')?.checked === true;
+}
+
+function getOscCompatListenPortFromForm() {
+    const input = document.getElementById('osc-compat-listen-port');
+    if (!input) return 9001;
+    const raw = parseInt(input.value, 10);
+    const p = Math.max(1, Math.min(65535, Number.isFinite(raw) ? raw : 9001));
+    input.value = p;
+    return p;
+}
+
+function updateOscCompatModeUi() {
+    const compatEnabled = isOscCompatModeEnabled();
+    const compatPortGroup = document.getElementById('osc-compat-listen-port-group');
+    if (compatPortGroup) {
+        compatPortGroup.style.display = compatEnabled ? 'block' : 'none';
+    }
+
+    const compatPortInput = document.getElementById('osc-compat-listen-port');
+    if (compatPortInput) {
+        compatPortInput.disabled = !compatEnabled;
+        getOscCompatListenPortFromForm();
+    }
+
+    const bypassOscEl = document.getElementById('bypass-osc-udp-port-check');
+    const bypassOscGroup = document.getElementById('bypass-osc-udp-port-check-group');
+    if (bypassOscEl) {
+        bypassOscEl.disabled = compatEnabled;
+    }
+    if (bypassOscGroup) {
+        bypassOscGroup.classList.toggle('disabled-option', compatEnabled);
+    }
+}
+
+function shouldSkipOscUdpPortCheck() {
+    return isOscCompatModeEnabled()
+        || document.getElementById('bypass-osc-udp-port-check')?.checked === true;
+}
+
 function applyLLMTemplate(templateName) {
     const previousTemplateName = detectActiveLLMTemplate();
     const baseUrlInput = document.getElementById('llm-base-url');
@@ -1426,6 +1467,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     applyStoredExtraBodyForActiveLLMTemplate();
     setupSecretVisibilityToggles();
     applyAsrBackendLocks();
+    updateOscCompatModeUi();
     loadEnvStatus();
     refreshMicDevices(true);
     setupMicDeviceAutoRefresh();
@@ -1830,6 +1872,14 @@ function loadConfigFromLocalStorage() {
             }
 
             if (config.osc) {
+                const oscCompatEl = document.getElementById('osc-compat-mode');
+                if (oscCompatEl) {
+                    oscCompatEl.checked = config.osc.compat_mode ?? false;
+                }
+                const oscCompatPortEl = document.getElementById('osc-compat-listen-port');
+                if (oscCompatPortEl) {
+                    oscCompatPortEl.value = config.osc.compat_listen_port ?? 9001;
+                }
                 const bypassOscEl = document.getElementById('bypass-osc-udp-port-check');
                 if (bypassOscEl) {
                     bypassOscEl.checked = config.osc.bypass_udp_port_check ?? false;
@@ -1861,7 +1911,6 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('enable-vad').checked = config.asr.enable_vad ?? true;
                 document.getElementById('vad-threshold').value = config.asr.vad_threshold || 0.2;
                 document.getElementById('vad-silence-duration').value = config.asr.vad_silence_duration_ms || 800;
-                document.getElementById('keepalive-interval').value = config.asr.keepalive_interval || 30;
 
                 // 加载国际版设置
                 const useInternational = config.asr.use_international_endpoint ?? false;
@@ -1889,6 +1938,19 @@ function loadConfigFromLocalStorage() {
             if (bypassOscEl && config.osc) {
                 bypassOscEl.checked = config.osc.bypass_udp_port_check ?? false;
             }
+            const oscCompatEl = document.getElementById('osc-compat-mode');
+            if (oscCompatEl && config.osc) {
+                oscCompatEl.checked = config.osc.compat_mode ?? false;
+            }
+            const oscCompatPortEl = document.getElementById('osc-compat-listen-port');
+            if (oscCompatPortEl && config.osc) {
+                const clp = config.osc.compat_listen_port;
+                const p =
+                    clp == null || clp === ''
+                        ? 9001
+                        : Math.max(1, Math.min(65535, parseInt(clp, 10) || 9001));
+                oscCompatPortEl.value = String(p);
+            }
             const oscPortEl = document.getElementById('osc-send-target-port');
             if (oscPortEl && config.osc) {
                 const stp = config.osc.send_target_port;
@@ -1912,6 +1974,7 @@ function loadConfigFromLocalStorage() {
         updateLLMSettingsVisibility();
         updateSensitiveWordsHint();
         applyAsrBackendLocks();
+        updateOscCompatModeUi();
         syncLLMTemplateKeySourceHintFromInputs();
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
@@ -1927,6 +1990,7 @@ function loadConfigFromLocalStorage() {
         updateLLMSettingsVisibility();
         updateSensitiveWordsHint();
         applyAsrBackendLocks();
+        updateOscCompatModeUi();
         syncLLMTemplateKeySourceHintFromInputs();
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
@@ -1978,7 +2042,6 @@ function loadDefaultConfig() {
     document.getElementById('enable-vad').checked = true;
     document.getElementById('vad-threshold').value = 0.2;
     document.getElementById('vad-silence-duration').value = 800;
-    document.getElementById('keepalive-interval').value = 30;
     document.getElementById('use-international-endpoint').checked = false;
 
     if (isLocalAsrUiEnabled()) {
@@ -2006,6 +2069,14 @@ function loadDefaultConfig() {
     if (bypassOscDefault) {
         bypassOscDefault.checked = false;
     }
+    const oscCompatDefault = document.getElementById('osc-compat-mode');
+    if (oscCompatDefault) {
+        oscCompatDefault.checked = false;
+    }
+    const oscCompatPortDefault = document.getElementById('osc-compat-listen-port');
+    if (oscCompatPortDefault) {
+        oscCompatPortDefault.value = '9001';
+    }
     const oscSendErrorsDefault = document.getElementById('osc-send-error-messages');
     if (oscSendErrorsDefault) {
         oscSendErrorsDefault.checked = false;
@@ -2021,6 +2092,7 @@ function loadDefaultConfig() {
     updateLLMSettingsVisibility();
     updateSensitiveWordsHint();
     applyAsrBackendLocks();
+    updateOscCompatModeUi();
     syncLLMTemplateKeySourceHintFromInputs();
     syncAllLanguageComboClearButtons();
     updateDashscopeKeyFieldState();
@@ -2034,6 +2106,7 @@ function refreshUiAfterServerConfigApply() {
     updateLLMSettingsVisibility();
     updateSensitiveWordsHint();
     applyAsrBackendLocks();
+    updateOscCompatModeUi();
     syncLLMTemplateKeySourceHintFromInputs();
     syncAllLanguageComboClearButtons();
     updateDashscopeKeyFieldState();
@@ -2098,7 +2171,6 @@ function applyServerConfigPayload(config) {
     document.getElementById('enable-vad').checked = config.asr.enable_vad;
     document.getElementById('vad-threshold').value = config.asr.vad_threshold;
     document.getElementById('vad-silence-duration').value = config.asr.vad_silence_duration_ms;
-    document.getElementById('keepalive-interval').value = config.asr.keepalive_interval;
     const useInternational = config.asr.use_international_endpoint ?? false;
     document.getElementById('use-international-endpoint').checked = useInternational;
     localStorage.setItem('use_international_endpoint', useInternational.toString());
@@ -2112,6 +2184,19 @@ function applyServerConfigPayload(config) {
     const bypassOscEl = document.getElementById('bypass-osc-udp-port-check');
     if (bypassOscEl && config.osc) {
         bypassOscEl.checked = config.osc.bypass_udp_port_check ?? false;
+    }
+    const oscCompatEl = document.getElementById('osc-compat-mode');
+    if (oscCompatEl && config.osc) {
+        oscCompatEl.checked = config.osc.compat_mode ?? false;
+    }
+    const oscCompatPortEl = document.getElementById('osc-compat-listen-port');
+    if (oscCompatPortEl && config.osc) {
+        const clp = config.osc.compat_listen_port;
+        const p =
+            clp == null || clp === ''
+                ? 9001
+                : Math.max(1, Math.min(65535, parseInt(clp, 10) || 9001));
+        oscCompatPortEl.value = String(p);
     }
     const oscSendErrorsEl = document.getElementById('osc-send-error-messages');
     if (oscSendErrorsEl && config.osc) {
@@ -2251,7 +2336,6 @@ function saveConfigToLocalStorage() {
                 enable_vad: document.getElementById('enable-vad').checked,
                 vad_threshold: parseFloat(document.getElementById('vad-threshold').value),
                 vad_silence_duration_ms: parseInt(document.getElementById('vad-silence-duration').value),
-                keepalive_interval: parseInt(document.getElementById('keepalive-interval').value),
                 use_international_endpoint: document.getElementById('use-international-endpoint').checked,
             },
             language_detector: {
@@ -2262,6 +2346,8 @@ function saveConfigToLocalStorage() {
             },
             osc: {
                 send_target_port: getOscSendTargetPortFromForm(),
+                compat_mode: isOscCompatModeEnabled(),
+                compat_listen_port: getOscCompatListenPortFromForm(),
                 bypass_udp_port_check:
                     document.getElementById('bypass-osc-udp-port-check')?.checked === true,
                 send_error_messages:
@@ -2458,7 +2544,6 @@ async function saveConfig(autoSave = false) {
                 enable_vad: document.getElementById('enable-vad').checked,
                 vad_threshold: parseFloat(document.getElementById('vad-threshold').value),
                 vad_silence_duration_ms: parseInt(document.getElementById('vad-silence-duration').value),
-                keepalive_interval: parseInt(document.getElementById('keepalive-interval').value),
             },
             language_detector: {
                 type: document.getElementById('language-detector').value,
@@ -2468,6 +2553,8 @@ async function saveConfig(autoSave = false) {
             },
             osc: {
                 send_target_port: getOscSendTargetPortFromForm(),
+                compat_mode: isOscCompatModeEnabled(),
+                compat_listen_port: getOscCompatListenPortFromForm(),
                 bypass_udp_port_check:
                     document.getElementById('bypass-osc-udp-port-check')?.checked === true,
                 send_error_messages:
@@ -2625,7 +2712,7 @@ async function startService() {
     startBtn.textContent = t('btn.starting');
     pendingWarningMessage = null;
 
-    const bypassOscUdp = document.getElementById('bypass-osc-udp-port-check')?.checked === true;
+    const bypassOscUdp = shouldSkipOscUdpPortCheck();
     if (!bypassOscUdp) {
         try {
             const udpPayload = await fetchOscUdpPortCheck();
@@ -2899,7 +2986,7 @@ async function stopService() {
 async function restartService() {
     try {
         const tr = window.i18n ? window.i18n.t : (key) => key;
-        const bypassOscRestart = document.getElementById('bypass-osc-udp-port-check')?.checked === true;
+        const bypassOscRestart = shouldSkipOscUdpPortCheck();
         if (!bypassOscRestart) {
             try {
                 const udpPayload = await fetchOscUdpPortCheck();

@@ -196,6 +196,10 @@ const translations = {
         'label.keepaliveInterval': '心跳间隔（秒）',
         'hint.keepaliveInterval': '防止长时间闲置导致连接超时，设置为0禁用',
         'subsection.oscNetwork': 'OSC',
+        'label.oscCompatMode': '兼容模式',
+        'hint.oscCompatMode': '用于其他兼容OSC的游戏，如Resonite。',
+        'label.oscCompatListenPort': '监听端口',
+        'hint.oscCompatListenPort': '兼容模式开启时使用固定监听端口接收 OSC，默认 9001。',
         'label.bypassOscUdpPortCheck': '绕过 VRChat OSC 端口占用检查',
         'hint.bypassOscUdpPortCheck':
             '开启后启动/重启服务时不再检查 UDP 端口占用（可能影响游戏接收 OSC，仅在知情时使用）',
@@ -492,6 +496,10 @@ const translations = {
         'label.keepaliveInterval': 'Heartbeat Interval (seconds)',
         'hint.keepaliveInterval': 'Prevents connection timeout during idle, set to 0 to disable',
         'subsection.oscNetwork': 'OSC',
+        'label.oscCompatMode': 'Compatibility mode',
+        'hint.oscCompatMode': 'For other OSC-compatible games such as Resonite.',
+        'label.oscCompatListenPort': 'Listen port',
+        'hint.oscCompatListenPort': 'When compatibility mode is on, use this fixed port to listen for OSC events. Default: 9001.',
         'label.bypassOscUdpPortCheck': 'Bypass VRChat OSC UDP port check',
         'hint.bypassOscUdpPortCheck':
             'When on, start/restart will not block if the OSC UDP port appears in use (may break in-game OSC; use only if you understand the risk).',
@@ -780,6 +788,10 @@ const translations = {
         'label.keepaliveInterval': 'ハートビート間隔（秒）',
         'hint.keepaliveInterval': 'アイドル時の接続タイムアウトを防ぎます。0 で無効化',
         'subsection.oscNetwork': 'OSC',
+        'label.oscCompatMode': '互換モード',
+        'hint.oscCompatMode': 'Resonite など、OSC 互換ゲーム向けです。',
+        'label.oscCompatListenPort': '待受ポート',
+        'hint.oscCompatListenPort': '互換モード時はこの固定ポートで OSC を受信します。既定値は 9001 です。',
         'label.bypassOscUdpPortCheck': 'VRChat OSC の UDP ポート占有チェックをバイパス',
         'hint.bypassOscUdpPortCheck':
             'オンにすると起動・再起動時に UDP ポート占有でブロックしません（ゲーム側 OSC に影響する可能性があります。理解した上で利用してください）',
@@ -1064,6 +1076,10 @@ const translations = {
         'label.keepaliveInterval': '하트비트 간격(초)',
         'hint.keepaliveInterval': '유휴 상태에서 연결 타임아웃을 방지합니다. 0으로 비활성화',
         'subsection.oscNetwork': 'OSC',
+        'label.oscCompatMode': '호환 모드',
+        'hint.oscCompatMode': 'Resonite 같은 다른 OSC 호환 게임용입니다.',
+        'label.oscCompatListenPort': '수신 포트',
+        'hint.oscCompatListenPort': '호환 모드에서는 이 고정 포트로 OSC를 수신합니다. 기본값은 9001입니다.',
         'label.bypassOscUdpPortCheck': 'VRChat OSC UDP 포트 점검 건너뛰기',
         'hint.bypassOscUdpPortCheck':
             '켜면 시작/다시 시작 시 UDP 포트 사용 중이어도 막지 않습니다(인게임 OSC에 문제가 생길 수 있습니다. 인지한 경우에만 사용하세요).',

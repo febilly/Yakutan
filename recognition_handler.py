@@ -486,7 +486,11 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         f"[{source_lang}→{target_lang}] "
                         f"{translation_display} ({current_original_display})"
                     )
-                    if len(display_text) > config.OSC_TEXT_MAX_LENGTH:
+                    osc_text_max_length = config.get_effective_osc_text_max_length()
+                    if (
+                        osc_text_max_length is not None
+                        and len(display_text) > osc_text_max_length
+                    ):
                         display_text = f"[{source_lang}→{target_lang}] {translation_display}"
                 else:
                     display_text = translation_display
@@ -701,7 +705,11 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             f"[{tag_src}→{tag_tgt}] "
                             f"{display_translated_text} ({display_source_text})"
                         )
-                        if len(display_text) > config.OSC_TEXT_MAX_LENGTH:
+                        osc_text_max_length = config.get_effective_osc_text_max_length()
+                        if (
+                            osc_text_max_length is not None
+                            and len(display_text) > osc_text_max_length
+                        ):
                             display_text = f"[{tag_src}→{tag_tgt}] {display_translated_text}"
                     else:
                         display_text = str(display_translated_text)
@@ -1033,7 +1041,11 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                                 f"[{tag_src}→{tag_tgt}] "
                                 f"{display_translated_text} ({display_source_text})"
                             )
-                            if len(display_text) > config.OSC_TEXT_MAX_LENGTH:
+                            osc_text_max_length = config.get_effective_osc_text_max_length()
+                            if (
+                                osc_text_max_length is not None
+                                and len(display_text) > osc_text_max_length
+                            ):
                                 display_text = (
                                     f"[{tag_src}→{tag_tgt}] {display_translated_text}"
                                 )

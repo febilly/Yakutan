@@ -9,6 +9,8 @@ import threading
 import os
 from typing import Optional, Tuple
 from dataclasses import dataclass
+from pythonosc.dispatcher import Dispatcher
+from pythonosc.osc_server import ThreadingOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 
 from vrchat_oscquery.common import dict_to_dispatcher
@@ -20,9 +22,6 @@ import config as app_config
 __all__ = ["OSCManager", "osc_manager"]
 
 logger = logging.getLogger(__name__)
-
-# 定义发送到 VRChat 聊天框的最大文本长度（统一来自配置）
-MAX_LENGTH = app_config.OSC_TEXT_MAX_LENGTH
 
 # 翻译头部行（None 或空字符串表示禁用）
 TRANSLATION_HEADER = ""
@@ -73,6 +72,10 @@ class OSCManager:
             self._oscquery_lock = threading.Lock()
             self._oscquery_connected = False
             self._oscquery_httpd = None
+            self._compat_server = None
+            self._compat_server_thread = None
+            self._compat_server_target: Optional[Tuple[str, int]] = None
+            self._active_receive_mode: Optional[str] = None
             self._vrchat_linked_logged = False
             
             # 发送节流配置（仅保留一个待发消息）
@@ -101,6 +104,39 @@ class OSCManager:
             logger.debug(message)
         else:
             logger.info(message)
+
+    @staticmethod
+    def _normalize_udp_port(value, default: int) -> int:
+        try:
+            port = int(value)
+        except (TypeError, ValueError):
+            port = default
+        return max(1, min(65535, port))
+
+    @staticmethod
+    def _compat_mode_enabled() -> bool:
+        checker = getattr(app_config, "is_osc_compat_mode_enabled", None)
+        if callable(checker):
+            return bool(checker())
+        return bool(getattr(app_config, "OSC_COMPAT_MODE", False))
+
+    @staticmethod
+    def _effective_text_max_length() -> Optional[int]:
+        getter = getattr(app_config, "get_effective_osc_text_max_length", None)
+        if callable(getter):
+            return getter()
+        try:
+            return max(1, int(getattr(app_config, "OSC_TEXT_MAX_LENGTH", 144)))
+        except (TypeError, ValueError):
+            return 144
+
+    def _compat_listen_target(self) -> Tuple[str, int]:
+        host = (getattr(app_config, "OSC_SERVER_IP", None) or "127.0.0.1").strip() or "127.0.0.1"
+        port = self._normalize_udp_port(
+            getattr(app_config, "OSC_COMPAT_LISTEN_PORT", 9001),
+            9001,
+        )
+        return host, port
     
     def set_mute_callback(self, callback):
         """
@@ -196,39 +232,109 @@ class OSCManager:
         if not self._vrchat_linked_logged:
             self._vrchat_linked_logged = True
             self._oscquery_connected = True
-            self._emit("[OSCQuery] Linked with VRChat (received first MuteSelf event)")
+            if self._active_receive_mode == "compat":
+                self._emit("[OSC Compat] Linked with game (received first MuteSelf event)")
+            else:
+                self._emit("[OSCQuery] Linked with VRChat (received first MuteSelf event)")
         self._notify_mute_callback(mute_value)
     
     async def start_server(self, app_name: Optional[str] = None):
-        """Start OSCQuery service and wait for VRChat callbacks."""
-        if not self._oscquery_enabled:
-            self._emit("[OSC] OSCQuery is disabled by config; skipping startup", level="warning")
-            return None
-
+        """Start the configured OSC receive service and wait for callbacks."""
         if app_name is not None:
             normalized_name = str(app_name).strip()
             if normalized_name:
                 self._oscquery_app_name = normalized_name
 
-        with self._oscquery_lock:
-            if self._oscquery_httpd is not None:
-                self._emit("[OSC] OSCQuery service is already running")
+        if self._compat_mode_enabled():
+            target = self._compat_listen_target()
+            with self._oscquery_lock:
+                already_running = (
+                    self._active_receive_mode == "compat"
+                    and self._compat_server is not None
+                    and self._compat_server_target == target
+                )
+            if already_running:
+                self._emit(f"[OSC Compat] Direct listener already running on {target[0]}:{target[1]}")
                 return None
+
+            await self._stop_receive_service()
             try:
-                self._oscquery_httpd = await asyncio.to_thread(self._start_oscquery_service_blocking)
+                server, server_thread = await asyncio.to_thread(
+                    self._start_compat_server_blocking,
+                    target[0],
+                    target[1],
+                )
+                with self._oscquery_lock:
+                    self._compat_server = server
+                    self._compat_server_thread = server_thread
+                    self._compat_server_target = target
+                    self._active_receive_mode = "compat"
+                    self._vrchat_linked_logged = False
+                    self._oscquery_connected = False
+                    self._last_mute_value = None
+                self._emit(
+                    f"[OSC Compat] Listening on {target[0]}:{target[1]} for {VRCHAT_MUTE_PATH}"
+                )
+            except Exception as error:
+                with self._oscquery_lock:
+                    self._compat_server = None
+                    self._compat_server_thread = None
+                    self._compat_server_target = None
+                    if self._active_receive_mode == "compat":
+                        self._active_receive_mode = None
+                self._emit(f"[OSC Compat] Failed to start direct listener: {error!r}", level="error")
+            return None
+
+        if not self._oscquery_enabled:
+            await self._stop_receive_service()
+            self._emit("[OSC] OSCQuery is disabled by config; skipping startup", level="warning")
+            return None
+
+        with self._oscquery_lock:
+            already_running = (
+                self._active_receive_mode == "oscquery"
+                and self._oscquery_httpd is not None
+            )
+        if already_running:
+            self._emit("[OSC] OSCQuery service is already running")
+            return None
+
+        await self._stop_receive_service()
+        try:
+            httpd = await asyncio.to_thread(self._start_oscquery_service_blocking)
+            with self._oscquery_lock:
+                self._oscquery_httpd = httpd
+                self._active_receive_mode = "oscquery"
                 self._vrchat_linked_logged = False
                 self._oscquery_connected = False
                 self._last_mute_value = None
-                self._emit(f"[OSCQuery] Service published as '{self._oscquery_app_name}'. Waiting for VRChat to connect...")
-            except Exception as error:
-                self._emit(f"[OSCQuery] Failed to publish OSCQuery service: {error!r}", level="error")
+            self._emit(
+                f"[OSCQuery] Service published as '{self._oscquery_app_name}'. Waiting for VRChat to connect..."
+            )
+        except Exception as error:
+            with self._oscquery_lock:
                 self._oscquery_httpd = None
-            return None
+                if self._active_receive_mode == "oscquery":
+                    self._active_receive_mode = None
+            self._emit(f"[OSCQuery] Failed to publish OSCQuery service: {error!r}", level="error")
+        return None
 
     def _start_oscquery_service_blocking(self):
         vrchat_osc_common.APP_HOST = "127.0.0.1"
         dispatcher = dict_to_dispatcher({VRCHAT_MUTE_PATH: self._handle_mute_self})
         return vrc_osc(self._oscquery_app_name, dispatcher, foreground=False)
+
+    def _start_compat_server_blocking(self, host: str, port: int):
+        dispatcher = Dispatcher()
+        dispatcher.map(VRCHAT_MUTE_PATH, self._handle_mute_self)
+        server = ThreadingOSCUDPServer((host, port), dispatcher)
+        server_thread = threading.Thread(
+            target=server.serve_forever,
+            kwargs={"poll_interval": 0.1},
+            daemon=True,
+        )
+        server_thread.start()
+        return server, server_thread
 
     def reset_runtime_state(self):
         """Reset per-run runtime state while keeping OSCQuery service alive."""
@@ -243,24 +349,77 @@ class OSCManager:
         self._last_mute_value = None
     
     async def stop_server(self):
-        """Stop OSCQuery service."""
+        """Stop OSC receive service."""
         self.reset_runtime_state()
+        await self._stop_receive_service()
 
+    async def apply_runtime_config(self, app_name: Optional[str] = None):
+        """Hot-apply OSC runtime config without restarting recognition."""
+        self._apply_send_policy_changes()
+        await self.start_server(app_name=app_name)
+
+    async def _stop_receive_service(self):
         with self._oscquery_lock:
             httpd = self._oscquery_httpd
+            compat_server = self._compat_server
+            compat_thread = self._compat_server_thread
+            active_mode = self._active_receive_mode
             self._oscquery_httpd = None
+            self._compat_server = None
+            self._compat_server_thread = None
+            self._compat_server_target = None
+            self._active_receive_mode = None
+
+        if compat_server is not None:
+            try:
+                await asyncio.to_thread(self._shutdown_compat_server_blocking, compat_server, compat_thread)
+                self._emit("[OSC Compat] Direct listener stopped")
+            except Exception as error:
+                self._emit(f"[OSC Compat] Error while stopping direct listener: {error}", level="warning")
+
         if httpd is not None:
             try:
-                httpd.shutdown()
-                httpd.server_close()
+                await asyncio.to_thread(self._shutdown_oscquery_service_blocking, httpd)
                 self._emit("[OSCQuery] Service stopped")
             except Exception as error:
                 self._emit(f"[OSCQuery] Error while stopping service: {error}", level="warning")
-        self._oscquery_connected = False
-        self._vrchat_linked_logged = False
+
+        if active_mode in {"oscquery", "compat"}:
+            self._oscquery_connected = False
+            self._vrchat_linked_logged = False
+            self._last_mute_value = None
+
+    @staticmethod
+    def _shutdown_oscquery_service_blocking(httpd):
+        httpd.shutdown()
+        httpd.server_close()
+
+    @staticmethod
+    def _shutdown_compat_server_blocking(server, thread):
+        server.shutdown()
+        server.server_close()
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=1.0)
+
+    def _apply_send_policy_changes(self):
+        pending_message = None
+        if not self._compat_mode_enabled():
+            return
+
+        with self._state_lock:
+            if self._pending_timer is not None:
+                self._pending_timer.cancel()
+                self._pending_timer = None
+            if self._pending_message is not None:
+                pending_message = self._pending_message
+                self._pending_message = None
+            self._last_send_time = 0.0
+
+        if pending_message is not None:
+            self._send_message_immediately(pending_message.text, pending_message.ongoing)
         self._last_mute_value = None
     
-    def _truncate_text(self, text: str, max_length: int = MAX_LENGTH) -> str:
+    def _truncate_text(self, text: str, max_length: Optional[int] = None) -> str:
         """
         截断过长的文本，优先删除前面的句子
         
@@ -271,8 +430,14 @@ class OSCManager:
         Returns:
             截断后的文本
         """
+        if max_length is None:
+            max_length = self._effective_text_max_length()
         if not getattr(self, "_truncate_enabled", True):
             return text
+        if max_length is None:
+            return text
+        if max_length <= 0:
+            return ""
 
         if len(text) <= max_length:
             return text
@@ -316,6 +481,7 @@ class OSCManager:
         header = getattr(self, "_header_line", "") or ""
         header_enabled = bool(header)
         max_lines = 9
+        max_length = self._effective_text_max_length()
 
         # 构造行：前缀含说话人
         lines = []
@@ -348,8 +514,11 @@ class OSCManager:
         if not combined:
             return ""
 
+        if max_length is None:
+            return combined
+
         # 超长时优先删除旧的整条消息（不删除头部）
-        while len(combined) > MAX_LENGTH and len(lines) > 1:
+        while len(combined) > max_length and len(lines) > 1:
             # 删除 header 后的第一条消息，如果没有 header 就删第一条
             drop_index = 1 if header_enabled and len(lines) > 1 else 0
             if drop_index < len(lines):
@@ -358,12 +527,12 @@ class OSCManager:
                 self._message_history.pop(0)
             combined = assemble(lines)
 
-        if len(combined) > MAX_LENGTH and len(lines) >= 1:
+        if len(combined) > max_length and len(lines) >= 1:
             # 仅剩头部 + 最新一条或只有一条消息仍然超长，截断最新消息
             header_overhead = len(lines[0]) + 1 if header_enabled and len(lines) > 1 else (len(lines[0]) if header_enabled else 0)
             if header_enabled and len(lines) > 1:
                 latest_idx = len(lines) - 1
-                budget = max(0, MAX_LENGTH - header_overhead)
+                budget = max(0, max_length - header_overhead)
                 body = lines[latest_idx]
                 truncated_body = self._truncate_text(body, max_length=budget if budget > 0 else 0)
                 lines[latest_idx] = truncated_body
@@ -376,7 +545,7 @@ class OSCManager:
                 combined = assemble(lines)
             elif not header_enabled and lines:
                 latest_idx = len(lines) - 1
-                budget = MAX_LENGTH
+                budget = max_length
                 body = lines[latest_idx]
                 truncated_body = self._truncate_text(body, max_length=budget)
                 lines[latest_idx] = truncated_body
@@ -505,7 +674,17 @@ class OSCManager:
     def send_text_sync(self, text: str, ongoing: bool):
         """发送文本到 VRChat（带冷却，最多保留一个待发消息）"""
         # 截断过长的文本
-        text = self._truncate_text(text, max_length=MAX_LENGTH)
+        text = self._truncate_text(text)
+
+        if self._compat_mode_enabled():
+            with self._state_lock:
+                if self._pending_timer is not None:
+                    self._pending_timer.cancel()
+                    self._pending_timer = None
+                self._pending_message = None
+                self._last_send_time = time.time()
+            self._send_message_immediately(text, ongoing)
+            return
         
         # 确定优先级
         priority = PRIORITY_LOW if ongoing else PRIORITY_HIGH

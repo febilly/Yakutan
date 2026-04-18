@@ -677,6 +677,15 @@ html[lang="en"] .language-setting-item label span[data-i18n="label.quickLangSlot
     height: 24px;
 }
 
+.form-group.disabled-option {
+    opacity: 0.58;
+}
+
+.form-group.disabled-option .switch-label,
+.form-group.disabled-option .form-text {
+    color: #9aa3ad;
+}
+
 .switch input {
     opacity: 0;
     width: 0;
@@ -715,6 +724,19 @@ input:checked + .slider:before {
     transform: translateX(26px);
 }
 
+.switch input:disabled + .slider {
+    cursor: not-allowed;
+    background-color: #d8dde3;
+}
+
+.switch input:disabled + .slider:before {
+    background-color: #f7f9fb;
+}
+
+.switch input:disabled:checked + .slider {
+    background-color: #bcc6d1;
+}
+
 /* Collapsible */
 .collapsible-header {
     display: flex;
@@ -738,7 +760,8 @@ input:checked + .slider:before {
 }
 
 .collapsible-content {
-    max-height: 1500px;
+    /* 保留 max-height 动画，但给足展开空间，避免高级设置内容变多后溢出卡片。 */
+    max-height: 6000px;
     overflow: visible;
     transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }

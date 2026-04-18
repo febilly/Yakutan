@@ -189,11 +189,19 @@ def _osc_udp_port() -> int:
 def _osc_udp_port_status_payload() -> dict:
     """本机 OSC 目标 UDP 端口占用情况（供独立检测接口与启动前校验）。"""
     port = _osc_udp_port()
+    if bool(getattr(config, 'OSC_COMPAT_MODE', False)):
+        return {
+            "osc_udp_port": port,
+            "udp_port_conflicts": [],
+            "port_clear": True,
+            "skipped_due_to_compat_mode": True,
+        }
     conflicts = get_non_vrchat_udp_port_occupants(port)
     return {
         "osc_udp_port": port,
         "udp_port_conflicts": conflicts,
         "port_clear": len(conflicts) == 0,
+        "skipped_due_to_compat_mode": False,
     }
 
 
@@ -360,6 +368,8 @@ def get_config_dict():
             'client_ip': config.OSC_CLIENT_IP,
             'client_port': config.OSC_CLIENT_PORT,
             'send_target_port': int(getattr(config, 'OSC_SEND_TARGET_PORT', 9000)),
+            'compat_mode': bool(getattr(config, 'OSC_COMPAT_MODE', False)),
+            'compat_listen_port': int(getattr(config, 'OSC_COMPAT_LISTEN_PORT', 9001)),
             'bypass_udp_port_check': bool(getattr(config, 'BYPASS_OSC_UDP_PORT_CHECK', False)),
             'send_error_messages': bool(getattr(config, 'OSC_SEND_ERROR_MESSAGES', False)),
         },
@@ -487,6 +497,14 @@ def update_config(config_data):
 
         if 'osc' in config_data:
             osc = config_data['osc']
+            if 'compat_mode' in osc:
+                config.OSC_COMPAT_MODE = bool(osc['compat_mode'])
+            if 'compat_listen_port' in osc:
+                try:
+                    p = int(osc['compat_listen_port'])
+                except (TypeError, ValueError):
+                    p = 9001
+                config.OSC_COMPAT_LISTEN_PORT = max(1, min(65535, p))
             if 'bypass_udp_port_check' in osc:
                 config.BYPASS_OSC_UDP_PORT_CHECK = bool(osc['bypass_udp_port_check'])
             if 'send_error_messages' in osc:
@@ -663,11 +681,11 @@ def update_config_api():
         config_data = request.json
         success, message_id, message = update_config(config_data)
         if success:
-            # 如果服务正在运行，通知主服务线程在下一次可行时重载翻译器实例（无需重启识别线程）
+            # 如果服务正在运行，通知主服务线程热应用运行时配置（无需重启识别线程）
             try:
                 if _get_service_lifecycle() == 'running' and service_loop is not None:
                     import main as main_module
-                    # 在主服务的事件循环线程安全地调度重初始化操作
+                    # 在主服务的事件循环线程安全地调度热更新操作
                     service_loop.call_soon_threadsafe(getattr(main_module, 'reinitialize_translator_compat', lambda: None))
             except Exception as e:
                 print(f'Error notifying service to reload translator: {e}')
@@ -934,6 +952,8 @@ def start_service():
         if 'bypass_osc_udp_port_check' in data
         else bool(getattr(config, 'BYPASS_OSC_UDP_PORT_CHECK', False))
     )
+    if bool(getattr(config, 'OSC_COMPAT_MODE', False)):
+        bypass_udp = True
     if not bypass_udp:
         udp_status = _osc_udp_port_status_payload()
         if not udp_status['port_clear']:
@@ -1050,7 +1070,10 @@ def restart_service():
     if _get_service_lifecycle() != 'running':
         return jsonify({'success': False, 'message_id': 'msg.noRestartNeeded', 'message': '服务未运行，无需重启'})
 
-    if not bool(getattr(config, 'BYPASS_OSC_UDP_PORT_CHECK', False)):
+    if (
+        not bool(getattr(config, 'BYPASS_OSC_UDP_PORT_CHECK', False))
+        and not bool(getattr(config, 'OSC_COMPAT_MODE', False))
+    ):
         udp_status = _osc_udp_port_status_payload()
         if not udp_status['port_clear']:
             return jsonify({
@@ -1137,6 +1160,8 @@ def get_defaults():
         },
         'osc': {
             'send_target_port': 9000,
+            'compat_mode': False,
+            'compat_listen_port': 9001,
             'bypass_udp_port_check': False,
             'send_error_messages': False,
         },

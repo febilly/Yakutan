@@ -102,10 +102,13 @@ def update_subtitles(original: str, translated: str, ongoing: bool, reverse_tran
 
 
 def reinitialize_translator_compat():
-    """供 ui/app.py 调用的翻译器热重载入口。"""
+    """供 ui/app.py 调用的运行时热更新入口。"""
     state = get_state()
     if state:
         reinitialize_translator(state)
+        loop = state.main_loop
+        if loop is not None and loop.is_running():
+            loop.create_task(osc_manager.apply_runtime_config(app_name="Yakutan"))
 
 
 # ============ 识别控制 ============

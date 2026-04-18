@@ -3,6 +3,7 @@
 """
 import os
 import time
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -243,6 +244,21 @@ REMOVE_TRAILING_PERIOD = False
 # 项目内所有与聊天框文本上限相关的裁剪逻辑都应统一使用这个值。
 OSC_TEXT_MAX_LENGTH = 144
 
+
+def is_osc_compat_mode_enabled() -> bool:
+    return bool(globals().get('OSC_COMPAT_MODE', False))
+
+
+def get_effective_osc_text_max_length() -> Optional[int]:
+    """兼容模式下取消长度限制；其它模式沿用统一上限。"""
+    if is_osc_compat_mode_enabled():
+        return None
+    try:
+        value = int(globals().get('OSC_TEXT_MAX_LENGTH', 144))
+    except (TypeError, ValueError):
+        value = 144
+    return max(1, value)
+
 # 是否启用反向翻译功能
 ENABLE_REVERSE_TRANSLATION = True  # True: 翻译后再反向翻译回源语言
                                     # False: 不进行反向翻译
@@ -352,6 +368,10 @@ OSC_CLIENT_PORT = 9001
 
 # 发往 VRChat 的 OSC（如聊天框）使用的目标 UDP 端口，默认与游戏一致为 9000
 OSC_SEND_TARGET_PORT = _get_env_int('OSC_SEND_TARGET_PORT', 9000)
+
+# 兼容模式：不使用 OSCQuery，而是在固定端口监听兼容 OSC 的游戏事件。
+OSC_COMPAT_MODE = _get_env_bool('OSC_COMPAT_MODE', False)
+OSC_COMPAT_LISTEN_PORT = _get_env_int('OSC_COMPAT_LISTEN_PORT', 9001)
 
 # 是否绕过「VRChat OSC 所用 UDP 端口」占用检测（可由网页高级设置或环境变量覆盖）
 BYPASS_OSC_UDP_PORT_CHECK = _get_env_bool('BYPASS_OSC_UDP_PORT_CHECK', False)
