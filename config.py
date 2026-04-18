@@ -239,6 +239,10 @@ ENABLE_ZH_PINYIN = False
 # 是否去除文本句尾句号（仅移除末尾单个 。 / . / ．）
 REMOVE_TRAILING_PERIOD = False
 
+# 发往 VRChat / OSC 的显示文本最大长度。
+# 项目内所有与聊天框文本上限相关的裁剪逻辑都应统一使用这个值。
+OSC_TEXT_MAX_LENGTH = 144
+
 # 是否启用反向翻译功能
 ENABLE_REVERSE_TRANSLATION = True  # True: 翻译后再反向翻译回源语言
                                     # False: 不进行反向翻译

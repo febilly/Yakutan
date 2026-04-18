@@ -21,8 +21,8 @@ __all__ = ["OSCManager", "osc_manager"]
 
 logger = logging.getLogger(__name__)
 
-# 定义发送到VRChat聊天框的最大文本长度
-MAX_LENGTH = 144
+# 定义发送到 VRChat 聊天框的最大文本长度（统一来自配置）
+MAX_LENGTH = app_config.OSC_TEXT_MAX_LENGTH
 
 # 翻译头部行（None 或空字符串表示禁用）
 TRANSLATION_HEADER = ""
@@ -260,7 +260,7 @@ class OSCManager:
         self._vrchat_linked_logged = False
         self._last_mute_value = None
     
-    def _truncate_text(self, text: str, max_length: int = 144) -> str:
+    def _truncate_text(self, text: str, max_length: int = MAX_LENGTH) -> str:
         """
         截断过长的文本，优先删除前面的句子
         
