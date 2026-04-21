@@ -3102,20 +3102,62 @@ function localizeBackendMessage(messageId, defaultMessage) {
     return localized !== messageId ? localized : (defaultMessage || messageId);
 }
 
+function updateCollapsibleIcon(icon, collapsed) {
+    if (!icon) return;
+    icon.classList.toggle('collapsed', collapsed);
+    icon.textContent = collapsed ? '▶' : '▼';
+}
+
+function bindCollapsibleTransitionCleanup(content) {
+    if (!content || content.dataset.collapseTransitionBound === 'true') {
+        return;
+    }
+
+    content.addEventListener('transitionend', (event) => {
+        if (event.propertyName !== 'max-height') {
+            return;
+        }
+
+        if (content.classList.contains('collapsed')) {
+            content.style.maxHeight = '0px';
+            content.style.overflow = 'hidden';
+            return;
+        }
+
+        content.style.maxHeight = 'none';
+        content.style.overflow = 'visible';
+    });
+
+    content.dataset.collapseTransitionBound = 'true';
+}
+
 // 折叠/展开面板
 function toggleCollapsible(id) {
     const content = document.getElementById(id);
     const icon = document.getElementById(id + '-icon');
+    if (!content) return;
 
-    content.classList.toggle('collapsed');
-    icon.classList.toggle('collapsed');
+    bindCollapsibleTransitionCleanup(content);
 
-    // 更新图标
     if (content.classList.contains('collapsed')) {
-        icon.textContent = '▶';
-    } else {
-        icon.textContent = '▼';
+        content.style.overflow = 'hidden';
+        content.classList.remove('collapsed');
+        updateCollapsibleIcon(icon, false);
+
+        content.style.maxHeight = '0px';
+        void content.offsetHeight;
+
+        content.style.maxHeight = `${content.scrollHeight}px`;
+        return;
     }
+
+    content.style.overflow = 'hidden';
+    content.style.maxHeight = `${content.scrollHeight}px`;
+    void content.offsetHeight;
+
+    content.classList.add('collapsed');
+    updateCollapsibleIcon(icon, true);
+    content.style.maxHeight = '0px';
 }
 
 // 打开状态小面板

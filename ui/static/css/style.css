@@ -752,7 +752,7 @@ input:checked + .slider:before {
 
 .collapse-icon {
     font-size: 18px;
-    transition: transform 0.25s ease-out;
+    transition: transform 0.18s ease-out;
 }
 
 .collapse-icon.collapsed {
@@ -760,16 +760,15 @@ input:checked + .slider:before {
 }
 
 .collapsible-content {
-    /* 保留 max-height 动画，但给足展开空间，避免高级设置内容变多后溢出卡片。 */
-    max-height: 6000px;
+    max-height: none;
     overflow: visible;
-    transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: max-height 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .collapsible-content.collapsed {
     max-height: 0;
     overflow: hidden;
-    transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: max-height 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .template-button-row {
