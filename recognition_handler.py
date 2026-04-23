@@ -17,12 +17,10 @@ from text_processor import (
     normalize_lang_code,
     language_code_for_osc_tag,
     resolve_output_target_language,
-    add_furigana_if_needed,
-    add_pinyin_if_needed,
+    get_display_text,
     get_display_translation_text,
     build_streaming_output_line,
     build_dual_output_display,
-    remove_trailing_sentence_period_if_needed,
 )
 from translation_pipeline import (
     is_streaming_deepl_hybrid_mode,
@@ -637,11 +635,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     text, secondary_translated_text, actual_secondary_target,
                 )
 
-            display_source_text = add_furigana_if_needed(text, source_lang)
-            display_source_text = add_pinyin_if_needed(display_source_text, source_lang)
-            display_source_text = remove_trailing_sentence_period_if_needed(
-                display_source_text,
-            )
+            display_source_text = get_display_text(text, source_lang)
 
             if not self._is_async_result_current(async_result_seq, session_generation):
                 return
@@ -803,7 +797,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
         if is_ongoing:
             print(f'部分：{text}', end='\r')
-            display_text = remove_trailing_sentence_period_if_needed(text)
+            display_text = get_display_text(text)
             current_trans = s.subtitles_state.get("translated", "")
             current_reverse_trans = s.subtitles_state.get("reverse_translated", "")
             s.update_subtitles(display_text, current_trans, True, current_reverse_trans)
@@ -836,9 +830,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             if not config.ENABLE_TRANSLATION:
                 source_lang_info = s.language_detector.detect(text)
                 source_lang = source_lang_info['language']
-                display_text = add_furigana_if_needed(text, source_lang)
-                display_text = add_pinyin_if_needed(display_text, source_lang)
-                display_text = remove_trailing_sentence_period_if_needed(display_text)
+                display_text = get_display_text(text, source_lang)
                 print(f'识别：{display_text}')
                 s.update_subtitles(display_text, "", is_ongoing, "")
             else:
@@ -988,9 +980,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         text, secondary_translated_text, actual_secondary_target,
                     )
 
-                display_source_text = add_furigana_if_needed(text, source_lang)
-                display_source_text = add_pinyin_if_needed(display_source_text, source_lang)
-                display_source_text = remove_trailing_sentence_period_if_needed(display_source_text)
+                display_source_text = get_display_text(text, source_lang)
 
                 primary_translated = primary_should_translate
                 is_translated = primary_should_translate or secondary_should_translate

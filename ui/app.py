@@ -19,6 +19,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from audio_runtime_guard import hold_portaudio
+from text_processor import sanitize_text_fancy_style
 from udp_port_check import get_non_vrchat_udp_port_occupants
 try:
     from local_asr import (
@@ -345,6 +346,9 @@ def get_config_dict():
             'enable_furigana': getattr(config, 'ENABLE_JA_FURIGANA', False),
             'enable_pinyin': getattr(config, 'ENABLE_ZH_PINYIN', False),
             'remove_trailing_period': getattr(config, 'REMOVE_TRAILING_PERIOD', False),
+            'text_fancy_style': sanitize_text_fancy_style(
+                getattr(config, 'TEXT_FANCY_STYLE', 'none')
+            ),
             'enable_reverse_translation': config.ENABLE_REVERSE_TRANSLATION,
             'show_original_and_lang_tag': getattr(config, 'SHOW_ORIGINAL_AND_LANG_TAG', True),
         },
@@ -465,6 +469,8 @@ def update_config(config_data):
                 config.ENABLE_ZH_PINYIN = trans['enable_pinyin']
             if 'remove_trailing_period' in trans:
                 config.REMOVE_TRAILING_PERIOD = bool(trans['remove_trailing_period'])
+            if 'text_fancy_style' in trans:
+                config.TEXT_FANCY_STYLE = sanitize_text_fancy_style(trans['text_fancy_style'])
             if 'enable_reverse_translation' in trans:
                 config.ENABLE_REVERSE_TRANSLATION = trans['enable_reverse_translation']
             if 'show_original_and_lang_tag' in trans:
@@ -1146,6 +1152,7 @@ def get_defaults():
             'enable_furigana': False,
             'enable_pinyin': False,
             'remove_trailing_period': False,
+            'text_fancy_style': 'none',
             'enable_reverse_translation': True,
         },
         'mic_control': {

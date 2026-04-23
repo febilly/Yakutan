@@ -51,6 +51,7 @@ hiddenimports = [
     'websockets',
     'pypinyin',
     'jieba',
+    'fancify_text',
     'panel_app',
     'webview',
     'translators.translation_apis.google_web_api',

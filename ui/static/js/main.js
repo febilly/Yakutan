@@ -1863,6 +1863,7 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
                 document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
                 document.getElementById('remove-trailing-period').checked = config.translation.remove_trailing_period ?? false;
+                document.getElementById('text-fancy-style').value = config.translation.text_fancy_style || 'none';
                 document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? true;
 
                 const showTag = document.getElementById('show-original-and-lang-tag');
@@ -2012,6 +2013,7 @@ function loadDefaultConfig() {
     document.getElementById('enable-furigana').checked = false;
     document.getElementById('enable-pinyin').checked = false;
     document.getElementById('remove-trailing-period').checked = false;
+    document.getElementById('text-fancy-style').value = 'none';
     document.getElementById('enable-reverse-translation').checked = true;
     const streamingModeEl = document.getElementById('openrouter-streaming-mode');
     if (streamingModeEl) {
@@ -2152,6 +2154,7 @@ function applyServerConfigPayload(config) {
     document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
     document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
     document.getElementById('remove-trailing-period').checked = config.translation.remove_trailing_period ?? false;
+    document.getElementById('text-fancy-style').value = config.translation.text_fancy_style || 'none';
     document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? true;
     const showTag = document.getElementById('show-original-and-lang-tag');
     if (showTag) {
@@ -2317,6 +2320,7 @@ function saveConfigToLocalStorage() {
                 enable_furigana: document.getElementById('enable-furigana').checked,
                 enable_pinyin: document.getElementById('enable-pinyin').checked,
                 remove_trailing_period: document.getElementById('remove-trailing-period').checked,
+                text_fancy_style: document.getElementById('text-fancy-style').value || 'none',
                 enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,
                 show_original_and_lang_tag: document.getElementById('show-original-and-lang-tag')
                     ? document.getElementById('show-original-and-lang-tag').checked
@@ -2525,6 +2529,7 @@ async function saveConfig(autoSave = false) {
                 enable_furigana: document.getElementById('enable-furigana').checked,
                 enable_pinyin: document.getElementById('enable-pinyin').checked,
                 remove_trailing_period: document.getElementById('remove-trailing-period').checked,
+                text_fancy_style: document.getElementById('text-fancy-style').value || 'none',
                 enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,
                 show_original_and_lang_tag: document.getElementById('show-original-and-lang-tag')
                     ? document.getElementById('show-original-and-lang-tag').checked

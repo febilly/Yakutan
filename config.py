@@ -240,6 +240,13 @@ ENABLE_ZH_PINYIN = False
 # 是否去除文本句尾句号（仅移除末尾单个 。 / . / ．）
 REMOVE_TRAILING_PERIOD = False
 
+# 文本花体风格（fancify-text）
+# 可选:
+# 'none', 'sansSerif', 'bold', 'italic', 'boldItalic', 'monospaced',
+# 'boldSerif', 'italicSerif', 'boldItalicSerif', 'doubleStruck', 'script',
+# 'fraktur', 'boldFraktur', 'blue', 'smallCaps', 'curly', 'cool', 'magic'
+TEXT_FANCY_STYLE = 'none'
+
 # 发往 VRChat / OSC 的显示文本最大长度。
 # 项目内所有与聊天框文本上限相关的裁剪逻辑都应统一使用这个值。
 OSC_TEXT_MAX_LENGTH = 144

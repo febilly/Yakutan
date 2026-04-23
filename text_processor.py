@@ -13,6 +13,19 @@ COMPACT_SCRIPT_LANGUAGE_BASES = {'zh', 'ja', 'ko'}
 COMPACT_SCRIPT_BUDGET_WEIGHT = 1
 ALPHABETIC_SCRIPT_BUDGET_WEIGHT = 2
 
+TEXT_FANCY_STYLE_OPTIONS = (
+    ('none', 'No Effect'),
+    ('smallCaps', 'SMALLCAPS'),
+    ('curly', 'curly'),
+    ('magic', 'magic'),
+)
+TEXT_FANCY_STYLE_VALUES = frozenset(value for value, _ in TEXT_FANCY_STYLE_OPTIONS)
+
+try:
+    import fancify_text as _fancify_text
+except ImportError:
+    _fancify_text = None
+
 
 def _get_dual_output_limits() -> tuple[Optional[int], Optional[int], Optional[int]]:
     total_max_chars = config.get_effective_osc_text_max_length()
@@ -121,6 +134,34 @@ def _sanitize_output_line(text: str) -> str:
     return " ".join(part.strip() for part in normalized.split('\n') if part.strip())
 
 
+def sanitize_text_fancy_style(style: Optional[str]) -> str:
+    if style is None:
+        return 'none'
+    normalized = str(style).strip()
+    if normalized in TEXT_FANCY_STYLE_VALUES:
+        return normalized
+    return 'none'
+
+
+def apply_text_fancy_style_if_needed(text: str) -> str:
+    sanitized = _sanitize_output_line(text)
+    if not sanitized:
+        return ""
+
+    style = sanitize_text_fancy_style(getattr(config, 'TEXT_FANCY_STYLE', 'none'))
+    if style == 'none' or _fancify_text is None:
+        return sanitized
+
+    style_fn = getattr(_fancify_text, style, None)
+    if not callable(style_fn):
+        return sanitized
+
+    try:
+        return str(style_fn(sanitized))
+    except Exception:
+        return sanitized
+
+
 def remove_trailing_sentence_period_if_needed(text: str) -> str:
     """Optionally remove a single trailing sentence-final period."""
     sanitized = _sanitize_output_line(text)
@@ -131,6 +172,10 @@ def remove_trailing_sentence_period_if_needed(text: str) -> str:
     if trimmed.endswith(("。", ".", "．")):
         return trimmed[:-1].rstrip()
     return trimmed
+
+
+def apply_basic_text_post_processing(text: str) -> str:
+    return apply_text_fancy_style_if_needed(remove_trailing_sentence_period_if_needed(text))
 
 
 def _normalize_language_base(language: Optional[str]) -> str:
@@ -228,7 +273,9 @@ def build_dual_output_display(
 
 
 def build_streaming_output_line(text: str) -> str:
-    formatted_text = remove_trailing_sentence_period_if_needed(text)
+    formatted_text = apply_basic_text_post_processing(text)
+    if formatted_text.endswith("……"):
+        return formatted_text
     if formatted_text:
         return f"{formatted_text}……"
     return "……"
@@ -364,8 +411,14 @@ def add_pinyin_if_needed(text: str, language: str) -> str:
     return add_pinyin(text)
 
 
+def get_display_text(text: str, language: Optional[str] = None) -> str:
+    display_text = text
+    if language is not None:
+        display_text = add_furigana_if_needed(display_text, language)
+        display_text = add_pinyin_if_needed(display_text, language)
+    return apply_basic_text_post_processing(display_text)
+
+
 def get_display_translation_text(translated_text: str, target_language: str) -> str:
     """为翻译结果添加假名/拼音标注。"""
-    display_text = add_furigana_if_needed(translated_text, target_language)
-    display_text = add_pinyin_if_needed(display_text, target_language)
-    return remove_trailing_sentence_period_if_needed(display_text)
+    return get_display_text(translated_text, target_language)
