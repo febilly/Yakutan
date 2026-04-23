@@ -15,13 +15,14 @@ def _run_web_ui_mode():
     # 添加ui目录到路径
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ui'))
 
-    from ui.app import app
     import webbrowser
-    from proxy_detector import detect_system_proxy, print_proxy_info
+    from proxy_detector import apply_system_proxy, detect_system_proxy, print_proxy_info
 
     # 检测并应用系统代理设置
-    system_proxies = detect_system_proxy()
+    system_proxies = apply_system_proxy(detect_system_proxy())
     print_proxy_info(system_proxies)
+
+    from ui.app import app
 
     print("WebUI is now running at http://127.0.0.1:5001")
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):

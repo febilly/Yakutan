@@ -20,7 +20,7 @@ os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
 from dotenv import load_dotenv
 
 from hot_words_manager import HotWordsManager
-from proxy_detector import detect_system_proxy, print_proxy_info
+from proxy_detector import apply_system_proxy, detect_system_proxy, print_proxy_info
 from speech_recognizers.recognizer_factory import (
     init_dashscope_api_key,
     create_recognizer,
@@ -259,7 +259,7 @@ async def main(
     corpus_text: Optional[str] = None
 
     # 检测并应用系统代理设置
-    system_proxies = detect_system_proxy()
+    system_proxies = apply_system_proxy(detect_system_proxy())
     print_proxy_info(system_proxies)
 
     # 初始化 DashScope API Key

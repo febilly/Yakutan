@@ -21,8 +21,9 @@ class GoogleWebAPI(BaseTranslationAPI):
         proxies = detect_system_proxy()
         
         if proxies:
-            # googletrans 库支持代理参数
-            self.google_translator = GoogleWebTranslatorAPI(proxies=proxies)
+            # googletrans 最终透传给 httpx.AsyncClient(proxy=...)，这里需要单个代理 URL。
+            proxy_url = proxies.get('https') or proxies.get('http')
+            self.google_translator = GoogleWebTranslatorAPI(proxy=proxy_url)
         else:
             self.google_translator = GoogleWebTranslatorAPI()
     
