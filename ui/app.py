@@ -710,6 +710,20 @@ def update_config_api():
         return jsonify({'success': False, 'message_id': 'msg.configUpdateFailed', 'message': '配置更新失败'}), 500
 
 
+@app.route('/api/ipc_status', methods=['GET'])
+def get_ipc_status():
+    """获取 IPC 连接状态"""
+    from osc_manager import osc_manager
+    ipc_client = getattr(osc_manager, '_ipc_client', None)
+    
+    if ipc_client is None:
+        return jsonify({"connected": False, "mode": "standalone"})
+        
+    return jsonify({
+        "connected": ipc_client.is_connected(),
+        "mode": ipc_client.get_mode()
+    })
+
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """获取服务状态"""

@@ -123,6 +123,19 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         return bool(text) and "[ERROR]" in str(text)
 
     @staticmethod
+    def _resolve_smart_targets(self_language: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+        """若启用了智能目标语言，返回 (primary, secondary)；否则返回 (None, None)。"""
+        if not getattr(config, 'SMART_TARGET_LANGUAGE_ENABLED', False):
+            return None, None
+        from translators.smart_target_language import get_smart_selector
+        smart_targets = get_smart_selector().select_target_language(self_language)
+        if not smart_targets:
+            return None, None
+        primary = smart_targets[0]
+        secondary = smart_targets[1] if len(smart_targets) > 1 else None
+        return primary, secondary
+
+    @staticmethod
     def _filter_error_lines_for_osc(
         default_display_text: Optional[str],
         primary_raw_text: Optional[str] = None,
@@ -357,13 +370,20 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 return
             detected_lang_info = s.language_detector.detect(segment)
             detected_lang = detected_lang_info['language']
-            actual_target = resolve_output_target_language(detected_lang, config.TARGET_LANGUAGE)
-            requested_secondary_target = normalize_optional_language_code(
-                getattr(config, 'SECONDARY_TARGET_LANGUAGE', None)
-            )
-            actual_secondary_target = resolve_output_target_language(
-                detected_lang, requested_secondary_target,
-            )
+            smart_primary, smart_secondary = self._resolve_smart_targets(detected_lang)
+            if smart_primary is not None:
+                actual_target = resolve_output_target_language(detected_lang, smart_primary)
+                actual_secondary_target = resolve_output_target_language(
+                    detected_lang, normalize_optional_language_code(smart_secondary),
+                )
+            else:
+                actual_target = resolve_output_target_language(detected_lang, config.TARGET_LANGUAGE)
+                requested_secondary_target = normalize_optional_language_code(
+                    getattr(config, 'SECONDARY_TARGET_LANGUAGE', None)
+                )
+                actual_secondary_target = resolve_output_target_language(
+                    detected_lang, requested_secondary_target,
+                )
             use_secondary_output = (
                 actual_secondary_target is not None and s.secondary_translator is not None
             )
@@ -838,10 +858,15 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 source_lang = source_lang_info['language']
 
                 normalized_source = self._normalize_lang(source_lang)
-                requested_target = config.TARGET_LANGUAGE
-                requested_secondary_target = normalize_optional_language_code(
-                    getattr(config, 'SECONDARY_TARGET_LANGUAGE', None)
-                )
+                smart_primary, smart_secondary = self._resolve_smart_targets(source_lang)
+                if smart_primary is not None:
+                    requested_target = smart_primary
+                    requested_secondary_target = normalize_optional_language_code(smart_secondary)
+                else:
+                    requested_target = config.TARGET_LANGUAGE
+                    requested_secondary_target = normalize_optional_language_code(
+                        getattr(config, 'SECONDARY_TARGET_LANGUAGE', None)
+                    )
 
                 actual_target = resolve_output_target_language(source_lang, requested_target)
                 actual_secondary_target = resolve_output_target_language(

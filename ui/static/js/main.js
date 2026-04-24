@@ -1473,8 +1473,10 @@ document.addEventListener('DOMContentLoaded', async function () {
     setupMicDeviceAutoRefresh();
     updateDashscopeKeyFieldState();
     updateStatus();
+    updateIpcStatus();
     // 每2秒更新一次状态
     setInterval(updateStatus, 2000);
+    setInterval(updateIpcStatus, 2500);
     setInterval(() => {
         if (isLocalAsrUiEnabled()) {
             void refreshLocalAsrStatus();
@@ -3202,5 +3204,33 @@ async function openMiniPanel() {
         }
     } catch (error) {
         showMessage('请求失败: ' + error, 'error');
+    }
+}
+
+async function updateIpcStatus() {
+    try {
+        const response = await fetch(`${API_BASE}/ipc_status`);
+        const status = await response.json();
+        
+        const textSpan = document.getElementById('ipc-status-text');
+        const dot = document.getElementById('ipc-status-dot');
+        const container = document.getElementById('ipc-status-indicator');
+        
+        if (!textSpan || !dot) return;
+        
+        container.style.display = 'flex';
+        
+        if (status.mode === 'delegate' || status.connected) {
+            textSpan.textContent = '已连接 - 委托模式';
+            dot.style.backgroundColor = '#4caf50';
+        } else if (status.mode === 'waiting') {
+            textSpan.textContent = '等待连接';
+            dot.style.backgroundColor = '#ffc107';
+        } else {
+            textSpan.textContent = '独立模式';
+            dot.style.backgroundColor = '#888';
+        }
+    } catch (error) {
+        console.error('更新 IPC 状态失败:', error);
     }
 }

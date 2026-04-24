@@ -3,7 +3,7 @@
 提供通用的上下文感知翻译功能，支持可插拔的翻译 API
 """
 from collections import deque
-from typing import Optional, Tuple, Callable, TYPE_CHECKING
+from typing import Optional, Tuple, Callable, Literal, TYPE_CHECKING
 import threading
 
 if TYPE_CHECKING:
@@ -15,10 +15,12 @@ CONTEXT_MARKER = "🔤"
 
 class TranslationHistoryEntry:
     """翻译历史条目"""
-    def __init__(self, source_text: str, translated_text: str, target_language: str):
+    def __init__(self, source_text: str, translated_text: str, target_language: str,
+                 speaker: Literal["me", "others"] = "me"):
         self.source_text = source_text
         self.translated_text = translated_text
         self.target_language = target_language
+        self.speaker = speaker
 
 
 class ContextAwareTranslator:
@@ -91,12 +93,13 @@ class ContextAwareTranslator:
             if not contexts_to_use:
                 return ""
             
-            # 构建组合的前缀文本
+            # 构建组合的前缀文本，根据 speaker 添加前缀
             prefix_parts = []
             for entry in contexts_to_use:
-                prefix_parts.append(entry.source_text)
+                speaker_prefix = "[Me] " if entry.speaker == "me" else "[Others] "
+                prefix_parts.append(f"{speaker_prefix}{entry.source_text}")
             
-            # 使用空格或句号连接
+            # 使用空格连接
             prefix = " ".join(prefix_parts)
             
             # 确保以句号结尾（中文用。，英文用.）
@@ -136,21 +139,39 @@ class ContextAwareTranslator:
             if not contexts_to_use:
                 return []
             
-            # 构建原文-译文对列表
+            # 构建原文-译文对列表（包含 speaker 标记）
             pairs = []
             for entry in contexts_to_use:
+                speaker_prefix = "[Me] " if entry.speaker == "me" else "[Others] "
                 pairs.append({
-                    'source': entry.source_text,
-                    'target': entry.translated_text
+                    'source': f"{speaker_prefix}{entry.source_text}",
+                    'target': entry.translated_text,
+                    'speaker': entry.speaker,
                 })
-            
+
             return pairs
     
+    def add_external_speech(self, source_text: str) -> None:
+        """添加外部语音（来自他人）到上下文历史中，不携带翻译结果。"""
+        src = (source_text or "").strip()
+        if not src:
+            return
+        with self._lock:
+            self.contexts.append(
+                TranslationHistoryEntry(
+                    source_text=src,
+                    translated_text="",
+                    target_language="",
+                    speaker="others",
+                )
+            )
+
     def append_history_entry(
         self,
         source_text: str,
         translated_text: str,
         target_language: Optional[str] = None,
+        speaker: Literal["me", "others"] = "me",
     ) -> None:
         """在翻译已确认需要采用后写入对话历史（终句去重、迟到丢弃路径使用）。"""
         src = (source_text or "").strip()
@@ -164,6 +185,7 @@ class ContextAwareTranslator:
                     source_text=src,
                     translated_text=tgt,
                     target_language=lang,
+                    speaker=speaker,
                 )
             )
 
@@ -200,10 +222,30 @@ class ContextAwareTranslator:
             if self.native_context_support:
                 # API 原生支持上下文（如 DeepL、OpenRouter、Qwen-MT）
                 if self.context_aware and (len(self.contexts) > 0 or context_prefix):
-                    # 构建上下文字符串（仅原文，用于简单的 context 参数）
-                    context = f"{context_prefix}\n{self._get_previous_caption()}"
-                    # 获取完整的原文-译文对列表
+                    # 构建上下文字符串（包含当前句子作为最后一条 [Me]）
+                    previous_caption = self._get_previous_caption()
+                    current_prefix = f"[Me] {text.strip()}"
+                    if previous_caption:
+                        context = f"{context_prefix}\n{previous_caption}{current_prefix}"
+                    else:
+                        context = f"{context_prefix}\n{current_prefix}"
+                    # 确保以句号/空格结尾，保持和 _get_previous_caption 一致的格式
+                    if context and not context.endswith(('.', '。', '!', '！', '?', '？')):
+                        if any('\u4e00' <= char <= '\u9fff' for char in context):
+                            context += "。"
+                        else:
+                            context += "."
+                    if context and not context.endswith(' '):
+                        context += " "
+
+                    # 获取完整的原文-译文对列表（包含当前句子）
                     context_pairs = self._get_previous_context_pairs()
+                    context_pairs.append({
+                        'source': text.strip(),
+                        'target': '',
+                        'speaker': 'me',
+                    })
+
                     # 直接调用 API 的 translate 方法，传入 context 和 context_pairs 参数
                     translated_text = self.translation_api.translate(
                         text,
@@ -223,9 +265,10 @@ class ContextAwareTranslator:
                     )
             else:
                 # API 不支持原生上下文，使用标记法模拟
+                # 保持原有行为：历史上下文不包含当前句子
                 previous_caption = self._get_previous_caption() if self.context_aware and len(self.contexts) > 0 else ""
                 input_text = f"{previous_caption}\n{CONTEXT_MARKER}{text}{CONTEXT_MARKER}"
-                
+
                 # 调用翻译 API（不传入 context 参数）
                 translated_text = self.translation_api.translate(
                     input_text,
@@ -233,7 +276,7 @@ class ContextAwareTranslator:
                     target_language=actual_target_language,
                     **kwargs
                 )
-                
+
                 # 提取当前句子的翻译（如果有标记）
                 if CONTEXT_MARKER in translated_text:
                     try:
@@ -248,19 +291,20 @@ class ContextAwareTranslator:
                     except Exception:
                         # 如果提取失败，使用完整翻译结果
                         pass
-                
+
                 # 清理结果中的标记符号
                 translated_text = translated_text.replace(CONTEXT_MARKER, '').strip()
-            
+
             translated_text = translated_text.strip()
 
             is_partial = bool(kwargs.get("is_partial"))
-            if record_history and not is_partial:
+            if record_history and not is_partial and not translated_text.startswith("[ERROR]"):
                 with self._lock:
                     history_entry = TranslationHistoryEntry(
-                        source_text=text,
+                        source_text=text.strip(),
                         translated_text=translated_text,
-                        target_language=actual_target_language
+                        target_language=actual_target_language,
+                        speaker="me",
                     )
                     self.contexts.append(history_entry)
 
@@ -285,7 +329,8 @@ class ContextAwareTranslator:
                 'previous_contexts': [
                     {
                         'source': entry.source_text,
-                        'translated': entry.translated_text
+                        'translated': entry.translated_text,
+                        'speaker': entry.speaker,
                     }
                     for entry in self.display_contexts[:-1]  # 排除最新的当前项
                 ]
@@ -315,7 +360,8 @@ class ContextAwareTranslator:
                 {
                     'source': entry.source_text,
                     'translated': entry.translated_text,
-                    'language': entry.target_language
+                    'language': entry.target_language,
+                    'speaker': entry.speaker,
                 }
                 for entry in self.display_contexts
             ]

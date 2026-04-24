@@ -89,6 +89,7 @@ class OSCManager:
             self._history_ttl_seconds = 10.0
             self._header_line = TRANSLATION_HEADER
             self._udp_send_target: Optional[Tuple[str, int]] = None
+            self._ipc_client = None
 
             self._emit("[OSC] OSC manager initialized")
         if truncate_messages is not None:
@@ -154,7 +155,15 @@ class OSCManager:
         """清除静音状态回调函数"""
         self._mute_callback = None
         self._emit("[OSC] Mute callback cleared")
-    
+
+    def set_ipc_client(self, ipc_client):
+        self._ipc_client = ipc_client
+        self._emit("[OSC] IPC client registered")
+
+    def clear_ipc_client(self):
+        self._ipc_client = None
+        self._emit("[OSC] IPC client cleared")
+
     def get_udp_client(self):
         """获取 OSC UDP 客户端（发往 VRChat；端口来自 config.OSC_SEND_TARGET_PORT）。"""
         host = (getattr(app_config, "OSC_CLIENT_IP", None) or "127.0.0.1").strip() or "127.0.0.1"
@@ -642,7 +651,9 @@ class OSCManager:
             logger.error(f"[OSC] Failed to send OSC message: {e}")
     
     async def set_typing(self, typing: bool):
-        """兼容旧调用方式的异步接口"""
+        if self._ipc_client is not None and self._ipc_client.is_connected():
+            await self._ipc_client.set_typing(typing)
+            return
         if hasattr(asyncio, "to_thread"):
             await asyncio.to_thread(self.set_typing_sync, typing)
         else:
@@ -664,7 +675,9 @@ class OSCManager:
             logger.error(f"[OSC] Failed to set typing state: {e}")
     
     async def send_text(self, text: str, ongoing: bool):
-        """兼容旧调用方式的异步接口"""
+        if self._ipc_client is not None and self._ipc_client.is_connected():
+            await self._ipc_client.send_message(text, ongoing)
+            return
         if hasattr(asyncio, "to_thread"):
             await asyncio.to_thread(self.send_text_sync, text, ongoing)
         else:

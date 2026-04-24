@@ -34,6 +34,7 @@ import config
 load_dotenv()
 
 from osc_manager import osc_manager
+from ipc_client import IPCClient
 
 # ---- 新模块 ----
 from app_state import AppState, get_state, set_state
@@ -328,6 +329,14 @@ async def main(
             state.vocabulary_id = None
             corpus_text = None
 
+    ipc_client = None
+    if getattr(config, 'IPC_ENABLED', True):
+        ipc_client = IPCClient(translator=state.translator)
+        osc_manager.set_ipc_client(ipc_client)
+        asyncio.create_task(ipc_client.start())
+    else:
+        print('[IPC] IPC is disabled in config, using standalone mode')
+
     # 启动 OSC 服务器
     print('[OSC] 启动OSC服务器...')
     await osc_manager.start_server(app_name="Yakutan")
@@ -464,6 +473,9 @@ async def main(
         emit_lifecycle('stopping', state.recognition_active)
         osc_manager.clear_mute_callback()
         osc_manager.reset_runtime_state()
+        if ipc_client is not None:
+            await ipc_client.stop()
+        osc_manager.clear_ipc_client()
 
         loop = asyncio.get_event_loop()
 
