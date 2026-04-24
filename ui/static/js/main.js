@@ -3216,19 +3216,18 @@ async function updateIpcStatus() {
         const dot = document.getElementById('ipc-status-dot');
         const container = document.getElementById('ipc-status-indicator');
         
-        if (!textSpan || !dot) return;
+        if (!textSpan || !dot || !container) return;
         
-        container.style.display = 'flex';
-        
-        if (status.mode === 'delegate' || status.connected) {
-            textSpan.textContent = '已连接 - 委托模式';
+        if (status.connected) {
+            container.style.display = 'flex';
+            if (status.mode === 'delegate') {
+                textSpan.textContent = '已连接 - 委托模式';
+            } else {
+                textSpan.textContent = '已连接';
+            }
             dot.style.backgroundColor = '#4caf50';
-        } else if (status.mode === 'waiting') {
-            textSpan.textContent = '等待连接';
-            dot.style.backgroundColor = '#ffc107';
         } else {
-            textSpan.textContent = '独立模式';
-            dot.style.backgroundColor = '#888';
+            container.style.display = 'none';
         }
     } catch (error) {
         console.error('更新 IPC 状态失败:', error);
