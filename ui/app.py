@@ -18,7 +18,7 @@ import os
 # 添加父目录到路径以导入config和main
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
-from audio_runtime_guard import hold_portaudio
+from audio_runtime_guard import hold_portaudio, _suppress_stderr
 from text_processor import sanitize_text_fancy_style
 from udp_port_check import get_non_vrchat_udp_port_occupants
 try:
@@ -870,43 +870,45 @@ def list_input_devices():
             return jsonify({'devices': [], 'default_index': None, 'default_name': None, 'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None), 'error': str(e)})
 
         with hold_portaudio("list_input_devices"):
-            pa = pyaudio.PyAudio()
+            with _suppress_stderr():
+                pa = pyaudio.PyAudio()
             devices = []
             default_index = None
             default_name = None
             preferred_host_api_index = None
             try:
-                try:
-                    default_info = pa.get_default_input_device_info()
-                    default_index = default_info.get('index')
-                    default_name = str(default_info.get('name') or '').strip() or None
-                except Exception:
-                    default_index = None
-                    default_name = None
-
-                # 选择一个 Host API，避免同一设备被不同 Host API 重复枚举
-                # 优先 WASAPI（更贴近系统设备管理器的“启用/禁用”状态），否则用默认 Host API
-                try:
-                    host_api_count = pa.get_host_api_count()
-                    for host_api_idx in range(host_api_count):
-                        try:
-                            host_api_info = pa.get_host_api_info_by_index(host_api_idx)
-                        except Exception:
-                            continue
-                        name = str(host_api_info.get('name') or '')
-                        if 'wasapi' in name.lower():
-                            preferred_host_api_index = host_api_idx
-                            break
-                except Exception:
-                    preferred_host_api_index = None
-
-                if preferred_host_api_index is None:
+                with _suppress_stderr():
                     try:
-                        preferred_host_api_index = pa.get_default_host_api_info().get('index')
+                        default_info = pa.get_default_input_device_info()
+                        default_index = default_info.get('index')
+                        default_name = str(default_info.get('name') or '').strip() or None
+                    except Exception:
+                        default_index = None
+                        default_name = None
+
+                    # 选择一个 Host API，避免同一设备被不同 Host API 重复枚举
+                    # 优先 WASAPI（更贴近系统设备管理器的“启用/禁用”状态），否则用默认 Host API
+                    try:
+                        host_api_count = pa.get_host_api_count()
+                        for host_api_idx in range(host_api_count):
+                            try:
+                                host_api_info = pa.get_host_api_info_by_index(host_api_idx)
+                            except Exception:
+                                continue
+                            name = str(host_api_info.get('name') or '')
+                            if 'wasapi' in name.lower():
+                                preferred_host_api_index = host_api_idx
+                                break
                     except Exception:
                         preferred_host_api_index = None
 
-                count = pa.get_device_count()
+                    if preferred_host_api_index is None:
+                        try:
+                            preferred_host_api_index = pa.get_default_host_api_info().get('index')
+                        except Exception:
+                            preferred_host_api_index = None
+
+                    count = pa.get_device_count()
                 seen_names = set()
                 for idx in range(count):
                     try:

@@ -11,7 +11,7 @@ import pyaudio
 import config
 from audio_resampler import AudioResampler
 from audio_debug_recorder import WaveDebugRecorder
-from audio_runtime_guard import hold_portaudio
+from audio_runtime_guard import hold_portaudio, _suppress_stderr
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,8 @@ async def init_audio_stream(state):
 
     def _init():
         with hold_portaudio("init_audio_stream"):
-            state.mic = pyaudio.PyAudio()
+            with _suppress_stderr():
+                state.mic = pyaudio.PyAudio()
             device_index = getattr(config, 'MIC_DEVICE_INDEX', None)
             target_rate = int(config.SAMPLE_RATE)
             target_channels = RECOGNIZER_CHANNELS

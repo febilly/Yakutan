@@ -6,11 +6,24 @@ Windows 下 PortAudio 在并发 init/open/terminate/device-enumeration 时容易
 """
 from __future__ import annotations
 
+import os
+import sys
 import threading
 from contextlib import contextmanager
 from typing import Iterator
 
 _PORTAUDIO_LOCK = threading.RLock()
+
+
+@contextmanager
+def _suppress_stderr() -> Iterator[None]:
+    try:
+        original_stderr = sys.stderr
+        with open(os.devnull, 'w') as devnull:
+            sys.stderr = devnull
+            yield
+    finally:
+        sys.stderr = original_stderr
 
 
 @contextmanager
