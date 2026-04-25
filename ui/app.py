@@ -1264,7 +1264,7 @@ def get_defaults():
             'enable_pinyin': False,
             'remove_trailing_period': False,
             'text_fancy_style': 'none',
-            'enable_reverse_translation': True,
+            'enable_reverse_translation': False,
         },
         'mic_control': {
             'enable_mic_control': True,

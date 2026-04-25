@@ -2130,7 +2130,7 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
                 document.getElementById('remove-trailing-period').checked = config.translation.remove_trailing_period ?? false;
                 document.getElementById('text-fancy-style').value = config.translation.text_fancy_style || 'none';
-                document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? true;
+                document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? false;
 
                 const showTag = document.getElementById('show-original-and-lang-tag');
                 if (showTag) {
@@ -2305,7 +2305,7 @@ function loadDefaultConfig() {
     document.getElementById('enable-pinyin').checked = false;
     document.getElementById('remove-trailing-period').checked = false;
     document.getElementById('text-fancy-style').value = 'none';
-    document.getElementById('enable-reverse-translation').checked = true;
+    document.getElementById('enable-reverse-translation').checked = false;
     const streamingModeEl = document.getElementById('openrouter-streaming-mode');
     if (streamingModeEl) {
         streamingModeEl.checked = false;
@@ -2448,7 +2448,7 @@ function applyServerConfigPayload(config) {
     document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
     document.getElementById('remove-trailing-period').checked = config.translation.remove_trailing_period ?? false;
     document.getElementById('text-fancy-style').value = config.translation.text_fancy_style || 'none';
-    document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? true;
+    document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? false;
     const showTag = document.getElementById('show-original-and-lang-tag');
     if (showTag) {
         showTag.checked = config.translation.show_original_and_lang_tag ?? true;

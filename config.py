@@ -282,8 +282,8 @@ def get_effective_osc_text_max_length() -> Optional[int]:
     return max(1, value)
 
 # 是否启用反向翻译功能
-ENABLE_REVERSE_TRANSLATION = True  # True: 翻译后再反向翻译回源语言
-                                    # False: 不进行反向翻译
+ENABLE_REVERSE_TRANSLATION = False  # True: 翻译后再反向翻译回源语言
+                                     # False: 不进行反向翻译
 
 # 是否显示原文及语言标识
 # True: 保持当前行为（显示如 [en→ja] 译文 (原文)）
