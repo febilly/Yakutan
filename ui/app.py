@@ -368,7 +368,6 @@ def get_config_dict():
             'strategy': getattr(config, 'SMART_TARGET_LANGUAGE_STRATEGY', 'most_common'),
             'window_size': getattr(config, 'SMART_TARGET_LANGUAGE_WINDOW_SIZE', 10),
             'exclude_self_language': getattr(config, 'SMART_TARGET_LANGUAGE_EXCLUDE_SELF_LANGUAGE', True),
-            'fallback_language': getattr(config, 'SMART_TARGET_LANGUAGE_FALLBACK', 'en'),
             'min_samples': getattr(config, 'SMART_TARGET_LANGUAGE_MIN_SAMPLES', 3),
         },
         'panel': {
@@ -523,8 +522,6 @@ def update_config(config_data):
                 config.SMART_TARGET_LANGUAGE_WINDOW_SIZE = int(st['window_size'])
             if 'exclude_self_language' in st:
                 config.SMART_TARGET_LANGUAGE_EXCLUDE_SELF_LANGUAGE = bool(st['exclude_self_language'])
-            if 'fallback_language' in st:
-                config.SMART_TARGET_LANGUAGE_FALLBACK = str(st['fallback_language'])
             if 'min_samples' in st:
                 config.SMART_TARGET_LANGUAGE_MIN_SAMPLES = int(st['min_samples'])
 

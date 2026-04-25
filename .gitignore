@@ -37,3 +37,4 @@ local_asr/vendor/**/*.so
 local_asr/vendor/qwen_asr_gguf/inference_old/
 
 local_asr_models/
+/.sisyphus

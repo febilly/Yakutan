@@ -2232,13 +2232,10 @@ function applyServerConfigPayload(config) {
             document.getElementById('smart-target-strategy').value = stl.strategy || 'auto';
         }
         if (document.getElementById('smart-target-window-size')) {
-            document.getElementById('smart-target-window-size').value = stl.window_size ?? 10;
+            document.getElementById('smart-target-window-size').value = stl.window_size ?? 5;
         }
         if (document.getElementById('smart-target-exclude-self')) {
             document.getElementById('smart-target-exclude-self').checked = stl.exclude_self_language ?? true;
-        }
-        if (document.getElementById('smart-target-fallback')) {
-            document.getElementById('smart-target-fallback').value = stl.fallback_language || 'en';
         }
         if (document.getElementById('smart-target-min-samples')) {
             document.getElementById('smart-target-min-samples').value = stl.min_samples ?? 3;
@@ -2258,13 +2255,10 @@ function applyServerConfigPayload(config) {
             document.getElementById('smart-target-strategy').value = stl.strategy || 'auto';
         }
         if (document.getElementById('smart-target-window-size')) {
-            document.getElementById('smart-target-window-size').value = stl.window_size ?? 10;
+            document.getElementById('smart-target-window-size').value = stl.window_size ?? 5;
         }
         if (document.getElementById('smart-target-exclude-self')) {
             document.getElementById('smart-target-exclude-self').checked = stl.exclude_self_language ?? true;
-        }
-        if (document.getElementById('smart-target-fallback')) {
-            document.getElementById('smart-target-fallback').value = stl.fallback_language || 'en';
         }
         if (document.getElementById('smart-target-min-samples')) {
             document.getElementById('smart-target-min-samples').value = stl.min_samples ?? 3;
@@ -2415,9 +2409,8 @@ function saveConfigToLocalStorage() {
                 primary_enabled: document.getElementById('smart-target-primary-enabled')?.checked ?? true,
                 secondary_enabled: document.getElementById('smart-target-secondary-enabled')?.checked ?? false,
                 strategy: document.getElementById('smart-target-strategy')?.value || 'auto',
-                window_size: parseInt(document.getElementById('smart-target-window-size')?.value || '10'),
+                window_size: parseInt(document.getElementById('smart-target-window-size')?.value || '5'),
                 exclude_self_language: document.getElementById('smart-target-exclude-self')?.checked ?? true,
-                fallback_language: document.getElementById('smart-target-fallback')?.value || 'en',
                 min_samples: parseInt(document.getElementById('smart-target-min-samples')?.value || '3'),
             },
             local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
@@ -2620,9 +2613,8 @@ async function saveConfig(autoSave = false) {
                 primary_enabled: document.getElementById('smart-target-primary-enabled')?.checked ?? true,
                 secondary_enabled: document.getElementById('smart-target-secondary-enabled')?.checked ?? false,
                 strategy: document.getElementById('smart-target-strategy')?.value || 'auto',
-                window_size: parseInt(document.getElementById('smart-target-window-size')?.value || '10'),
+                window_size: parseInt(document.getElementById('smart-target-window-size')?.value || '5'),
                 exclude_self_language: document.getElementById('smart-target-exclude-self')?.checked ?? true,
-                fallback_language: document.getElementById('smart-target-fallback')?.value || 'en',
                 min_samples: parseInt(document.getElementById('smart-target-min-samples')?.value || '3'),
             },
             panel: {

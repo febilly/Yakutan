@@ -228,6 +228,20 @@ const translations = {
         'sourceLang.ko': '韩语',
         'hint.sourceLanguage': '建议保持"自动检测"，也可自行输入语言代码',
         'label.micDevice': '麦克风',
+
+        // 智能目标语言
+        'section.smartTargetLanguage': '智能目标语言',
+        'label.smartTargetPrimaryEnabled': '主目标语言自动推断',
+        'label.smartTargetSecondaryEnabled': '第二目标语言自动推断',
+        'label.excludeSelfLanguage': '排除自身语言',
+        'hint.excludeSelfLanguage': '自动推断时不选择语音识别检测到的源语言',
+        'label.smartTargetStrategy': '推断策略',
+        'option.strategy.mostCommon': '频率最高 (Most Common)',
+        'option.strategy.latest': '最新语言 (Latest)',
+        'option.strategy.weighted': '权重衰减 (Weighted)',
+        'label.smartTargetWindowSize': '采样窗口大小',
+        'label.smartTargetMinSamples': '最小采样数',
+
         'label.dependencies': '依赖',
         'label.device': '设备',
         'option.systemDefault': '系统默认',
@@ -534,6 +548,20 @@ const translations = {
         'sourceLang.ko': 'Korean',
         'hint.sourceLanguage': 'Recommended to keep "Auto Detect"; you can also type a language code.',
         'label.micDevice': 'Microphone',
+
+        // Smart Target Language
+        'section.smartTargetLanguage': 'Smart Target Language',
+        'label.smartTargetPrimaryEnabled': 'Auto-detect primary target language',
+        'label.smartTargetSecondaryEnabled': 'Auto-detect secondary target language',
+        'label.excludeSelfLanguage': 'Exclude self language',
+        'hint.excludeSelfLanguage': 'When auto-detecting, do not select the source language detected by speech recognition',
+        'label.smartTargetStrategy': 'Inference strategy',
+        'option.strategy.mostCommon': 'Most Common',
+        'option.strategy.latest': 'Latest',
+        'option.strategy.weighted': 'Weighted Decay',
+        'label.smartTargetWindowSize': 'Sampling window size',
+        'label.smartTargetMinSamples': 'Minimum samples',
+
         'label.dependencies': 'Dependencies',
         'label.device': 'Device',
         'option.systemDefault': 'System Default',
@@ -832,6 +860,20 @@ const translations = {
         'sourceLang.ko': '韓国語',
         'hint.sourceLanguage': '通常は「自動検出」のままを推奨します。言語コードを直接入力することもできます。',
         'label.micDevice': 'マイク',
+
+        // スマートターゲット言語
+        'section.smartTargetLanguage': 'スマートターゲット言語',
+        'label.smartTargetPrimaryEnabled': '主要ターゲット言語を自動推定',
+        'label.smartTargetSecondaryEnabled': '第二ターゲット言語を自動推定',
+        'label.excludeSelfLanguage': '自身の言語を除外',
+        'hint.excludeSelfLanguage': '自動推定時に音声認識で検出されたソース言語を選択しない',
+        'label.smartTargetStrategy': '推定戦略',
+        'option.strategy.mostCommon': '頻度最高',
+        'option.strategy.latest': '最新言語',
+        'option.strategy.weighted': '重み減衰',
+        'label.smartTargetWindowSize': 'サンプリングウィンドウサイズ',
+        'label.smartTargetMinSamples': '最小サンプル数',
+
         'label.dependencies': '依存関係',
         'label.device': 'デバイス',
         'option.systemDefault': 'システム既定',
@@ -1126,6 +1168,20 @@ const translations = {
         'sourceLang.ko': '한국어',
         'hint.sourceLanguage': '"자동 감지" 유지를 권장합니다. 언어 코드를 직접 입력할 수도 있습니다.',
         'label.micDevice': '마이크',
+
+        // 스마트 대상 언어
+        'section.smartTargetLanguage': '스마트 대상 언어',
+        'label.smartTargetPrimaryEnabled': '주 대상 언어 자동 추론',
+        'label.smartTargetSecondaryEnabled': '두 번째 대상 언어 자동 추론',
+        'label.excludeSelfLanguage': '자신의 언어 제외',
+        'hint.excludeSelfLanguage': '자동 추론 시 음성 인식이 감지한 소스 언어 선택 안 함',
+        'label.smartTargetStrategy': '추론 전략',
+        'option.strategy.mostCommon': '빈도 최고',
+        'option.strategy.latest': '최신 언어',
+        'option.strategy.weighted': '가중치 감쇠',
+        'label.smartTargetWindowSize': '샘플링 윈도우 크기',
+        'label.smartTargetMinSamples': '최소 샘플 수',
+
         'label.dependencies': '의존성',
         'label.device': '장치',
         'option.systemDefault': '시스템 기본값',
