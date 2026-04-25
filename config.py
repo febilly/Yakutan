@@ -430,13 +430,14 @@ IPC_ENABLED = _get_env_bool('IPC_ENABLED', True)
 IPC_HOST = os.getenv('IPC_HOST', '127.0.0.1').strip()
 
 # IPC 端口范围
-IPC_PORT_RANGE = (17353, 17363)
+IPC_PORT_RANGE = range(17353, 17364)
 
-# IPC 发现文件路径
 import tempfile
+import sys
+from shared.vrchat_bridge import get_discovery_path
 IPC_DISCOVERY_FILE = os.getenv(
     'IPC_DISCOVERY_FILE',
-    os.path.join(tempfile.gettempdir(), "vrchat_bridge_discovery.json")
+    get_discovery_path()
 ).strip()
 
 # IPC 发现超时时间（秒）

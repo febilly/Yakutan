@@ -17,6 +17,7 @@ class MessageType(str, Enum):
     YAKUTAN_MESSAGE = "YAKUTAN_MESSAGE"
     FOREIGN_SPEECH = "FOREIGN_SPEECH"
     HEARTBEAT = "HEARTBEAT"
+    OSC_STATE = "OSC_STATE"
 
 @dataclass
 class YakutanMessage:
@@ -34,7 +35,12 @@ class ForeignSpeech:
 class Heartbeat:
     type: MessageType = MessageType.HEARTBEAT
 
-def serialize_message(message: Union[YakutanMessage, ForeignSpeech, Heartbeat]) -> str:
+@dataclass
+class OscState:
+    enabled: bool = False
+    type: MessageType = MessageType.OSC_STATE
+
+def serialize_message(message: Union[YakutanMessage, ForeignSpeech, Heartbeat, OscState]) -> str:
     data = asdict(message)
     if isinstance(data['type'], MessageType):
         data['type'] = data['type'].value
@@ -96,8 +102,9 @@ async def discover_peer(discovery_file: str, timeout: float = 30.0) -> Optional[
         with open(discovery_file, "r") as f:
             data = json.load(f)
         
-        if time.time() - data.get("timestamp", 0) > timeout:
-            return None
+        # Skip timestamp expiration check - rely on PID liveness
+        # if time.time() - data.get("timestamp", 0) > timeout:
+        #     return None
             
         pid = data.get("pid")
         if pid:

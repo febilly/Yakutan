@@ -34,9 +34,13 @@ class IPCClient:
         self._discovery_file = config.IPC_DISCOVERY_FILE
         self._poll_interval = config.IPC_POLL_INTERVAL
         self._connect_timeout = config.IPC_CONNECT_TIMEOUT
+        self._delegate_osc_enabled = False
 
     def is_connected(self) -> bool:
         return self._mode == "delegate"
+
+    def is_delegate_osc_enabled(self) -> bool:
+        return self._delegate_osc_enabled and self.is_connected()
 
     def get_mode(self) -> str:
         return self._mode
@@ -44,7 +48,7 @@ class IPCClient:
     async def start(self):
         try:
             await asyncio.wait_for(self._try_connect(), timeout=self._connect_timeout)
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, ConnectionError):
             logger.info("Subtitle IPC server not found, entering wait mode (polling every %ss)", self._poll_interval)
             await self._enter_wait_mode()
         except Exception as e:
@@ -56,7 +60,12 @@ class IPCClient:
         if port is None:
             raise ConnectionError("No peer discovered")
 
-        reader, writer = await connect_bridge_client(self._host, port)
+        try:
+            reader, writer = await connect_bridge_client(self._host, port)
+        except Exception:
+            logger.warning("[IPC] Peer discovered on port %s but connection failed", port)
+            raise
+
         async with self._lock:
             self._reader = reader
             self._writer = writer
@@ -81,8 +90,11 @@ class IPCClient:
             try:
                 await self._try_connect()
                 return
-            except Exception:
+            except ConnectionError:
                 pass
+            except Exception as e:
+                if "Peer discovered" in str(e) or "connection failed" in str(e):
+                    logger.warning("[IPC] %s", e)
             await asyncio.sleep(self._poll_interval)
 
     async def _read_loop(self):
@@ -116,6 +128,10 @@ class IPCClient:
                             logger.error("[IPC] Failed to record foreign language: %s", e)
                 elif msg_type == MessageType.HEARTBEAT.value:
                     pass
+                elif msg_type == MessageType.OSC_STATE.value:
+                    enabled = bool(data.get("enabled", False))
+                    self._delegate_osc_enabled = enabled
+                    logger.info("[IPC] OSC delegation state from server: enabled=%s", enabled)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -128,6 +144,7 @@ class IPCClient:
         if self._mode != "standalone":
             async with self._lock:
                 self._mode = "waiting"
+                self._delegate_osc_enabled = False
             if self._reconnect_task is None or self._reconnect_task.done():
                 self._reconnect_task = asyncio.create_task(self._reconnect_loop())
 
@@ -136,8 +153,11 @@ class IPCClient:
             try:
                 await self._try_connect()
                 return
-            except Exception:
+            except ConnectionError:
                 pass
+            except Exception as e:
+                if "Peer discovered" in str(e) or "connection failed" in str(e):
+                    logger.warning("[IPC] %s", e)
             await asyncio.sleep(self._poll_interval)
 
     async def _close_connection(self):

@@ -651,7 +651,9 @@ class OSCManager:
             logger.error(f"[OSC] Failed to send OSC message: {e}")
     
     async def set_typing(self, typing: bool):
-        if self._ipc_client is not None and self._ipc_client.is_connected():
+        if (self._ipc_client is not None 
+                and self._ipc_client.is_connected() 
+                and self._ipc_client.is_delegate_osc_enabled()):
             await self._ipc_client.set_typing(typing)
             return
         if hasattr(asyncio, "to_thread"):
@@ -675,7 +677,9 @@ class OSCManager:
             logger.error(f"[OSC] Failed to set typing state: {e}")
     
     async def send_text(self, text: str, ongoing: bool):
-        if self._ipc_client is not None and self._ipc_client.is_connected():
+        if (self._ipc_client is not None 
+                and self._ipc_client.is_connected() 
+                and self._ipc_client.is_delegate_osc_enabled()):
             await self._ipc_client.send_message(text, ongoing)
             return
         if hasattr(asyncio, "to_thread"):
