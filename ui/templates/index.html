@@ -288,24 +288,33 @@
                                 <div class="form-group">
                                     <label data-i18n="label.llmTemplate">模板</label>
                                     <div class="template-button-row">
-                                        <button type="button" class="btn btn-subtle btn-small"
+                                        <button type="button" class="btn btn-subtle btn-small" data-llm-template="dashscope-qwen35-flash" aria-pressed="false"
                                             onclick="applyLLMTemplate('dashscope-qwen35-flash')"
                                             data-i18n="btn.llmTemplateDashscopeQwenFlash">阿里 Qwen3.5-Flash</button>
-                                            <button type="button" class="btn btn-subtle btn-small"
+                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="dashscope-qwen35-plus" aria-pressed="false"
                                             onclick="applyLLMTemplate('dashscope-qwen35-plus')"
                                             data-i18n="btn.llmTemplateDashscopeQwenPlus">阿里 Qwen3.5-Plus</button>
-                                            <button type="button" class="btn btn-subtle btn-small"
+                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="longcat" aria-pressed="false"
                                             onclick="applyLLMTemplate('longcat')"
                                             data-i18n="btn.llmTemplateLongCat">LongCat（免费）</button>
-                                            <button type="button" class="btn btn-subtle btn-small"
+                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="mercury2" aria-pressed="false"
                                             onclick="applyLLMTemplate('mercury2')"
                                             data-i18n="btn.llmTemplateMercury2">Mercury 2（免费）</button>
-                                            <button type="button" class="btn btn-subtle btn-small"
+                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="cerebras" aria-pressed="false"
                                             onclick="applyLLMTemplate('cerebras')"
                                             data-i18n="btn.llmTemplateCerebras">Cerebras（免费）</button>
-                                            <button type="button" class="btn btn-subtle btn-small"
+                                        <button type="button" class="btn btn-subtle btn-small" data-llm-template="openrouter" aria-pressed="false"
                                             onclick="applyLLMTemplate('openrouter')"
                                             data-i18n="btn.llmTemplateOpenRouter">OpenRouter</button>
+                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="custom1" aria-pressed="false"
+                                            onclick="applyLLMTemplate('custom1')"
+                                            data-i18n="btn.llmTemplateCustom1">自定义 1</button>
+                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="custom2" aria-pressed="false"
+                                            onclick="applyLLMTemplate('custom2')"
+                                            data-i18n="btn.llmTemplateCustom2">自定义 2</button>
+                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="custom3" aria-pressed="false"
+                                            onclick="applyLLMTemplate('custom3')"
+                                            data-i18n="btn.llmTemplateCustom3">自定义 3</button>
                                     </div>
                                     <small class="form-text" data-i18n="hint.llmTemplate">模板会直接填写下方配置；阿里模板会把当前 DashScope
                                         Key 复制到 LLM Key。</small>

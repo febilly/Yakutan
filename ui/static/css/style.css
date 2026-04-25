@@ -260,6 +260,29 @@ main {
     box-shadow: none;
 }
 
+.btn-subtle[data-llm-template] {
+    transition: none;
+}
+
+.btn-subtle[data-llm-template]:hover {
+    transform: none;
+}
+
+.btn-subtle.active,
+.btn-subtle[aria-pressed="true"] {
+    background-color: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.btn-subtle.active:hover,
+.btn-subtle[aria-pressed="true"]:hover {
+    background-color: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+    box-shadow: none;
+}
+
 .btn-small {
     padding: 6px 12px;
     font-size: 13px;
@@ -314,6 +337,13 @@ main {
 .form-control:focus {
     outline: none;
     border-color: var(--primary-color);
+}
+
+.form-control.readonly-field,
+.form-control[readonly] {
+    background-color: #f5f7fa;
+    color: #667085;
+    cursor: not-allowed;
 }
 
 .form-control::placeholder {

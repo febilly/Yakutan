@@ -326,6 +326,7 @@ def get_config_dict():
             'secondary_target_language': getattr(config, 'SECONDARY_TARGET_LANGUAGE', None),
             'fallback_language': config.FALLBACK_LANGUAGE,
             'api_type': config.TRANSLATION_API_TYPE,
+            'llm_template': getattr(config, 'LLM_TEMPLATE', 'custom1'),
             'llm_base_url': getattr(config, 'LLM_BASE_URL', ''),
             'llm_model': getattr(config, 'LLM_MODEL', ''),
             'llm_translation_formality': _sanitize_llm_translation_formality(
@@ -437,6 +438,8 @@ def update_config(config_data):
                     'openrouter_streaming',
                     'openrouter_streaming_deepl_hybrid',
                 )
+            if 'llm_template' in trans:
+                config.LLM_TEMPLATE = (trans['llm_template'] or 'custom1').strip() or 'custom1'
             if 'llm_base_url' in trans:
                 config.LLM_BASE_URL = (trans['llm_base_url'] or '').strip()
             if 'llm_model' in trans:

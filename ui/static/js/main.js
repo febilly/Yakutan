@@ -62,9 +62,12 @@ function touchMainPanelUserEditedAt() {
 // ===================== 同步基础设施结束 =====================
 
 const PANEL_FLOATING_MODE_STORAGE_KEY = 'panel_floating_mode';
+const LLM_SELECTED_TEMPLATE_STORAGE_KEY = 'llm_selected_template';
 const LLM_TEMPLATE_KEY_STORAGE_PREFIX = 'llm_template_key_';
+const LLM_TEMPLATE_BASEURL_STORAGE_PREFIX = 'llm_template_baseurl_';
 const LLM_TEMPLATE_MODEL_STORAGE_PREFIX = 'llm_template_model_';
 const LLM_TEMPLATE_EXTRABODY_STORAGE_PREFIX = 'llm_template_extrabody_';
+const LLM_TEMPLATE_PARALLEL_STORAGE_PREFIX = 'llm_template_parallel_';
 
 // 待显示的警告消息（用于自动切换翻译API）
 let pendingWarningMessage = null;
@@ -466,6 +469,7 @@ function applyAutoLanguageDetectorIfNeeded() {
 }
 
 const LLM_PARALLEL_FASTEST_MODES = ['off', 'final_only', 'all'];
+const DEFAULT_LLM_TEMPLATE_NAME = 'custom1';
 
 const LLM_TEMPLATE_CONFIGS = {
     'dashscope-qwen35-flash': {
@@ -510,6 +514,30 @@ const LLM_TEMPLATE_CONFIGS = {
         parallelFastestMode: 'off',
         providerLabelKey: 'btn.llmTemplateCerebras',
     },
+    custom1: {
+        baseUrl: '',
+        model: '',
+        extraBody: '',
+        parallelFastestMode: 'off',
+        providerLabelKey: 'btn.llmTemplateCustom1',
+        isCustom: true,
+    },
+    custom2: {
+        baseUrl: '',
+        model: '',
+        extraBody: '',
+        parallelFastestMode: 'off',
+        providerLabelKey: 'btn.llmTemplateCustom2',
+        isCustom: true,
+    },
+    custom3: {
+        baseUrl: '',
+        model: '',
+        extraBody: '',
+        parallelFastestMode: 'off',
+        providerLabelKey: 'btn.llmTemplateCustom3',
+        isCustom: true,
+    },
 };
 
 function resolveLLMParallelFastestModeFromStoredTranslation(trans) {
@@ -542,11 +570,34 @@ function getLLMParallelFastestModeSelect() {
 
 let activeLLMTemplate = null;
 
-function detectActiveLLMTemplate() {
+function isValidLLMTemplateName(templateName) {
+    return !!(templateName && Object.prototype.hasOwnProperty.call(LLM_TEMPLATE_CONFIGS, templateName));
+}
+
+function normalizeLLMTemplateName(templateName) {
+    return isValidLLMTemplateName(templateName) ? templateName : '';
+}
+
+function isCustomLLMTemplate(templateName) {
+    return !!(templateName && LLM_TEMPLATE_CONFIGS[templateName]?.isCustom);
+}
+
+function inferLLMTemplateFromCurrentFields() {
     const baseUrl = (document.getElementById('llm-base-url')?.value || '').trim();
     const model = (document.getElementById('llm-model')?.value || '').trim();
 
     for (const [templateName, templateConfig] of Object.entries(LLM_TEMPLATE_CONFIGS)) {
+        if (templateConfig.isCustom) {
+            const storedBaseUrl = getStoredLLMTemplateBaseUrl(templateName);
+            const storedModel = getStoredLLMTemplateModel(templateName);
+            if (!(storedBaseUrl || storedModel)) {
+                continue;
+            }
+            if (baseUrl === storedBaseUrl && model === storedModel) {
+                return templateName;
+            }
+            continue;
+        }
         if (baseUrl !== templateConfig.baseUrl) {
             continue;
         }
@@ -564,8 +615,89 @@ function detectActiveLLMTemplate() {
     return null;
 }
 
+function updateLLMTemplateButtonStates() {
+    const selectedTemplate = getSelectedLLMTemplateName();
+    document.querySelectorAll('[data-llm-template]').forEach((button) => {
+        const isSelected = button.getAttribute('data-llm-template') === selectedTemplate;
+        button.classList.toggle('active', isSelected);
+        button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+    });
+}
+
+function updateLLMTemplateFieldLocks() {
+    const baseUrlInput = document.getElementById('llm-base-url');
+    if (!baseUrlInput) return;
+
+    const selectedTemplate = getSelectedLLMTemplateName();
+    const isEditable = isCustomLLMTemplate(selectedTemplate);
+    baseUrlInput.readOnly = !isEditable;
+    baseUrlInput.classList.toggle('readonly-field', !isEditable);
+}
+
+function setSelectedLLMTemplateName(templateName, persist = true) {
+    const normalized = normalizeLLMTemplateName(templateName) || DEFAULT_LLM_TEMPLATE_NAME;
+    activeLLMTemplate = normalized;
+    if (persist) {
+        localStorage.setItem(LLM_SELECTED_TEMPLATE_STORAGE_KEY, normalized);
+    }
+    updateLLMTemplateButtonStates();
+    updateLLMTemplateFieldLocks();
+    return normalized;
+}
+
+function getSelectedLLMTemplateName() {
+    const normalizedActive = normalizeLLMTemplateName(activeLLMTemplate);
+    if (normalizedActive) {
+        return normalizedActive;
+    }
+    const storedTemplate = normalizeLLMTemplateName(localStorage.getItem(LLM_SELECTED_TEMPLATE_STORAGE_KEY));
+    return storedTemplate || DEFAULT_LLM_TEMPLATE_NAME;
+}
+
+function hasAnyLLMConnectionFieldValue() {
+    return !!(
+        (document.getElementById('llm-base-url')?.value || '').trim()
+        || (document.getElementById('llm-model')?.value || '').trim()
+        || (document.getElementById('llm-api-key')?.value || '').trim()
+        || (document.getElementById('openai-compat-extra-body-json')?.value || '').trim()
+        || getLLMParallelFastestModeSelect() !== 'off'
+    );
+}
+
+function ensureSelectedLLMTemplate(configTranslation = null) {
+    const configTemplate = normalizeLLMTemplateName(configTranslation?.llm_template);
+    if (configTemplate) {
+        return setSelectedLLMTemplateName(configTemplate);
+    }
+
+    const storedTemplate = normalizeLLMTemplateName(localStorage.getItem(LLM_SELECTED_TEMPLATE_STORAGE_KEY));
+    if (storedTemplate) {
+        activeLLMTemplate = storedTemplate;
+        updateLLMTemplateButtonStates();
+        updateLLMTemplateFieldLocks();
+        return storedTemplate;
+    }
+
+    const inferredTemplate = inferLLMTemplateFromCurrentFields();
+    if (inferredTemplate) {
+        setSelectedLLMTemplateName(inferredTemplate);
+        persistCurrentLLMTemplateState();
+        return inferredTemplate;
+    }
+
+    setSelectedLLMTemplateName(DEFAULT_LLM_TEMPLATE_NAME);
+    if (hasAnyLLMConnectionFieldValue()) {
+        persistCurrentLLMTemplateState();
+    }
+    return DEFAULT_LLM_TEMPLATE_NAME;
+}
+
 function getLLMTemplateKeyStorageKey(templateName) {
     return templateName ? `${LLM_TEMPLATE_KEY_STORAGE_PREFIX}${templateName}` : null;
+}
+
+function getLLMTemplateBaseUrlStorageKey(templateName) {
+    return templateName ? `${LLM_TEMPLATE_BASEURL_STORAGE_PREFIX}${templateName}` : null;
 }
 
 function getLLMTemplateModelStorageKey(templateName) {
@@ -576,6 +708,14 @@ function getLLMTemplateExtraBodyStorageKey(templateName) {
     return templateName ? `${LLM_TEMPLATE_EXTRABODY_STORAGE_PREFIX}${templateName}` : null;
 }
 
+function getLLMTemplateParallelStorageKey(templateName) {
+    return templateName ? `${LLM_TEMPLATE_PARALLEL_STORAGE_PREFIX}${templateName}` : null;
+}
+
+function getCurrentLLMTemplateName() {
+    return getSelectedLLMTemplateName();
+}
+
 function getStoredLLMTemplateKey(templateName) {
     const storageKey = getLLMTemplateKeyStorageKey(templateName);
     if (!storageKey) return '';
@@ -584,6 +724,24 @@ function getStoredLLMTemplateKey(templateName) {
 
 function setStoredLLMTemplateKey(templateName, value) {
     const storageKey = getLLMTemplateKeyStorageKey(templateName);
+    if (!storageKey) return;
+
+    const normalized = (value || '').trim();
+    if (normalized) {
+        localStorage.setItem(storageKey, normalized);
+    } else {
+        localStorage.removeItem(storageKey);
+    }
+}
+
+function getStoredLLMTemplateBaseUrl(templateName) {
+    const storageKey = getLLMTemplateBaseUrlStorageKey(templateName);
+    if (!storageKey) return '';
+    return localStorage.getItem(storageKey) || '';
+}
+
+function setStoredLLMTemplateBaseUrl(templateName, value) {
+    const storageKey = getLLMTemplateBaseUrlStorageKey(templateName);
     if (!storageKey) return;
 
     const normalized = (value || '').trim();
@@ -626,8 +784,31 @@ function setStoredLLMTemplateExtraBody(templateName, value) {
     localStorage.setItem(storageKey, normalized);
 }
 
+function getStoredLLMTemplateParallelMode(templateName) {
+    const storageKey = getLLMTemplateParallelStorageKey(templateName);
+    if (!storageKey) return '';
+    const value = localStorage.getItem(storageKey) || '';
+    return LLM_PARALLEL_FASTEST_MODES.includes(value) ? value : '';
+}
+
+function setStoredLLMTemplateParallelMode(templateName, value) {
+    const storageKey = getLLMTemplateParallelStorageKey(templateName);
+    if (!storageKey) return;
+
+    const normalized = LLM_PARALLEL_FASTEST_MODES.includes(value) ? value : 'off';
+    localStorage.setItem(storageKey, normalized);
+}
+
+function persistCurrentLLMTemplateBaseUrl() {
+    const templateName = getCurrentLLMTemplateName();
+    const baseUrlInput = document.getElementById('llm-base-url');
+    if (!templateName || !baseUrlInput || !isCustomLLMTemplate(templateName)) return;
+
+    setStoredLLMTemplateBaseUrl(templateName, baseUrlInput.value);
+}
+
 function persistCurrentLLMTemplateKey() {
-    const templateName = detectActiveLLMTemplate();
+    const templateName = getCurrentLLMTemplateName();
     const keyInput = document.getElementById('llm-api-key');
     if (!templateName || !keyInput) return;
 
@@ -635,28 +816,47 @@ function persistCurrentLLMTemplateKey() {
 }
 
 function persistCurrentLLMTemplateModel() {
-    const templateName = detectActiveLLMTemplate();
+    const templateName = getCurrentLLMTemplateName();
     const modelInput = document.getElementById('llm-model');
     if (!templateName || !modelInput) return;
 
-    if (templateName === 'openrouter') {
+    if (templateName === 'openrouter' || isCustomLLMTemplate(templateName)) {
         setStoredLLMTemplateModel(templateName, modelInput.value);
     }
 }
 
 function persistCurrentLLMTemplateExtraBody() {
-    const templateName = detectActiveLLMTemplate();
+    const templateName = getCurrentLLMTemplateName();
     const extraInput = document.getElementById('openai-compat-extra-body-json');
     if (!templateName || !extraInput) return;
 
     setStoredLLMTemplateExtraBody(templateName, extraInput.value);
 }
 
+function persistCurrentLLMTemplateParallelMode() {
+    const templateName = getCurrentLLMTemplateName();
+    if (!templateName || !isCustomLLMTemplate(templateName)) return;
+
+    setStoredLLMTemplateParallelMode(templateName, getLLMParallelFastestModeSelect());
+}
+
+function persistCurrentLLMTemplateState() {
+    persistCurrentLLMTemplateBaseUrl();
+    persistCurrentLLMTemplateKey();
+    persistCurrentLLMTemplateModel();
+    persistCurrentLLMTemplateExtraBody();
+    persistCurrentLLMTemplateParallelMode();
+}
+
 function snapshotLLMTemplateStorage() {
     const snapshot = {};
+    snapshot[LLM_SELECTED_TEMPLATE_STORAGE_KEY] = getSelectedLLMTemplateName();
 
     Object.keys(LLM_TEMPLATE_CONFIGS).forEach((templateName) => {
         snapshot[getLLMTemplateKeyStorageKey(templateName)] = getStoredLLMTemplateKey(templateName);
+
+        const baseUrlStorageKey = getLLMTemplateBaseUrlStorageKey(templateName);
+        snapshot[baseUrlStorageKey] = getStoredLLMTemplateBaseUrl(templateName);
 
         const modelStorageKey = getLLMTemplateModelStorageKey(templateName);
         snapshot[modelStorageKey] = getStoredLLMTemplateModel(templateName);
@@ -668,6 +868,14 @@ function snapshotLLMTemplateStorage() {
                 snapshot[extraKey] = rawExtra;
             }
         }
+
+        const parallelStorageKey = getLLMTemplateParallelStorageKey(templateName);
+        if (parallelStorageKey) {
+            const rawParallelMode = localStorage.getItem(parallelStorageKey);
+            if (rawParallelMode !== null) {
+                snapshot[parallelStorageKey] = rawParallelMode;
+            }
+        }
     });
 
     return snapshot;
@@ -677,7 +885,22 @@ function restoreLLMTemplateStorage(snapshot) {
     if (!snapshot) return;
 
     Object.entries(snapshot).forEach(([storageKey, value]) => {
-        if (storageKey.startsWith(LLM_TEMPLATE_EXTRABODY_STORAGE_PREFIX)) {
+        if (storageKey === LLM_SELECTED_TEMPLATE_STORAGE_KEY) {
+            if (normalizeLLMTemplateName(value)) {
+                localStorage.setItem(storageKey, value);
+                activeLLMTemplate = value;
+            } else {
+                localStorage.removeItem(storageKey);
+                activeLLMTemplate = null;
+            }
+            updateLLMTemplateButtonStates();
+            updateLLMTemplateFieldLocks();
+            return;
+        }
+        if (
+            storageKey.startsWith(LLM_TEMPLATE_EXTRABODY_STORAGE_PREFIX)
+            || storageKey.startsWith(LLM_TEMPLATE_PARALLEL_STORAGE_PREFIX)
+        ) {
             if (value === '') {
                 localStorage.setItem(storageKey, '');
             } else if (value) {
@@ -697,7 +920,7 @@ function restoreLLMTemplateStorage(snapshot) {
 
 /** 若当前 Base URL 命中某一 LLM 预设且该预设下曾保存过 extra_body，则覆盖输入框（优先于配置里的全局值） */
 function applyStoredExtraBodyForActiveLLMTemplate() {
-    const templateName = detectActiveLLMTemplate();
+    const templateName = getCurrentLLMTemplateName();
     const extraBodyInput = document.getElementById('openai-compat-extra-body-json');
     if (!templateName || !extraBodyInput) return;
 
@@ -712,6 +935,7 @@ function resolveLLMTemplateKeySource(templateName) {
     const useInternationalEndpoint = document.getElementById('use-international-endpoint')?.checked ?? false;
     const templateConfig = LLM_TEMPLATE_CONFIGS[templateName];
     if (!templateConfig) return null;
+    if (templateConfig.isCustom) return null;
 
     let url = '';
     if (templateName === 'dashscope-qwen35-flash' || templateName === 'dashscope-qwen35-plus') {
@@ -752,7 +976,7 @@ function updateLLMTemplateKeySourceHint(templateName = activeLLMTemplate) {
         label.textContent = '';
         link.textContent = '';
         link.removeAttribute('href');
-        activeLLMTemplate = null;
+        activeLLMTemplate = templateName || null;
         return;
     }
 
@@ -766,7 +990,9 @@ function updateLLMTemplateKeySourceHint(templateName = activeLLMTemplate) {
 }
 
 function syncLLMTemplateKeySourceHintFromInputs() {
-    updateLLMTemplateKeySourceHint(detectActiveLLMTemplate());
+    updateLLMTemplateKeySourceHint(getCurrentLLMTemplateName());
+    updateLLMTemplateButtonStates();
+    updateLLMTemplateFieldLocks();
 }
 
 function shouldShowLLMSettings(apiType) {
@@ -1044,7 +1270,7 @@ function shouldSkipOscUdpPortCheck() {
 }
 
 function applyLLMTemplate(templateName) {
-    const previousTemplateName = detectActiveLLMTemplate();
+    const previousTemplateName = getCurrentLLMTemplateName();
     const baseUrlInput = document.getElementById('llm-base-url');
     const modelInput = document.getElementById('llm-model');
     const keyInput = document.getElementById('llm-api-key');
@@ -1059,13 +1285,18 @@ function applyLLMTemplate(templateName) {
     }
 
     if (previousTemplateName) {
-        persistCurrentLLMTemplateKey();
-        persistCurrentLLMTemplateModel();
-        persistCurrentLLMTemplateExtraBody();
+        persistCurrentLLMTemplateState();
     }
 
-    baseUrlInput.value = templateConfig.baseUrl;
-    if (Object.prototype.hasOwnProperty.call(templateConfig, 'model')) {
+    setSelectedLLMTemplateName(templateName);
+
+    if (templateConfig.isCustom) {
+        baseUrlInput.value = getStoredLLMTemplateBaseUrl(templateName);
+        modelInput.value = getStoredLLMTemplateModel(templateName);
+    } else {
+        baseUrlInput.value = templateConfig.baseUrl;
+    }
+    if (!templateConfig.isCustom && Object.prototype.hasOwnProperty.call(templateConfig, 'model')) {
         modelInput.value = templateConfig.model;
     } else if (templateName === 'openrouter') {
         modelInput.value = getStoredLLMTemplateModel(templateName);
@@ -1078,13 +1309,21 @@ function applyLLMTemplate(templateName) {
     } else {
         extraBodyInput.value = '';
     }
-    parallelFastestSelect.value = templateConfig.parallelFastestMode || 'off';
+    if (templateConfig.isCustom) {
+        parallelFastestSelect.value = getStoredLLMTemplateParallelMode(templateName) || 'off';
+    } else {
+        parallelFastestSelect.value = templateConfig.parallelFastestMode || 'off';
+    }
 
     const storedKey = getStoredLLMTemplateKey(templateName);
     if (storedKey) {
         keyInput.value = storedKey;
         persistSecretInputValue('llm-api-key');
         envStatus.llm.api_key_set = true;
+    } else if (templateConfig.isCustom) {
+        keyInput.value = '';
+        persistSecretInputValue('llm-api-key');
+        envStatus.llm.api_key_set = false;
     } else if (templateConfig.copyDashscopeKey) {
         const dashscopeKey = dashscopeKeyInput ? dashscopeKeyInput.value.trim() : '';
         if (dashscopeKey) {
@@ -1666,12 +1905,13 @@ function loadAPIKeys() {
     const sonioxKey = localStorage.getItem('soniox_api_key');
     if (sonioxKey) document.getElementById('soniox-api-key').value = sonioxKey;
 
-    const activeTemplate = detectActiveLLMTemplate();
+    const activeTemplate = ensureSelectedLLMTemplate();
     const storedTemplateKey = getStoredLLMTemplateKey(activeTemplate);
     if (storedTemplateKey) {
         document.getElementById('llm-api-key').value = storedTemplateKey;
     } else if (llmKey) {
         document.getElementById('llm-api-key').value = llmKey;
+        persistCurrentLLMTemplateKey();
     }
 
     if (activeTemplate === 'openrouter') {
@@ -1708,6 +1948,9 @@ function loadAPIKeys() {
         const input = document.getElementById(inputId);
         if (!input) return;
         input.addEventListener('input', (event) => {
+            if (event.target.id === 'llm-base-url') {
+                persistCurrentLLMTemplateBaseUrl();
+            }
             if (event.target.id === 'llm-model') {
                 persistCurrentLLMTemplateModel();
             }
@@ -1732,6 +1975,16 @@ function loadAPIKeys() {
         extraBodyEl.dataset.llmExtrabodyBlurPersistBound = 'true';
         extraBodyEl.addEventListener('blur', () => {
             persistCurrentLLMTemplateExtraBody();
+        });
+    }
+
+    const parallelModeEl = document.getElementById('llm-parallel-fastest-mode');
+    if (parallelModeEl && parallelModeEl.dataset.llmParallelPersistBound !== 'true') {
+        parallelModeEl.dataset.llmParallelPersistBound = 'true';
+        parallelModeEl.addEventListener('change', () => {
+            persistCurrentLLMTemplateParallelMode();
+            syncLLMTemplateKeySourceHintFromInputs();
+            onSettingChange(parallelModeEl);
         });
     }
 }
@@ -1861,6 +2114,7 @@ function loadConfigFromLocalStorage() {
                 setLLMParallelFastestModeSelect(
                     resolveLLMParallelFastestModeFromStoredTranslation(config.translation)
                 );
+                ensureSelectedLLMTemplate(config.translation);
                 applySourceLanguageInputFromStored(config.translation.source_language ?? 'auto');
                 document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
                 document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
@@ -2002,6 +2256,7 @@ function loadConfigFromLocalStorage() {
         updateSensitiveWordsHint();
         applyAsrBackendLocks();
         updateOscCompatModeUi();
+        ensureSelectedLLMTemplate();
         syncLLMTemplateKeySourceHintFromInputs();
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
@@ -2018,6 +2273,7 @@ function loadConfigFromLocalStorage() {
         updateSensitiveWordsHint();
         applyAsrBackendLocks();
         updateOscCompatModeUi();
+        ensureSelectedLLMTemplate();
         syncLLMTemplateKeySourceHintFromInputs();
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
@@ -2115,6 +2371,7 @@ function loadDefaultConfig() {
     }
 
     console.log('✓ 已加载前端默认配置');
+    ensureSelectedLLMTemplate({ llm_template: DEFAULT_LLM_TEMPLATE_NAME });
     updateOpenRouterStreamingUi();
     updateFuriganaVisibility();
     updateLLMSettingsVisibility();
@@ -2176,6 +2433,7 @@ function applyServerConfigPayload(config) {
     setLLMParallelFastestModeSelect(
         resolveLLMParallelFastestModeFromStoredTranslation(config.translation),
     );
+    ensureSelectedLLMTemplate(config.translation);
     document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
     document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
     document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
@@ -2354,6 +2612,7 @@ function saveConfigToLocalStorage() {
                 secondary_target_language: document.getElementById('secondary-target-language').value || null,
                 fallback_language: document.getElementById('fallback-language').value || null,
                 api_type: actualApiType,
+                llm_template: getSelectedLLMTemplateName(),
                 llm_base_url: document.getElementById('llm-base-url').value.trim(),
                 llm_model: document.getElementById('llm-model').value.trim(),
                 llm_translation_formality: sanitizeLLMTranslationFormality(
@@ -2571,6 +2830,7 @@ async function saveConfig(autoSave = false) {
                 secondary_target_language: document.getElementById('secondary-target-language').value || null,
                 fallback_language: document.getElementById('fallback-language').value || null,
                 api_type: actualApiType,
+                llm_template: getSelectedLLMTemplateName(),
                 llm_base_url: document.getElementById('llm-base-url').value.trim(),
                 llm_model: document.getElementById('llm-model').value.trim(),
                 llm_translation_formality: sanitizeLLMTranslationFormality(
@@ -3101,9 +3361,7 @@ async function resetToDefaults() {
     }
 
     try {
-        persistCurrentLLMTemplateKey();
-        persistCurrentLLMTemplateModel();
-        persistCurrentLLMTemplateExtraBody();
+        persistCurrentLLMTemplateState();
         const llmTemplateStorageSnapshot = snapshotLLMTemplateStorage();
 
         // 使用前端默认配置

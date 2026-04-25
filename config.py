@@ -199,6 +199,7 @@ LLM_MODEL = (
     or os.getenv('OPENAI_MODEL', '').strip()
     or os.getenv('OPENROUTER_TRANSLATION_MODEL', 'qwen/qwen3-235b-a22b-2507').strip()
 )
+LLM_TEMPLATE = os.getenv('LLM_TEMPLATE', '').strip() or 'custom1'
 LLM_TRANSLATION_TEMPERATURE = 0.2
 LLM_TRANSLATION_TIMEOUT = 30
 LLM_TRANSLATION_MAX_RETRIES = 3
