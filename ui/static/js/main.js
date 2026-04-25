@@ -3281,12 +3281,13 @@ async function updateIpcStatus() {
         
         if (!textSpan || !dot || !container) return;
         
+        const t = window.i18n ? window.i18n.t : (key) => key;
         if (status.connected) {
             container.style.display = 'flex';
             if (status.mode === 'delegate') {
-                textSpan.textContent = '已连接 - 委托模式';
+                textSpan.textContent = t('status.ipcConnectedDelegate');
             } else {
-                textSpan.textContent = '已连接';
+                textSpan.textContent = t('status.ipcConnected');
             }
             dot.style.backgroundColor = '#4caf50';
             if (smartSection) {

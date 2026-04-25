@@ -34,6 +34,8 @@ const translations = {
         'status.starting': '服务启动中',
         'status.stopping': '服务停止中',
         'status.running': '服务运行中',
+        'status.ipcConnected': '已连接',
+        'status.ipcConnectedDelegate': '已连接 Realtime Subtitle',
 
         // 服务控制
         'section.serviceControl': '服务控制',
@@ -356,6 +358,8 @@ const translations = {
         'status.starting': 'Service Starting',
         'status.stopping': 'Service Stopping',
         'status.running': 'Service Running',
+        'status.ipcConnected': 'Connected',
+        'status.ipcConnectedDelegate': 'Connected Realtime Subtitle',
 
         // Service control
         'section.serviceControl': 'Service Control',
@@ -677,6 +681,8 @@ const translations = {
         'status.starting': 'サービス起動中',
         'status.stopping': 'サービス停止処理中',
         'status.running': 'サービス稼働中',
+        'status.ipcConnected': '接続済み',
+        'status.ipcConnectedDelegate': 'Realtime Subtitle に接続済み',
 
         'section.serviceControl': 'サービス制御',
         'btn.startService': 'サービス開始',
@@ -987,6 +993,8 @@ const translations = {
         'status.starting': '서비스 시작 중',
         'status.stopping': '서비스 중지 중',
         'status.running': '서비스 실행 중',
+        'status.ipcConnected': '연결됨',
+        'status.ipcConnectedDelegate': 'Realtime Subtitle 연결됨',
 
         'section.serviceControl': '서비스 제어',
         'btn.startService': '서비스 시작',
