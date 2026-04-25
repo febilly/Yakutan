@@ -3184,6 +3184,8 @@ function syncCollapsibleContainerState(content) {
     const container = content.parentElement;
     if (!container) return;
 
+    container.classList.add('collapsible-container');
+
     container.classList.toggle(
         'collapsible-container-collapsed',
         content.classList.contains('collapsed'),

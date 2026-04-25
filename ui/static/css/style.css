@@ -774,6 +774,14 @@ input:checked + .slider:before {
     line-height: 1.25;
 }
 
+.card.collapsible-container {
+    padding-top: 12px;
+}
+
+.subsection.collapsible-container {
+    padding-top: 10px;
+}
+
 .card.collapsible-container-collapsed {
     padding-top: 12px;
     padding-bottom: 12px;
@@ -787,17 +795,15 @@ input:checked + .slider:before {
 .collapsible-content {
     max-height: none;
     overflow: visible;
-    transition: max-height 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+    padding-top: 10px;
+    transition: max-height 0.18s cubic-bezier(0.4, 0, 0.2, 1), padding-top 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .collapsible-content.collapsed {
     max-height: 0;
     overflow: hidden;
-    transition: max-height 0.18s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.collapsible-content:not(.collapsed) {
-    padding-top: 10px;
+    padding-top: 0;
+    transition: max-height 0.18s cubic-bezier(0.4, 0, 0.2, 1), padding-top 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .template-button-row {
