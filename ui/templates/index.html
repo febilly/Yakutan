@@ -138,6 +138,82 @@
                                     data-i18n="hint.fallbackLanguage">留空则禁用备用语言；当源语言与目标语言相同时会改用这里</small>
                             </div>
                         </div>
+                        
+                        <div id="smart-target-language-section" style="display: none; margin-top: 15px;">
+                            <div class="collapsible-header" onclick="toggleCollapsible('smart-target-settings')">
+                                <h3 style="margin: 0; font-size: 14px; font-weight: 500;">智能目标语言（自动推断输出语言）</h3>
+                                <span class="collapse-icon" id="smart-target-settings-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content collapsed" id="smart-target-settings" style="padding-top: 10px;">
+                                <div class="switch-row">
+                                    <div class="form-group">
+                                        <label class="switch-label">
+                                            <span>主目标语言自动推断</span>
+                                            <label class="switch">
+                                                <input type="checkbox" id="smart-target-primary-enabled" onchange="onSettingChange()">
+                                                <span class="slider"></span>
+                                            </label>
+                                        </label>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="switch-label">
+                                            <span>第二目标语言自动推断</span>
+                                            <label class="switch">
+                                                <input type="checkbox" id="smart-target-secondary-enabled" onchange="onSettingChange()">
+                                                <span class="slider"></span>
+                                            </label>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="switch-row">
+                                    <div class="form-group">
+                                        <label class="switch-label">
+                                            <span>排除自身语言</span>
+                                            <label class="switch">
+                                                <input type="checkbox" id="smart-target-exclude-self" onchange="onSettingChange()">
+                                                <span class="slider"></span>
+                                            </label>
+                                        </label>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="smart-target-strategy">推断策略</label>
+                                        <select id="smart-target-strategy" class="form-control" onchange="onSettingChange()">
+                                            <option value="most_common">频率最高 (Most Common)</option>
+                                            <option value="latest">最新语言 (Latest)</option>
+                                            <option value="weighted">权重衰减 (Weighted)</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="switch-row">
+                                    <div class="form-group">
+                                        <label for="smart-target-window-size">采样窗口大小</label>
+                                        <input type="number" id="smart-target-window-size" class="form-control" min="1" max="100" onchange="onSettingChange()">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="smart-target-min-samples">最小采样数</label>
+                                        <input type="number" id="smart-target-min-samples" class="form-control" min="1" max="50" onchange="onSettingChange()">
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="smart-target-fallback">备用目标语言</label>
+                                    <div class="language-combo" data-input-id="smart-target-fallback">
+                                        <input type="text" id="smart-target-fallback" class="form-control language-combo-input"
+                                            placeholder="en" autocomplete="off" spellcheck="false"
+                                            onchange="onSettingChange()" onblur="onSettingChange()">
+                                        <button type="button" class="language-combo-clear" hidden title="清除输入">
+                                            <span class="language-combo-clear-icon" aria-hidden="true">×</span>
+                                        </button>
+                                        <button type="button" class="language-combo-toggle" aria-label="Select language">
+                                            <span class="language-combo-toggle-icon"></span>
+                                        </button>
+                                        <div class="language-combo-menu"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="form-group">

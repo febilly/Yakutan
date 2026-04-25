@@ -362,6 +362,15 @@ def get_config_dict():
         'language_detector': {
             'type': config.LANGUAGE_DETECTOR_TYPE,
         },
+        'smart_target_language': {
+            'primary_enabled': getattr(config, 'SMART_TARGET_PRIMARY_ENABLED', False),
+            'secondary_enabled': getattr(config, 'SMART_TARGET_SECONDARY_ENABLED', False),
+            'strategy': getattr(config, 'SMART_TARGET_LANGUAGE_STRATEGY', 'most_common'),
+            'window_size': getattr(config, 'SMART_TARGET_LANGUAGE_WINDOW_SIZE', 10),
+            'exclude_self_language': getattr(config, 'SMART_TARGET_LANGUAGE_EXCLUDE_SELF_LANGUAGE', True),
+            'fallback_language': getattr(config, 'SMART_TARGET_LANGUAGE_FALLBACK', 'en'),
+            'min_samples': getattr(config, 'SMART_TARGET_LANGUAGE_MIN_SAMPLES', 3),
+        },
         'panel': {
             'width': getattr(config, 'PANEL_WIDTH', 600),
         },
@@ -495,6 +504,29 @@ def update_config(config_data):
             ld = config_data['language_detector']
             if 'type' in ld:
                 config.LANGUAGE_DETECTOR_TYPE = ld['type']
+
+        # 更新智能目标语言配置
+        if 'smart_target_language' in config_data:
+            st = config_data['smart_target_language']
+            if 'primary_enabled' in st:
+                config.SMART_TARGET_PRIMARY_ENABLED = bool(st['primary_enabled'])
+                # 同步更新废弃变量以维持旧逻辑兼容
+                config.SMART_TARGET_LANGUAGE_ENABLED = config.SMART_TARGET_PRIMARY_ENABLED
+            if 'secondary_enabled' in st:
+                config.SMART_TARGET_SECONDARY_ENABLED = bool(st['secondary_enabled'])
+                # 同步更新废弃变量以维持旧逻辑兼容
+                config.SMART_TARGET_LANGUAGE_COUNT = 2 if config.SMART_TARGET_SECONDARY_ENABLED else 1
+                config.SMART_TARGET_LANGUAGE_ENABLED = config.SMART_TARGET_PRIMARY_ENABLED or config.SMART_TARGET_SECONDARY_ENABLED
+            if 'strategy' in st:
+                config.SMART_TARGET_LANGUAGE_STRATEGY = str(st['strategy'])
+            if 'window_size' in st:
+                config.SMART_TARGET_LANGUAGE_WINDOW_SIZE = int(st['window_size'])
+            if 'exclude_self_language' in st:
+                config.SMART_TARGET_LANGUAGE_EXCLUDE_SELF_LANGUAGE = bool(st['exclude_self_language'])
+            if 'fallback_language' in st:
+                config.SMART_TARGET_LANGUAGE_FALLBACK = str(st['fallback_language'])
+            if 'min_samples' in st:
+                config.SMART_TARGET_LANGUAGE_MIN_SAMPLES = int(st['min_samples'])
 
         if 'panel' in config_data:
             panel = config_data['panel']
@@ -792,6 +824,68 @@ def set_target_language():
             'target_language': lang,
             'config_applied_at_ms': applied_ms,
         })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/secondary-target-language', methods=['POST'])
+def set_secondary_target_language():
+    """设置第二目标翻译语言"""
+    try:
+        data = request.json or {}
+        lang = data.get('secondary_target_language')
+        if lang is not None:
+            lang = str(lang).strip()
+            if not lang:
+                lang = None
+        config.SECONDARY_TARGET_LANGUAGE = lang
+        applied_ms = config.bump_config_applied_at_ms()
+        try:
+            if _get_service_lifecycle() == 'running' and service_loop is not None:
+                import main as main_module
+                service_loop.call_soon_threadsafe(getattr(main_module, 'reinitialize_translator_compat', lambda: None))
+        except Exception as e:
+            logging.error(f'Error notifying service to reload translator: {e}')
+        return jsonify({
+            'success': True,
+            'secondary_target_language': lang,
+            'config_applied_at_ms': applied_ms,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/smart-target-status', methods=['GET'])
+def get_smart_target_status():
+    """获取智能目标语言选择器状态"""
+    try:
+        from translators.smart_target_language import get_smart_selector
+        selector = get_smart_selector()
+        enabled_primary = bool(getattr(config, 'SMART_TARGET_PRIMARY_ENABLED', False))
+        enabled_secondary = bool(getattr(config, 'SMART_TARGET_SECONDARY_ENABLED', False))
+        min_samples = int(getattr(config, 'SMART_TARGET_LANGUAGE_MIN_SAMPLES', 3))
+        history_count = len(selector._history)
+        active = enabled_primary and history_count >= min_samples
+        enabled = enabled_primary or enabled_secondary
+        active_languages = selector.select_target_language()
+        return jsonify({
+            'enabled': enabled,
+            'history_count': history_count,
+            'min_samples': min_samples,
+            'active': active,
+            'active_languages': active_languages,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/smart-target-reset', methods=['POST'])
+def reset_smart_target():
+    """重置智能目标语言选择器历史记录"""
+    try:
+        from translators.smart_target_language import get_smart_selector
+        get_smart_selector().clear_history()
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 

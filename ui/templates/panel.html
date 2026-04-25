@@ -235,7 +235,9 @@
         let pendingServiceActionStartedAt = 0;
         let lastShowReverseTranslation = null;
         let currentTargetLanguage = '';
+        let currentSecondaryTargetLanguage = '';
         let switchingLanguage = false;
+        let switchingSecondaryLanguage = false;
         const QUICK_LANG_DEFAULTS = ['en', 'zh-CN', 'ja', 'ko'];
         const QUICK_LANG_BAR_HEIGHT = 27;
         const SERVICE_ACTION_TIMEOUT_MS = 30000;
@@ -382,6 +384,10 @@
                     btn.classList.add('active');
                 }
                 btn.addEventListener('click', () => switchTargetLanguage(lang));
+                btn.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    switchSecondaryTargetLanguage(lang);
+                });
                 bar.appendChild(btn);
             });
         }
@@ -389,9 +395,67 @@
         function updateQuickLangActiveState() {
             const buttons = document.querySelectorAll('.quick-lang-btn');
             buttons.forEach((btn) => {
-                const isActive = btn.dataset.lang.toLowerCase() === (currentTargetLanguage || '').toLowerCase();
+                const lang = btn.dataset.lang.toLowerCase();
+                const isActive = lang === (currentTargetLanguage || '').toLowerCase();
+                const isSecondary = lang === (currentSecondaryTargetLanguage || '').toLowerCase();
+                
                 btn.classList.toggle('active', isActive);
+                
+                // Show secondary indicator
+                let indicator = btn.querySelector('.secondary-indicator');
+                if (isSecondary) {
+                    if (!indicator) {
+                        indicator = document.createElement('span');
+                        indicator.className = 'secondary-indicator';
+                        indicator.textContent = '2nd';
+                        indicator.style.position = 'absolute';
+                        indicator.style.right = '2px';
+                        indicator.style.bottom = '1px';
+                        indicator.style.fontSize = '8px';
+                        indicator.style.lineHeight = '1';
+                        indicator.style.color = 'var(--text-muted)';
+                        indicator.style.pointerEvents = 'none';
+                        btn.style.position = 'relative';
+                        btn.appendChild(indicator);
+                    }
+                } else if (indicator) {
+                    indicator.remove();
+                }
             });
+        }
+
+        async function switchSecondaryTargetLanguage(lang) {
+            if (switchingSecondaryLanguage) return;
+            switchingSecondaryLanguage = true;
+            try {
+                const res = await fetch('/api/secondary-target-language', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ secondary_target_language: lang })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    currentSecondaryTargetLanguage = data.secondary_target_language;
+                    localStorage.setItem('secondary_target_language', data.secondary_target_language);
+                    updateQuickLangActiveState();
+                    
+                    // Visual feedback: briefly highlight the button
+                    const btn = document.querySelector(`.quick-lang-btn[data-lang="${lang}"]`);
+                    if (btn) {
+                        const originalTransition = btn.style.transition;
+                        btn.style.transition = 'none';
+                        btn.style.backgroundColor = 'rgba(78, 140, 255, 0.4)';
+                        setTimeout(() => {
+                            btn.style.transition = originalTransition;
+                            btn.style.backgroundColor = '';
+                        }, 200);
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to switch secondary target language:', e);
+            } finally {
+                switchingSecondaryLanguage = false;
+            }
         }
 
         async function switchTargetLanguage(lang) {
@@ -556,6 +620,11 @@
 
                 if (subData.target_language && subData.target_language !== currentTargetLanguage) {
                     currentTargetLanguage = subData.target_language;
+                    updateQuickLangActiveState();
+                }
+
+                if (subData.secondary_target_language && subData.secondary_target_language !== currentSecondaryTargetLanguage) {
+                    currentSecondaryTargetLanguage = subData.secondary_target_language;
                     updateQuickLangActiveState();
                 }
 

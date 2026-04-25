@@ -38,7 +38,11 @@ from ipc_client import IPCClient
 
 # ---- 新模块 ----
 from app_state import AppState, get_state, set_state
-from translation_pipeline import reinitialize_translator
+from translation_pipeline import (
+    reinitialize_translator,
+    update_secondary_translator,
+    _is_primary_translator_config_changed,
+)
 from audio_capture import init_audio_stream, close_audio_stream, audio_capture_task
 from recognition_handler import (
     VRChatRecognitionCallback,
@@ -103,10 +107,12 @@ def update_subtitles(original: str, translated: str, ongoing: bool, reverse_tran
 
 
 def reinitialize_translator_compat():
-    """供 ui/app.py 调用的运行时热更新入口。"""
     state = get_state()
     if state:
-        reinitialize_translator(state)
+        if _is_primary_translator_config_changed(state):
+            reinitialize_translator(state)
+        else:
+            update_secondary_translator(state)
         loop = state.main_loop
         if loop is not None and loop.is_running():
             loop.create_task(osc_manager.apply_runtime_config(app_name="Yakutan"))

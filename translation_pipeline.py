@@ -61,6 +61,50 @@ def _build_context_translator(api_factory, target_language: str):
     return translation_api_instance, translator_instance
 
 
+def _is_primary_translator_config_changed(state) -> bool:
+    return (
+        config.TRANSLATION_API_TYPE != getattr(state, 'translation_api_type', None)
+        or config.TARGET_LANGUAGE != getattr(state, 'target_language', None)
+    )
+
+
+def update_secondary_translator(state):
+    new_secondary = normalize_optional_language_code(
+        getattr(config, 'SECONDARY_TARGET_LANGUAGE', None)
+    )
+    current_secondary = getattr(state, 'secondary_target_language', None)
+    if new_secondary == current_secondary:
+        return
+
+    state.secondary_translation_api = None
+    state.secondary_translator = None
+    state.secondary_deepl_fallback_translation_api = None
+    state.secondary_deepl_fallback_translator = None
+
+    if new_secondary:
+        TranslationAPIClass = _get_translation_api_class(config.TRANSLATION_API_TYPE)
+        state.secondary_translation_api, state.secondary_translator = (
+            _build_context_translator(TranslationAPIClass, new_secondary)
+        )
+        if is_streaming_deepl_hybrid_mode():
+            try:
+                (
+                    state.secondary_deepl_fallback_translation_api,
+                    state.secondary_deepl_fallback_translator,
+                ) = _build_context_translator(DeepLAPI, new_secondary)
+            except Exception as e:
+                logger.warning(
+                    "[Translation] 混合模式下 DeepL 第二翻译器初始化失败，"
+                    "将回退 LLM 终译: %s",
+                    e,
+                )
+
+    state.secondary_target_language = new_secondary
+    logger.info(
+        "[Translation] 第二翻译器已更新: %s -> %s", current_secondary, new_secondary
+    )
+
+
 def reinitialize_translator(state):
     """根据当前配置动态（重）初始化翻译器实例。
 
@@ -116,6 +160,10 @@ def reinitialize_translator(state):
             logger.warning(
                 "[Translation] 混合模式下 DeepL 初始化失败，将回退 LLM 终译: %s", e
             )
+
+    state.translation_api_type = config.TRANSLATION_API_TYPE
+    state.target_language = config.TARGET_LANGUAGE
+    state.secondary_target_language = secondary_target_language
 
 
 def translate_with_backend(

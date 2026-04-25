@@ -2219,6 +2219,58 @@ function applyServerConfigPayload(config) {
     if (isLocalAsrUiEnabled()) {
         applyLocalAsrConfig(config.local_asr || {});
     }
+
+    if (config.smart_target_language) {
+        const stl = config.smart_target_language;
+        if (document.getElementById('smart-target-primary-enabled')) {
+            document.getElementById('smart-target-primary-enabled').checked = stl.primary_enabled ?? true;
+        }
+        if (document.getElementById('smart-target-secondary-enabled')) {
+            document.getElementById('smart-target-secondary-enabled').checked = stl.secondary_enabled ?? false;
+        }
+        if (document.getElementById('smart-target-strategy')) {
+            document.getElementById('smart-target-strategy').value = stl.strategy || 'auto';
+        }
+        if (document.getElementById('smart-target-window-size')) {
+            document.getElementById('smart-target-window-size').value = stl.window_size ?? 10;
+        }
+        if (document.getElementById('smart-target-exclude-self')) {
+            document.getElementById('smart-target-exclude-self').checked = stl.exclude_self_language ?? true;
+        }
+        if (document.getElementById('smart-target-fallback')) {
+            document.getElementById('smart-target-fallback').value = stl.fallback_language || 'en';
+        }
+        if (document.getElementById('smart-target-min-samples')) {
+            document.getElementById('smart-target-min-samples').value = stl.min_samples ?? 3;
+        }
+        updateSmartTargetVisibility();
+    }
+
+    if (config.smart_target_language) {
+        const stl = config.smart_target_language;
+        if (document.getElementById('smart-target-primary-enabled')) {
+            document.getElementById('smart-target-primary-enabled').checked = stl.primary_enabled ?? true;
+        }
+        if (document.getElementById('smart-target-secondary-enabled')) {
+            document.getElementById('smart-target-secondary-enabled').checked = stl.secondary_enabled ?? false;
+        }
+        if (document.getElementById('smart-target-strategy')) {
+            document.getElementById('smart-target-strategy').value = stl.strategy || 'auto';
+        }
+        if (document.getElementById('smart-target-window-size')) {
+            document.getElementById('smart-target-window-size').value = stl.window_size ?? 10;
+        }
+        if (document.getElementById('smart-target-exclude-self')) {
+            document.getElementById('smart-target-exclude-self').checked = stl.exclude_self_language ?? true;
+        }
+        if (document.getElementById('smart-target-fallback')) {
+            document.getElementById('smart-target-fallback').value = stl.fallback_language || 'en';
+        }
+        if (document.getElementById('smart-target-min-samples')) {
+            document.getElementById('smart-target-min-samples').value = stl.min_samples ?? 3;
+        }
+        updateSmartTargetVisibility();
+    }
 }
 
 /**
@@ -2358,6 +2410,15 @@ function saveConfigToLocalStorage() {
                     document.getElementById('bypass-osc-udp-port-check')?.checked === true,
                 send_error_messages:
                     document.getElementById('osc-send-error-messages')?.checked === true,
+            },
+            smart_target_language: {
+                primary_enabled: document.getElementById('smart-target-primary-enabled')?.checked ?? true,
+                secondary_enabled: document.getElementById('smart-target-secondary-enabled')?.checked ?? false,
+                strategy: document.getElementById('smart-target-strategy')?.value || 'auto',
+                window_size: parseInt(document.getElementById('smart-target-window-size')?.value || '10'),
+                exclude_self_language: document.getElementById('smart-target-exclude-self')?.checked ?? true,
+                fallback_language: document.getElementById('smart-target-fallback')?.value || 'en',
+                min_samples: parseInt(document.getElementById('smart-target-min-samples')?.value || '3'),
             },
             local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
         };
@@ -2554,6 +2615,15 @@ async function saveConfig(autoSave = false) {
             },
             language_detector: {
                 type: document.getElementById('language-detector').value,
+            },
+            smart_target_language: {
+                primary_enabled: document.getElementById('smart-target-primary-enabled')?.checked ?? true,
+                secondary_enabled: document.getElementById('smart-target-secondary-enabled')?.checked ?? false,
+                strategy: document.getElementById('smart-target-strategy')?.value || 'auto',
+                window_size: parseInt(document.getElementById('smart-target-window-size')?.value || '10'),
+                exclude_self_language: document.getElementById('smart-target-exclude-self')?.checked ?? true,
+                fallback_language: document.getElementById('smart-target-fallback')?.value || 'en',
+                min_samples: parseInt(document.getElementById('smart-target-min-samples')?.value || '3'),
             },
             panel: {
                 width: getNormalizedPanelWidth(),
@@ -3215,6 +3285,7 @@ async function updateIpcStatus() {
         const textSpan = document.getElementById('ipc-status-text');
         const dot = document.getElementById('ipc-status-dot');
         const container = document.getElementById('ipc-status-indicator');
+        const smartSection = document.getElementById('smart-target-language-section');
         
         if (!textSpan || !dot || !container) return;
         
@@ -3226,10 +3297,35 @@ async function updateIpcStatus() {
                 textSpan.textContent = '已连接';
             }
             dot.style.backgroundColor = '#4caf50';
+            if (smartSection) {
+                smartSection.style.display = 'block';
+            }
         } else {
             container.style.display = 'none';
+            if (smartSection) {
+                smartSection.style.display = 'none';
+            }
         }
     } catch (error) {
         console.error('更新 IPC 状态失败:', error);
     }
 }
+
+function updateSmartTargetVisibility() {
+    const primaryEnabled = document.getElementById('smart-target-primary-enabled')?.checked ?? true;
+    const secondaryEnabled = document.getElementById('smart-target-secondary-enabled')?.checked ?? false;
+    const details = document.getElementById('smart-target-settings');
+    if (!details) return;
+
+    if (primaryEnabled || secondaryEnabled) {
+        details.style.display = 'block';
+    } else {
+        details.style.display = 'none';
+    }
+}
+
+document.addEventListener('change', (e) => {
+    if (e.target.id === 'smart-target-primary-enabled' || e.target.id === 'smart-target-secondary-enabled') {
+        updateSmartTargetVisibility();
+    }
+});

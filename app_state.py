@@ -57,6 +57,9 @@ class AppState:
         self.deepl_fallback_translator = None
         self.secondary_deepl_fallback_translation_api = None
         self.secondary_deepl_fallback_translator = None
+        self.secondary_target_language: Optional[str] = None
+        self.translation_api_type: Optional[str] = None
+        self.target_language: Optional[str] = None
 
         # ---- 语言检测 ----
         self.language_detector = None

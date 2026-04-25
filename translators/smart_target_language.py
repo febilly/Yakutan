@@ -13,6 +13,10 @@ class SmartTargetLanguageSelector:
         self.config = config_module
         self._history: deque[str] = deque()
 
+    def clear_history(self) -> None:
+        """清空历史记录。"""
+        self._history.clear()
+
     def record_language(self, detected_language: str) -> None:
         """记录一条 foreign speech 的语言。"""
         if not detected_language:

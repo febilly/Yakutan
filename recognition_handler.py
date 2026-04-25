@@ -124,15 +124,30 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
     @staticmethod
     def _resolve_smart_targets(self_language: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-        """若启用了智能目标语言，返回 (primary, secondary)；否则返回 (None, None)。"""
-        if not getattr(config, 'SMART_TARGET_LANGUAGE_ENABLED', False):
+        primary = None
+        secondary = None
+        
+        primary_enabled = getattr(config, 'SMART_TARGET_PRIMARY_ENABLED', False)
+        secondary_enabled = getattr(config, 'SMART_TARGET_SECONDARY_ENABLED', False)
+        
+        if not primary_enabled and not secondary_enabled:
             return None, None
+        
         from translators.smart_target_language import get_smart_selector
-        smart_targets = get_smart_selector().select_target_language(self_language)
-        if not smart_targets:
+        selector = get_smart_selector()
+        min_samples = getattr(config, 'SMART_TARGET_LANGUAGE_MIN_SAMPLES', 1)
+        
+        if len(selector._history) < min_samples:
             return None, None
-        primary = smart_targets[0]
-        secondary = smart_targets[1] if len(smart_targets) > 1 else None
+        
+        smart_targets = selector.select_target_language(self_language)
+        
+        if primary_enabled and smart_targets:
+            primary = smart_targets[0]
+        
+        if secondary_enabled and len(smart_targets) > 1:
+            secondary = smart_targets[1]
+        
         return primary, secondary
 
     @staticmethod
@@ -415,10 +430,11 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     ),
                 )
 
-            if use_secondary_output and secondary_should_translate:
+            secondary_translator = s.secondary_translator
+            if use_secondary_output and secondary_should_translate and secondary_translator is not None:
                 secondary_future = loop.run_in_executor(
                     s.executor,
-                    lambda: s.secondary_translator.translate(
+                    lambda: secondary_translator.translate(
                         segment,
                         source_language='auto',
                         target_language=actual_secondary_target,
@@ -614,12 +630,14 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         False,
                     ),
                 )
-            if use_secondary_output and secondary_should_translate:
+            secondary_translator = s.secondary_translator
+            secondary_deepl_fallback = s.secondary_deepl_fallback_translator
+            if use_secondary_output and secondary_should_translate and secondary_translator is not None:
                 secondary_future = loop.run_in_executor(
                     s.executor,
                     lambda: translate_with_backend(
-                        s.secondary_translator,
-                        s.secondary_deepl_fallback_translator,
+                        secondary_translator,
+                        secondary_deepl_fallback,
                         text,
                         actual_secondary_target,
                         previous_translation_secondary,
@@ -891,8 +909,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 ):
                     use_deepl_final = True
 
+                secondary_translator = s.secondary_translator
+                secondary_deepl_fallback = s.secondary_deepl_fallback_translator
                 use_secondary_output = (
-                    actual_secondary_target is not None and s.secondary_translator is not None
+                    actual_secondary_target is not None and secondary_translator is not None
                 )
                 secondary_should_translate = (
                     use_secondary_output
@@ -960,10 +980,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             source_lang,
                             False,
                         )
-                    if secondary_should_translate:
+                    if secondary_should_translate and secondary_translator is not None:
                         secondary_translated_text = translate_with_backend(
-                            s.secondary_translator,
-                            s.secondary_deepl_fallback_translator,
+                            secondary_translator,
+                            secondary_deepl_fallback,
                             text,
                             actual_secondary_target,
                             previous_translation_secondary,
@@ -1001,7 +1021,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     and secondary_translated_text
                     and not str(secondary_translated_text).startswith("[ERROR]")
                 ):
-                    s.secondary_translator.append_history_entry(
+                    secondary_translator.append_history_entry(
                         text, secondary_translated_text, actual_secondary_target,
                     )
 
