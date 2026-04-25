@@ -871,6 +871,7 @@ def get_smart_target_status():
             'min_samples': min_samples,
             'active': active,
             'active_languages': active_languages,
+            'recent_languages': list(selector._history),
         })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500

@@ -241,6 +241,8 @@ const translations = {
         'option.strategy.weighted': '权重衰减 (Weighted)',
         'label.smartTargetWindowSize': '采样窗口大小',
         'label.smartTargetMinSamples': '最小采样数',
+        'label.recentLanguages': '最近检测到的语言',
+        'hint.noRecentLanguages': '暂无数据',
 
         'label.dependencies': '依赖',
         'label.device': '设备',
@@ -561,6 +563,8 @@ const translations = {
         'option.strategy.weighted': 'Weighted Decay',
         'label.smartTargetWindowSize': 'Sampling window size',
         'label.smartTargetMinSamples': 'Minimum samples',
+        'label.recentLanguages': 'Recently detected languages',
+        'hint.noRecentLanguages': 'No data yet',
 
         'label.dependencies': 'Dependencies',
         'label.device': 'Device',
@@ -873,6 +877,8 @@ const translations = {
         'option.strategy.weighted': '重み減衰',
         'label.smartTargetWindowSize': 'サンプリングウィンドウサイズ',
         'label.smartTargetMinSamples': '最小サンプル数',
+        'label.recentLanguages': '最近検出された言語',
+        'hint.noRecentLanguages': 'データなし',
 
         'label.dependencies': '依存関係',
         'label.device': 'デバイス',
@@ -1181,6 +1187,8 @@ const translations = {
         'option.strategy.weighted': '가중치 감쇠',
         'label.smartTargetWindowSize': '샘플링 윈도우 크기',
         'label.smartTargetMinSamples': '최소 샘플 수',
+        'label.recentLanguages': '최근 감지된 언어',
+        'hint.noRecentLanguages': '데이터 없음',
 
         'label.dependencies': '의존성',
         'label.device': '장치',

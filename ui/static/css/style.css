@@ -744,6 +744,7 @@ input:checked + .slider:before {
     align-items: center;
     cursor: pointer;
     user-select: none;
+    padding: 8px 0;
 }
 
 .collapsible-header:hover h2 {
@@ -759,6 +760,10 @@ input:checked + .slider:before {
     transform: rotate(-90deg);
 }
 
+.collapsible-header h3 {
+    margin: 0;
+}
+
 .collapsible-content {
     max-height: none;
     overflow: visible;
@@ -769,6 +774,10 @@ input:checked + .slider:before {
     max-height: 0;
     overflow: hidden;
     transition: max-height 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.collapsible-content:not(.collapsed) {
+    padding-top: 10px;
 }
 
 .template-button-row {

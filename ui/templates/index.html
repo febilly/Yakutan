@@ -25,7 +25,6 @@
                     <span id="ipc-status-text">已连接</span>
                     <div class="status-dot" id="ipc-status-dot" style="background-color: #4caf50;"></div>
                 </div>
-            </div>
         </header>
 
         <main>
@@ -144,7 +143,7 @@
                                 <h3 data-i18n="section.smartTargetLanguage">智能目标语言</h3>
                                 <span class="collapse-icon collapsed" id="smart-target-settings-icon">▶</span>
                             </div>
-                            <div class="collapsible-content collapsed" id="smart-target-settings" style="padding-top: 10px;">
+                            <div class="collapsible-content collapsed" id="smart-target-settings">
                                 <div class="switch-row">
                                     <div class="form-group">
                                         <label class="switch-label">
@@ -195,6 +194,13 @@
                                     <div class="form-group">
                                         <label for="smart-target-min-samples" data-i18n="label.smartTargetMinSamples">最小采样数</label>
                                         <input type="number" id="smart-target-min-samples" class="form-control" min="1" max="50" value="3" onchange="onSettingChange()">
+                                    </div>
+                                </div>
+
+                                <div class="form-group" style="margin-top: 10px;">
+                                    <label data-i18n="label.recentLanguages">最近检测到的语言</label>
+                                    <div id="smart-target-recent-langs" style="display: flex; gap: 6px; flex-wrap: wrap; min-height: 24px; align-items: center;">
+                                        <span style="color: #888; font-size: 12px;" data-i18n="hint.noRecentLanguages">暂无数据</span>
                                     </div>
                                 </div>
                             </div>

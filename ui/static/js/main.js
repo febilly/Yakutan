@@ -3291,6 +3291,22 @@ async function updateIpcStatus() {
             dot.style.backgroundColor = '#4caf50';
             if (smartSection) {
                 smartSection.style.display = 'block';
+                
+                fetch(`${API_BASE}/smart-target-status`)
+                    .then(r => r.json())
+                    .then(status => {
+                        const recentEl = document.getElementById('smart-target-recent-langs');
+                        if (!recentEl) return;
+                        if (status.recent_languages && status.recent_languages.length > 0) {
+                            recentEl.innerHTML = status.recent_languages.map(lang => 
+                                `<span style="background: #e8f0fe; color: #1a73e8; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500;">${lang}</span>`
+                            ).join('');
+                        } else {
+                            const hintText = (typeof t === 'function') ? (t('hint.noRecentLanguages') || '暂无数据') : '暂无数据';
+                            recentEl.innerHTML = `<span style="color: #888; font-size: 12px;">${hintText}</span>`;
+                        }
+                    })
+                    .catch(() => {});
             }
         } else {
             container.style.display = 'none';
