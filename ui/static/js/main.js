@@ -488,6 +488,13 @@ const LLM_TEMPLATE_CONFIGS = {
         providerLabelKey: 'btn.llmTemplateDashscopeQwenPlus',
         copyDashscopeKey: true,
     },
+    'deepseek-v4-flash': {
+        baseUrl: 'https://api.deepseek.com',
+        model: 'deepseek-v4-flash',
+        extraBody: '{"thinking": {"type": "disabled"}}',
+        parallelFastestMode: 'off',
+        providerLabelKey: 'btn.llmTemplateDeepSeekV4Flash',
+    },
     openrouter: {
         baseUrl: 'https://openrouter.ai/api/v1',
         parallelFastestMode: 'off',
@@ -944,6 +951,8 @@ function resolveLLMTemplateKeySource(templateName) {
             : 'https://bailian.console.aliyun.com/cn-beijing/?tab=model#/api-key';
     } else if (templateName === 'openrouter') {
         url = 'https://openrouter.ai/settings/keys';
+    } else if (templateName === 'deepseek-v4-flash') {
+        url = 'https://platform.deepseek.com/api_keys';
     } else if (templateName === 'longcat') {
         url = 'https://longcat.chat/platform/api_keys';
     } else if (templateName === 'mercury2') {
