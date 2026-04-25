@@ -744,7 +744,8 @@ input:checked + .slider:before {
     align-items: center;
     cursor: pointer;
     user-select: none;
-    padding: 8px 0;
+    padding: 6px 0;
+    min-height: 40px;
 }
 
 .collapsible-header:hover h2 {
@@ -752,7 +753,14 @@ input:checked + .slider:before {
 }
 
 .collapse-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
     font-size: 18px;
+    line-height: 1;
     transition: transform 0.18s ease-out;
 }
 
@@ -760,8 +768,20 @@ input:checked + .slider:before {
     transform: rotate(-90deg);
 }
 
+.collapsible-header h2,
 .collapsible-header h3 {
     margin: 0;
+    line-height: 1.25;
+}
+
+.card.collapsible-container-collapsed {
+    padding-top: 12px;
+    padding-bottom: 12px;
+}
+
+.subsection.collapsible-container-collapsed {
+    padding-top: 10px;
+    padding-bottom: 10px;
 }
 
 .collapsible-content {

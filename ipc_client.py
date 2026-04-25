@@ -141,6 +141,11 @@ class IPCClient:
 
     async def _on_disconnect(self):
         await self._close_connection()
+        try:
+            get_smart_selector().clear_history()
+            logger.info("[IPC] Cleared smart target language history on disconnect")
+        except Exception:
+            pass
         if self._mode != "standalone":
             async with self._lock:
                 self._mode = "waiting"
@@ -207,3 +212,7 @@ class IPCClient:
                     pass
 
         await self._close_connection()
+        try:
+            get_smart_selector().clear_history()
+        except Exception:
+            pass

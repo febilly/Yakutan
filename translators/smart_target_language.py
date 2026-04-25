@@ -105,7 +105,7 @@ class SmartTargetLanguageSelector:
         if manual_secondary is not None:
             return [primary, manual_secondary]
 
-        secondary = selected[1] if len(selected) > 1 else fallback
+        secondary = selected[1] if len(selected) > 1 else None
         return [primary, secondary]
 
 

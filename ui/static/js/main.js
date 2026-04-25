@@ -1464,6 +1464,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     loadPanelFloatingModeSetting();
     loadQuickLanguageSettings();
     loadAPIKeys();
+    initializeCollapsibleStates();
     applyStoredExtraBodyForActiveLLMTemplate();
     setupSecretVisibilityToggles();
     applyAsrBackendLocks();
@@ -1691,8 +1692,8 @@ function loadAPIKeys() {
         const apiKeysIcon = document.getElementById('api-keys-icon');
         if (apiKeysSection && !apiKeysSection.classList.contains('collapsed')) {
             apiKeysSection.classList.add('collapsed');
-            apiKeysIcon.classList.add('collapsed');
-            apiKeysIcon.textContent = '▶';
+            updateCollapsibleIcon(apiKeysIcon, true);
+            syncCollapsibleContainerState(apiKeysSection);
         }
     }
 
@@ -1964,6 +1965,29 @@ function loadConfigFromLocalStorage() {
                 oscPortEl.value = String(p);
             }
 
+            if (config.smart_target_language) {
+                const stl = config.smart_target_language;
+                if (document.getElementById('smart-target-primary-enabled')) {
+                    document.getElementById('smart-target-primary-enabled').checked = stl.primary_enabled ?? true;
+                }
+                if (document.getElementById('smart-target-secondary-enabled')) {
+                    document.getElementById('smart-target-secondary-enabled').checked = stl.secondary_enabled ?? false;
+                }
+                if (document.getElementById('smart-target-strategy')) {
+                    document.getElementById('smart-target-strategy').value = stl.strategy || 'auto';
+                }
+                if (document.getElementById('smart-target-window-size')) {
+                    document.getElementById('smart-target-window-size').value = stl.window_size ?? 5;
+                }
+                if (document.getElementById('smart-target-exclude-self')) {
+                    document.getElementById('smart-target-exclude-self').checked = stl.exclude_self_language ?? true;
+                }
+                if (document.getElementById('smart-target-min-samples')) {
+                    document.getElementById('smart-target-min-samples').value = stl.min_samples ?? 3;
+                }
+                updateSmartTargetVisibility();
+            }
+
             console.log('✓ 已从浏览器加载配置');
         } else {
             // 如果没有保存的配置，使用前端默认值（由页面初始化处再拉取服务器并 / 或对账）
@@ -2218,29 +2242,6 @@ function applyServerConfigPayload(config) {
     }
     if (isLocalAsrUiEnabled()) {
         applyLocalAsrConfig(config.local_asr || {});
-    }
-
-    if (config.smart_target_language) {
-        const stl = config.smart_target_language;
-        if (document.getElementById('smart-target-primary-enabled')) {
-            document.getElementById('smart-target-primary-enabled').checked = stl.primary_enabled ?? true;
-        }
-        if (document.getElementById('smart-target-secondary-enabled')) {
-            document.getElementById('smart-target-secondary-enabled').checked = stl.secondary_enabled ?? false;
-        }
-        if (document.getElementById('smart-target-strategy')) {
-            document.getElementById('smart-target-strategy').value = stl.strategy || 'auto';
-        }
-        if (document.getElementById('smart-target-window-size')) {
-            document.getElementById('smart-target-window-size').value = stl.window_size ?? 5;
-        }
-        if (document.getElementById('smart-target-exclude-self')) {
-            document.getElementById('smart-target-exclude-self').checked = stl.exclude_self_language ?? true;
-        }
-        if (document.getElementById('smart-target-min-samples')) {
-            document.getElementById('smart-target-min-samples').value = stl.min_samples ?? 3;
-        }
-        updateSmartTargetVisibility();
     }
 
     if (config.smart_target_language) {
@@ -3177,6 +3178,29 @@ function updateCollapsibleIcon(icon, collapsed) {
     icon.textContent = collapsed ? '▶' : '▼';
 }
 
+function syncCollapsibleContainerState(content) {
+    if (!content) return;
+
+    const container = content.parentElement;
+    if (!container) return;
+
+    container.classList.toggle(
+        'collapsible-container-collapsed',
+        content.classList.contains('collapsed'),
+    );
+}
+
+function initializeCollapsibleStates() {
+    document.querySelectorAll('.collapsible-content').forEach((content) => {
+        bindCollapsibleTransitionCleanup(content);
+        syncCollapsibleContainerState(content);
+
+        if (!content.id) return;
+        const icon = document.getElementById(`${content.id}-icon`);
+        updateCollapsibleIcon(icon, content.classList.contains('collapsed'));
+    });
+}
+
 function bindCollapsibleTransitionCleanup(content) {
     if (!content || content.dataset.collapseTransitionBound === 'true') {
         return;
@@ -3212,6 +3236,7 @@ function toggleCollapsible(id) {
         content.style.overflow = 'hidden';
         content.classList.remove('collapsed');
         updateCollapsibleIcon(icon, false);
+        syncCollapsibleContainerState(content);
 
         content.style.maxHeight = '0px';
         void content.offsetHeight;
@@ -3226,6 +3251,7 @@ function toggleCollapsible(id) {
 
     content.classList.add('collapsed');
     updateCollapsibleIcon(icon, true);
+    syncCollapsibleContainerState(content);
     content.style.maxHeight = '0px';
 }
 

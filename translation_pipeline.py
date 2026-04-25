@@ -105,6 +105,51 @@ def update_secondary_translator(state):
     )
 
 
+def ensure_secondary_translator(state, target_language: Optional[str]) -> bool:
+    if not target_language:
+        if state.secondary_translator is not None:
+            state.secondary_translation_api = None
+            state.secondary_translator = None
+            state.secondary_deepl_fallback_translation_api = None
+            state.secondary_deepl_fallback_translator = None
+            state.secondary_target_language = None
+        return False
+
+    if (
+        state.secondary_translator is not None
+        and state.secondary_target_language == target_language
+    ):
+        return True
+
+    state.secondary_translation_api = None
+    state.secondary_translator = None
+    state.secondary_deepl_fallback_translation_api = None
+    state.secondary_deepl_fallback_translator = None
+
+    TranslationAPIClass = _get_translation_api_class(config.TRANSLATION_API_TYPE)
+    state.secondary_translation_api, state.secondary_translator = (
+        _build_context_translator(TranslationAPIClass, target_language)
+    )
+    if is_streaming_deepl_hybrid_mode():
+        try:
+            (
+                state.secondary_deepl_fallback_translation_api,
+                state.secondary_deepl_fallback_translator,
+            ) = _build_context_translator(DeepLAPI, target_language)
+        except Exception as e:
+            logger.warning(
+                "[Translation] 混合模式下 DeepL 第二翻译器动态初始化失败，"
+                "将回退 LLM 终译: %s",
+                e,
+            )
+
+    state.secondary_target_language = target_language
+    logger.info(
+        "[Translation] 第二翻译器动态创建: %s", target_language
+    )
+    return True
+
+
 def reinitialize_translator(state):
     """根据当前配置动态（重）初始化翻译器实例。
 

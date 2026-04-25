@@ -26,6 +26,7 @@ from translation_pipeline import (
     is_streaming_deepl_hybrid_mode,
     translate_with_backend,
     reverse_translation,
+    ensure_secondary_translator,
 )
 
 logger = logging.getLogger(__name__)
@@ -409,6 +410,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 actual_secondary_target = resolve_output_target_language(
                     detected_lang, requested_secondary_target,
                 )
+            ensure_secondary_translator(s, actual_secondary_target)
             use_secondary_output = (
                 actual_secondary_target is not None and s.secondary_translator is not None
             )
@@ -904,6 +906,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     actual_secondary_target = resolve_output_target_language(
                         source_lang, requested_secondary_target,
                     )
+                ensure_secondary_translator(s, actual_secondary_target)
 
                 print(f'原文：{text} [{source_lang_info["language"]}]')
                 if not primary_enabled and actual_target != config.TARGET_LANGUAGE:
