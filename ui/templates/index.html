@@ -165,42 +165,44 @@
                                     </div>
                                 </div>
 
-                                <div class="switch-row">
-                                    <div class="form-group">
-                                        <label class="switch-label">
-                                            <span data-i18n="label.excludeSelfLanguage">排除自身语言</span>
-                                            <label class="switch">
-                                                <input type="checkbox" id="smart-target-exclude-self" onchange="onSettingChange()">
-                                                <span class="slider"></span>
+                                <div id="smart-target-advanced-settings">
+                                    <div class="switch-row">
+                                        <div class="form-group">
+                                            <label class="switch-label">
+                                                <span data-i18n="label.excludeSelfLanguage">排除自身语言</span>
+                                                <label class="switch">
+                                                    <input type="checkbox" id="smart-target-exclude-self" onchange="onSettingChange()">
+                                                    <span class="slider"></span>
+                                                </label>
                                             </label>
-                                        </label>
-                                        <small class="form-text" data-i18n="hint.excludeSelfLanguage">自动推断时不选择语音识别检测到的源语言</small>
+                                            <small class="form-text" data-i18n="hint.excludeSelfLanguage">自动推断时不选择语音识别检测到的源语言</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="smart-target-strategy" data-i18n="label.smartTargetStrategy">推断策略</label>
+                                            <select id="smart-target-strategy" class="form-control" onchange="onSettingChange()">
+                                                <option value="most_common" data-i18n="option.strategy.mostCommon">频率最高 (Most Common)</option>
+                                                <option value="latest" data-i18n="option.strategy.latest">最新语言 (Latest)</option>
+                                                <option value="weighted" data-i18n="option.strategy.weighted">权重衰减 (Weighted)</option>
+                                            </select>
+                                        </div>
                                     </div>
-                                    <div class="form-group">
-                                        <label for="smart-target-strategy" data-i18n="label.smartTargetStrategy">推断策略</label>
-                                        <select id="smart-target-strategy" class="form-control" onchange="onSettingChange()">
-                                            <option value="most_common" data-i18n="option.strategy.mostCommon">频率最高 (Most Common)</option>
-                                            <option value="latest" data-i18n="option.strategy.latest">最新语言 (Latest)</option>
-                                            <option value="weighted" data-i18n="option.strategy.weighted">权重衰减 (Weighted)</option>
-                                        </select>
-                                    </div>
-                                </div>
 
-                                <div class="switch-row">
-                                    <div class="form-group">
-                                        <label for="smart-target-window-size" data-i18n="label.smartTargetWindowSize">采样窗口大小</label>
-                                        <input type="number" id="smart-target-window-size" class="form-control" min="1" max="100" value="5" onchange="onSettingChange()">
+                                    <div class="switch-row">
+                                        <div class="form-group">
+                                            <label for="smart-target-window-size" data-i18n="label.smartTargetWindowSize">采样窗口大小</label>
+                                            <input type="number" id="smart-target-window-size" class="form-control" min="1" max="100" value="5" onchange="onSettingChange()">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="smart-target-min-samples" data-i18n="label.smartTargetMinSamples">最小采样数</label>
+                                            <input type="number" id="smart-target-min-samples" class="form-control" min="1" max="50" value="3" onchange="onSettingChange()">
+                                        </div>
                                     </div>
-                                    <div class="form-group">
-                                        <label for="smart-target-min-samples" data-i18n="label.smartTargetMinSamples">最小采样数</label>
-                                        <input type="number" id="smart-target-min-samples" class="form-control" min="1" max="50" value="3" onchange="onSettingChange()">
-                                    </div>
-                                </div>
 
-                                <div class="form-group" style="margin-top: 10px;">
-                                    <label data-i18n="label.recentLanguages">最近检测到的语言</label>
-                                    <div id="smart-target-recent-langs" style="display: flex; gap: 6px; flex-wrap: wrap; min-height: 24px; align-items: center;">
-                                        <span style="color: #888; font-size: 12px;" data-i18n="hint.noRecentLanguages">暂无数据</span>
+                                    <div class="form-group" style="margin-top: 10px;">
+                                        <label data-i18n="label.recentLanguages">最近检测到的语言</label>
+                                        <div id="smart-target-recent-langs" style="display: flex; gap: 6px; flex-wrap: wrap; min-height: 24px; align-items: center;">
+                                            <span style="color: #888; font-size: 12px;" data-i18n="hint.noRecentLanguages">暂无数据</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

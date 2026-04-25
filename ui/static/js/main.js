@@ -3610,12 +3610,16 @@ function updateSmartTargetVisibility() {
     const primaryEnabled = document.getElementById('smart-target-primary-enabled')?.checked ?? true;
     const secondaryEnabled = document.getElementById('smart-target-secondary-enabled')?.checked ?? false;
     const details = document.getElementById('smart-target-settings');
-    if (!details) return;
+    const advanced = document.getElementById('smart-target-advanced-settings');
 
-    if (primaryEnabled || secondaryEnabled) {
-        details.style.display = 'block';
-    } else {
-        details.style.display = 'none';
+    if (details) {
+        details.style.display = '';
+    }
+    if (advanced) {
+        advanced.hidden = !(primaryEnabled || secondaryEnabled);
+    }
+    if (details && !details.classList.contains('collapsed') && details.style.maxHeight !== 'none') {
+        details.style.maxHeight = `${details.scrollHeight}px`;
     }
 }
 
