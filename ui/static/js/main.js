@@ -514,13 +514,6 @@ const LLM_TEMPLATE_CONFIGS = {
         parallelFastestMode: 'off',
         providerLabelKey: 'btn.llmTemplateMercury2',
     },
-    cerebras: {
-        baseUrl: 'https://api.cerebras.ai/v1',
-        model: 'qwen-3-235b-a22b-instruct-2507',
-        extraBody: '',
-        parallelFastestMode: 'off',
-        providerLabelKey: 'btn.llmTemplateCerebras',
-    },
     custom1: {
         baseUrl: '',
         model: '',
@@ -957,8 +950,6 @@ function resolveLLMTemplateKeySource(templateName) {
         url = 'https://longcat.chat/platform/api_keys';
     } else if (templateName === 'mercury2') {
         url = 'https://platform.inceptionlabs.ai/dashboard/api-keys';
-    } else if (templateName === 'cerebras') {
-        url = 'https://cloud.cerebras.ai/platform';
     }
 
     if (!url) return null;
@@ -973,10 +964,9 @@ function updateLLMTemplateKeySourceHint(templateName = activeLLMTemplate) {
     const container = document.getElementById('llm-template-key-source-hint');
     const label = document.getElementById('llm-template-key-source-label');
     const link = document.getElementById('llm-template-key-source-link');
-    const rotationHint = document.getElementById('llm-template-key-rotation-hint');
     const t = window.i18n ? window.i18n.t : (key) => key;
 
-    if (!container || !label || !link || !rotationHint) return;
+    if (!container || !label || !link) return;
 
     const source = resolveLLMTemplateKeySource(templateName);
     if (!source) {
@@ -995,7 +985,6 @@ function updateLLMTemplateKeySourceHint(templateName = activeLLMTemplate) {
     link.textContent = source.url;
     link.title = source.url;
     container.style.display = 'block';
-    rotationHint.style.display = templateName === 'cerebras' ? 'block' : 'none';
 }
 
 function syncLLMTemplateKeySourceHintFromInputs() {
