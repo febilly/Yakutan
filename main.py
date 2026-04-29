@@ -38,10 +38,13 @@ from ipc_client import IPCClient
 
 # ---- 新模块 ----
 from app_state import AppState, get_state, set_state
-from translation_pipeline import (
+from streaming_translation import (
+    config_from_module,
     reinitialize_translator,
     update_secondary_translator,
-    _is_primary_translator_config_changed,
+)
+from streaming_translation.pipeline import (
+    _is_primary_config_changed as _is_primary_translator_config_changed,
 )
 from audio_capture import init_audio_stream, close_audio_stream, audio_capture_task
 from recognition_handler import (
@@ -109,10 +112,11 @@ def update_subtitles(original: str, translated: str, ongoing: bool, reverse_tran
 def reinitialize_translator_compat():
     state = get_state()
     if state:
-        if _is_primary_translator_config_changed(state):
-            reinitialize_translator(state)
+        cfg = config_from_module(config)
+        if _is_primary_translator_config_changed(state, cfg):
+            reinitialize_translator(state, cfg)
         else:
-            update_secondary_translator(state)
+            update_secondary_translator(state, cfg)
         loop = state.main_loop
         if loop is not None and loop.is_running():
             loop.create_task(osc_manager.apply_runtime_config(app_name="Yakutan"))
@@ -288,7 +292,8 @@ async def main(
     state.language_detector = _create_language_detector()
 
     # 初始化翻译器
-    reinitialize_translator(state)
+    cfg = config_from_module(config)
+    reinitialize_translator(state, cfg)
 
     # 初始化热词（在线：qwen 语料 / dashscope 热词表；本地：Qwen3-ASR 走与在线 Qwen 相同的语料注入）
     if config.ENABLE_HOT_WORDS and backend in {'qwen', 'dashscope', 'local'}:

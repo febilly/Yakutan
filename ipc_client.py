@@ -14,7 +14,7 @@ from shared.vrchat_bridge import (
     connect_bridge_client,
     get_discovery_path,
 )
-from translators.smart_target_language import get_smart_selector
+from app_state import get_smart_selector
 
 logger = logging.getLogger(__name__)
 

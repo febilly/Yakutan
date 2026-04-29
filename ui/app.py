@@ -859,7 +859,7 @@ def set_secondary_target_language():
 def get_smart_target_status():
     """获取智能目标语言选择器状态"""
     try:
-        from translators.smart_target_language import get_smart_selector
+        from app_state import get_smart_selector
         selector = get_smart_selector()
         enabled_primary = bool(getattr(config, 'SMART_TARGET_PRIMARY_ENABLED', False))
         enabled_secondary = bool(getattr(config, 'SMART_TARGET_SECONDARY_ENABLED', False))
@@ -884,7 +884,7 @@ def get_smart_target_status():
 def reset_smart_target():
     """重置智能目标语言选择器历史记录"""
     try:
-        from translators.smart_target_language import get_smart_selector
+        from app_state import get_smart_selector
         get_smart_selector().clear_history()
         return jsonify({'success': True})
     except Exception as e:

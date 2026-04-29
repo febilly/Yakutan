@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "streaming-translation"
+version = "0.1.0"
+description = "Streaming translation library with context-aware, multi-backend support"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+deepl = ["deepl"]
+google = ["googletrans>=4.0.0"]
+llm = ["openai>=2.8.0"]
+all = [
+    "deepl",
+    "googletrans>=4.0.0",
+    "openai>=2.8.0",
+    "aiohttp>=3.13.0",
+]

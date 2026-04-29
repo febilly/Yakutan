@@ -54,17 +54,12 @@ hiddenimports = [
     'fancify_text',
     'panel_app',
     'webview',
-    'translators.translation_apis.google_web_api',
-    'translators.translation_apis.google_dictionary_api',
-    'translators.translation_apis.openrouter_api',
-    'translators.translation_apis.deepl_api',
-    'translators.translation_apis.qwen_mt_api',
     'speech_recognizers.local_speech_recognizer',
     'local_asr',
 ]
 
 hiddenimports += collect_submodules('webview.platforms')
-hiddenimports += collect_submodules('translators.translation_apis')
+hiddenimports += collect_submodules('streaming_translation')
 hiddenimports += collect_submodules('local_asr')
 hiddenimports += collect_submodules('gguf')
 

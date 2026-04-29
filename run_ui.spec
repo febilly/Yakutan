@@ -53,18 +53,12 @@ hiddenimports = [
     'fancify_text',
     'panel_app',
     'webview',
-    'translators.translation_apis.google_web_api',
-    'translators.translation_apis.google_dictionary_api',
-    'translators.translation_apis.openrouter_api',
-    'translators.translation_apis.deepl_api',
-    'translators.translation_apis.qwen_mt_api',
 ]
 
 # pywebview 在 Windows 下会动态加载平台后端，PyInstaller 需显式收集。
 hiddenimports += collect_submodules('webview.platforms')
-# 翻译后端通过 importlib 动态加载，需显式收集整个子包，否则单文件 exe
-# 运行时会出现 No module named 'translators.translation_apis.xxx'。
-hiddenimports += collect_submodules('translators.translation_apis')
+# streaming_translation 翻译库
+hiddenimports += collect_submodules('streaming_translation')
 
 a = Analysis(
     ['run_ui.py'],  # Web UI入口文件

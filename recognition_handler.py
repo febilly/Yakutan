@@ -22,11 +22,12 @@ from text_processor import (
     build_streaming_output_line,
     build_dual_output_display,
 )
-from translation_pipeline import (
-    is_streaming_deepl_hybrid_mode,
-    translate_with_backend,
-    reverse_translation,
+from streaming_translation import (
+    config_from_module,
     ensure_secondary_translator,
+    is_streaming_deepl_hybrid_mode,
+    reverse_translation,
+    translate_with_backend,
 )
 
 logger = logging.getLogger(__name__)
@@ -131,7 +132,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         if not primary_enabled and not secondary_enabled:
             return None, None
 
-        from translators.smart_target_language import get_smart_selector
+        from app_state import get_smart_selector
         selector = get_smart_selector()
         min_samples = getattr(config, 'SMART_TARGET_LANGUAGE_MIN_SAMPLES', 1)
 
@@ -410,7 +411,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 actual_secondary_target = resolve_output_target_language(
                     detected_lang, requested_secondary_target,
                 )
-            ensure_secondary_translator(s, actual_secondary_target)
+            ensure_secondary_translator(s, actual_secondary_target, config_from_module(config))
             use_secondary_output = (
                 actual_secondary_target is not None and s.secondary_translator is not None
             )
@@ -639,7 +640,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         use_deepl_final,
                         previous_source_segment,
                         source_lang,
-                        False,
+                        source_language=config.SOURCE_LANGUAGE,
+                        context_prefix=config.CONTEXT_PREFIX,
+                        record_history=False,
                     ),
                 )
             secondary_translator = s.secondary_translator
@@ -656,7 +659,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         use_deepl_final,
                         previous_source_segment,
                         source_lang,
-                        False,
+                        source_language=config.SOURCE_LANGUAGE,
+                        context_prefix=config.CONTEXT_PREFIX,
+                        record_history=False,
                     ),
                 )
 
@@ -906,7 +911,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     actual_secondary_target = resolve_output_target_language(
                         source_lang, requested_secondary_target,
                     )
-                ensure_secondary_translator(s, actual_secondary_target)
+                ensure_secondary_translator(s, actual_secondary_target, config_from_module(config))
 
                 print(f'原文：{text} [{source_lang_info["language"]}]')
                 if not primary_enabled and actual_target != config.TARGET_LANGUAGE:
@@ -922,7 +927,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 max_updates = max(0, int(getattr(config, 'STREAMING_FINAL_DEEPL_MAX_UPDATES', 2)))
                 if (
                     self._prefer_deepl_on_next_final
-                    and is_streaming_deepl_hybrid_mode()
+                    and is_streaming_deepl_hybrid_mode(config.TRANSLATION_API_TYPE)
                     and self.partial_translation_update_count <= max_updates
                     and s.deepl_fallback_translator is not None
                 ):
@@ -997,7 +1002,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             use_deepl_final,
                             previous_source_segment,
                             source_lang,
-                            False,
+                            source_language=config.SOURCE_LANGUAGE,
+                            context_prefix=config.CONTEXT_PREFIX,
+                            record_history=False,
                         )
                     if secondary_should_translate and secondary_translator is not None:
                         secondary_translated_text = translate_with_backend(
@@ -1009,7 +1016,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             use_deepl_final,
                             previous_source_segment,
                             source_lang,
-                            False,
+                            source_language=config.SOURCE_LANGUAGE,
+                            context_prefix=config.CONTEXT_PREFIX,
+                            record_history=False,
                         )
                 else:
                     if primary_should_translate:
@@ -1022,7 +1031,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             use_deepl_final,
                             previous_source_segment,
                             source_lang,
-                            False,
+                            source_language=config.SOURCE_LANGUAGE,
+                            context_prefix=config.CONTEXT_PREFIX,
+                            record_history=False,
                         )
                     else:
                         translated_text = text

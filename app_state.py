@@ -3,9 +3,12 @@
 """
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Any
+from typing import Optional, TYPE_CHECKING
 
 import config
+
+if TYPE_CHECKING:
+    from streaming_translation import SmartTargetLanguageSelector
 
 
 class AppState:
@@ -111,3 +114,17 @@ def set_state(state: Optional[AppState]):
     """设置当前应用状态（由 main() 在启动时调用）。"""
     global _current_state
     _current_state = state
+
+
+# ---- 智能目标语言选择器单例 ----
+
+_smart_selector_instance: Optional["SmartTargetLanguageSelector"] = None
+
+
+def get_smart_selector() -> "SmartTargetLanguageSelector":
+    """获取全局单例 SmartTargetLanguageSelector。"""
+    global _smart_selector_instance
+    if _smart_selector_instance is None:
+        from streaming_translation import SmartTargetLanguageSelector, config_from_module
+        _smart_selector_instance = SmartTargetLanguageSelector(config_from_module(config))
+    return _smart_selector_instance
