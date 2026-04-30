@@ -415,7 +415,7 @@ def update_config(config_data):
             if 'enable_hot_words' in asr:
                 config.ENABLE_HOT_WORDS = asr['enable_hot_words']
             if 'use_international_endpoint' in asr:
-                config.USE_INTERNATIONAL_ENDPOINT = asr['use_international_endpoint']
+                config.USE_INTERNATIONAL_ENDPOINT = bool(asr['use_international_endpoint'])
         
         # 更新翻译配置
         if 'translation' in config_data:
@@ -1254,6 +1254,7 @@ def get_defaults():
             'vad_silence_duration_ms': 800,
             'keepalive_interval': 30,
             'enable_hot_words': True,
+            'use_international_endpoint': False,
         },
         'translation': {
             'enable_translation': True,

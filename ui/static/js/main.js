@@ -2868,6 +2868,7 @@ async function saveConfig(autoSave = false) {
                 enable_vad: document.getElementById('enable-vad').checked,
                 vad_threshold: parseFloat(document.getElementById('vad-threshold').value),
                 vad_silence_duration_ms: parseInt(document.getElementById('vad-silence-duration').value),
+                use_international_endpoint: document.getElementById('use-international-endpoint').checked,
             },
             language_detector: {
                 type: document.getElementById('language-detector').value,
