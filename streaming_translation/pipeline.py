@@ -120,6 +120,9 @@ def _is_primary_config_changed(state, cfg: TranslationConfig) -> bool:
     return (
         cfg.translation_api_type != getattr(state, "translation_api_type", None)
         or cfg.target_language != getattr(state, "target_language", None)
+        or cfg.llm_formality != getattr(state, "_last_llm_formality", None)
+        or cfg.llm_style != getattr(state, "_last_llm_style", None)
+        or cfg.deepl_formality != getattr(state, "_last_deepl_formality", None)
     )
 
 
@@ -227,6 +230,9 @@ def reinitialize_translator(state, cfg: TranslationConfig) -> None:
     state.translation_api_type = cfg.translation_api_type
     state.target_language = cfg.target_language
     state.secondary_target_language = secondary_target
+    state._last_llm_formality = cfg.llm_formality
+    state._last_llm_style = cfg.llm_style
+    state._last_deepl_formality = cfg.deepl_formality
 
 
 def update_secondary_translator(state, cfg: TranslationConfig) -> None:
