@@ -528,6 +528,10 @@ def update_config(config_data):
             if 'min_samples' in st:
                 config.SMART_TARGET_LANGUAGE_MIN_SAMPLES = int(st['min_samples'])
 
+            from streaming_translation import config_from_module
+            from app_state import get_smart_selector
+            get_smart_selector().reload_config(config_from_module(config))
+
         if 'panel' in config_data:
             panel = config_data['panel']
             if 'width' in panel:

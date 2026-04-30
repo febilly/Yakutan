@@ -330,7 +330,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         async_result_seq: int,
         session_generation: int,
     ) -> bool:
-        if not self.loop or not self.loop.is_running():
+        if not self.loop:
             return False
 
         def _dispatch() -> None:
@@ -354,8 +354,284 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 )
             )
 
-        self.loop.call_soon_threadsafe(_dispatch)
-        return True
+        try:
+            self.loop.call_soon_threadsafe(_dispatch)
+            return True
+        except RuntimeError:
+            return False
+
+    def _dispatch_final_translation_to_executor(
+        self,
+        *,
+        text: str,
+        source_lang: str,
+        normalized_source: str,
+        actual_target: Optional[str],
+        actual_secondary_target: Optional[str],
+        primary_should_translate: bool,
+        secondary_should_translate: bool,
+        use_secondary_output: bool,
+        use_deepl_final: bool,
+        previous_translation: Optional[str],
+        previous_translation_secondary: Optional[str],
+        previous_source_segment: Optional[str],
+        async_result_seq: int,
+        session_generation: int,
+    ) -> None:
+        """Non-blocking: run final translation in executor, post results to event loop.
+
+        Used when ``_schedule_final_translation_task`` fails (event loop unavailable).
+        The ASR callback returns immediately; translation happens in ``state.executor``.
+        Display/OSC updates are posted to the event loop when it becomes available.
+        """
+        s = self.state
+
+        def _translate_and_post() -> None:
+            """Runs in executor thread — translation + history, then post to event loop."""
+            try:
+                if not self._is_session_generation_current(session_generation):
+                    return
+
+                # ── Translation (the slow part) ──────────────────────────
+                secondary_translator = s.secondary_translator
+                secondary_deepl_fallback = s.secondary_deepl_fallback_translator
+
+                if use_secondary_output:
+                    translated_text = text
+                    secondary_translated_text = text
+                    if primary_should_translate:
+                        translated_text = translate_with_backend(
+                            s.translator, s.deepl_fallback_translator,
+                            text, actual_target,
+                            previous_translation, use_deepl_final,
+                            previous_source_segment, source_lang,
+                            source_language=config.SOURCE_LANGUAGE,
+                            context_prefix=config.CONTEXT_PREFIX,
+                            record_history=False,
+                        )
+                    if secondary_should_translate and secondary_translator is not None:
+                        secondary_translated_text = translate_with_backend(
+                            secondary_translator, secondary_deepl_fallback,
+                            text, actual_secondary_target,
+                            previous_translation_secondary, use_deepl_final,
+                            previous_source_segment, source_lang,
+                            source_language=config.SOURCE_LANGUAGE,
+                            context_prefix=config.CONTEXT_PREFIX,
+                            record_history=False,
+                        )
+                else:
+                    secondary_translated_text = None
+                    if primary_should_translate:
+                        translated_text = translate_with_backend(
+                            s.translator, s.deepl_fallback_translator,
+                            text, actual_target,
+                            previous_translation, use_deepl_final,
+                            previous_source_segment, source_lang,
+                            source_language=config.SOURCE_LANGUAGE,
+                            context_prefix=config.CONTEXT_PREFIX,
+                            record_history=False,
+                        )
+                    else:
+                        translated_text = text
+
+                if not self._is_session_generation_current(session_generation):
+                    return
+
+                # ── History recording (thread-safe) ─────────────────────
+                if primary_should_translate and translated_text and not str(
+                    translated_text,
+                ).startswith("[ERROR]"):
+                    s.translator.append_history_entry(
+                        text, translated_text, actual_target,
+                    )
+                if (
+                    use_secondary_output
+                    and secondary_should_translate
+                    and secondary_translated_text
+                    and not str(secondary_translated_text).startswith("[ERROR]")
+                    and secondary_translator is not None
+                ):
+                    secondary_translator.append_history_entry(
+                        text, secondary_translated_text, actual_secondary_target,
+                    )
+
+                # ── Reverse translation ─────────────────────────────────
+                reverse_text = None
+                if primary_should_translate and config.ENABLE_REVERSE_TRANSLATION:
+                    reverse_text = reverse_translation(
+                        s.backwards_translator, translated_text,
+                        actual_target, normalized_source,
+                    )
+
+                # ── Post results to event loop ──────────────────────────
+                loop = self.loop
+                if loop is not None:
+                    try:
+                        loop.call_soon_threadsafe(
+                            lambda: asyncio.ensure_future(
+                                self._apply_direct_translation_results(
+                                    text=text,
+                                    source_lang=source_lang,
+                                    normalized_source=normalized_source,
+                                    translated_text=translated_text,
+                                    secondary_translated_text=secondary_translated_text,
+                                    actual_target=actual_target,
+                                    actual_secondary_target=actual_secondary_target,
+                                    primary_should_translate=primary_should_translate,
+                                    secondary_should_translate=secondary_should_translate,
+                                    use_secondary_output=use_secondary_output,
+                                    reverse_translated_text=reverse_text,
+                                    async_result_seq=async_result_seq,
+                                    session_generation=session_generation,
+                                )
+                            )
+                        )
+                    except RuntimeError:
+                        pass
+            except Exception:
+                logger.exception("Translation executor dispatch failed")
+
+        s.executor.submit(_translate_and_post)
+
+    async def _apply_direct_translation_results(
+        self,
+        *,
+        text: str,
+        source_lang: str,
+        normalized_source: str,
+        translated_text: str,
+        secondary_translated_text: Optional[str],
+        actual_target: Optional[str],
+        actual_secondary_target: Optional[str],
+        primary_should_translate: bool,
+        secondary_should_translate: bool,
+        use_secondary_output: bool,
+        reverse_translated_text: Optional[str],
+        async_result_seq: int,
+        session_generation: int,
+    ) -> None:
+        """Apply translation results on the event loop (display, subtitles, OSC).
+
+        Counterpart to ``_dispatch_final_translation_to_executor``.
+        Runs on the asyncio event loop after translation completes in the executor.
+        """
+        s = self.state
+        try:
+            if not self._is_session_generation_current(session_generation):
+                return
+            if not self._try_adopt_async_result(async_result_seq, session_generation):
+                return
+
+            is_translated = primary_should_translate or secondary_should_translate
+            display_source_text = get_display_text(text, source_lang)
+            display_text = None
+            display_translated_text = None
+            secondary_display_translated_text = None
+
+            if not is_translated:
+                print(f'识别：{display_source_text}')
+                display_text = display_source_text
+                s.update_subtitles(display_source_text, "", False, "")
+            else:
+                print(f'主目标语言：{actual_target}')
+                primary_display_language = (
+                    actual_target if primary_should_translate else source_lang
+                )
+                display_translated_text = get_display_translation_text(
+                    translated_text, primary_display_language,
+                )
+                print(f'主译文：{display_translated_text}')
+
+                if use_secondary_output and actual_secondary_target is not None:
+                    print(f'第二目标语言：{actual_secondary_target}')
+                    secondary_display_language = (
+                        actual_secondary_target if secondary_should_translate else source_lang
+                    )
+                    secondary_display_translated_text = get_display_translation_text(
+                        secondary_translated_text, secondary_display_language,
+                    )
+                    print(f'第二译文：{secondary_display_translated_text}')
+
+                if use_secondary_output and secondary_display_translated_text is not None:
+                    display_text = build_dual_output_display(
+                        display_translated_text,
+                        secondary_display_translated_text,
+                        actual_target,
+                        actual_secondary_target,
+                    )
+                    subtitles_translated = (
+                        f"{display_translated_text}\n"
+                        f"{secondary_display_translated_text}"
+                    )
+                else:
+                    show_tag = primary_should_translate and getattr(
+                        config, 'SHOW_ORIGINAL_AND_LANG_TAG', True,
+                    )
+                    if show_tag:
+                        tag_src = language_code_for_osc_tag(source_lang)
+                        tag_tgt = language_code_for_osc_tag(actual_target)
+                        display_text = (
+                            f"[{tag_src}→{tag_tgt}] "
+                            f"{display_translated_text} ({display_source_text})"
+                        )
+                        osc_text_max_length = config.get_effective_osc_text_max_length()
+                        if (
+                            osc_text_max_length is not None
+                            and len(display_text) > osc_text_max_length
+                        ):
+                            display_text = (
+                                f"[{tag_src}→{tag_tgt}] {display_translated_text}"
+                            )
+                    else:
+                        display_text = str(display_translated_text)
+                    subtitles_translated = str(display_translated_text)
+
+                s.update_subtitles(
+                    display_source_text, subtitles_translated, False, "",
+                )
+
+            if not self._is_async_result_current(async_result_seq, session_generation):
+                return
+
+            osc_text = display_text
+            if is_translated:
+                osc_text = self._filter_error_lines_for_osc(
+                    display_text,
+                    primary_raw_text=translated_text if primary_should_translate else None,
+                    primary_display_text=display_translated_text,
+                    primary_language=(
+                        actual_target if actual_target is not None and primary_should_translate
+                        else source_lang
+                    ),
+                    secondary_raw_text=(
+                        secondary_translated_text
+                        if use_secondary_output and secondary_should_translate
+                        else None
+                    ),
+                    secondary_display_text=secondary_display_translated_text,
+                    secondary_language=(
+                        actual_secondary_target
+                        if use_secondary_output and actual_secondary_target is not None
+                        else None
+                    ),
+                )
+
+            if osc_text:
+                await osc_manager.send_text(osc_text, ongoing=False)
+
+            if (
+                reverse_translated_text is not None
+                and self._is_async_result_current(async_result_seq, session_generation)
+            ):
+                current_original = s.subtitles_state.get("original", "")
+                current_translated = s.subtitles_state.get("translated", "")
+                current_ongoing = s.subtitles_state.get("ongoing", False)
+                s.update_subtitles(
+                    current_original, current_translated,
+                    current_ongoing, str(reverse_translated_text),
+                )
+        except Exception:
+            logger.exception("Apply direct translation results failed")
 
     def on_session_started(self) -> None:
         logger.info('Speech recognizer session opened.')
@@ -970,23 +1246,41 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 async_result_seq = self._next_async_result_seq()
                 self._reset_partial_translation_state()
 
-                if my_final_tid is not None and self._schedule_final_translation_task(
-                    text=text,
-                    source_lang=source_lang,
-                    normalized_source=normalized_source,
-                    actual_target=actual_target,
-                    actual_secondary_target=actual_secondary_target,
-                    primary_should_translate=primary_should_translate,
-                    secondary_should_translate=secondary_should_translate,
-                    use_secondary_output=use_secondary_output,
-                    use_deepl_final=use_deepl_final,
-                    previous_translation=previous_translation,
-                    previous_translation_secondary=previous_translation_secondary,
-                    previous_source_segment=previous_source_segment,
-                    request_id=my_final_tid,
-                    async_result_seq=async_result_seq,
-                    session_generation=session_generation,
-                ):
+                if my_final_tid is not None:
+                    if self._schedule_final_translation_task(
+                        text=text,
+                        source_lang=source_lang,
+                        normalized_source=normalized_source,
+                        actual_target=actual_target,
+                        actual_secondary_target=actual_secondary_target,
+                        primary_should_translate=primary_should_translate,
+                        secondary_should_translate=secondary_should_translate,
+                        use_secondary_output=use_secondary_output,
+                        use_deepl_final=use_deepl_final,
+                        previous_translation=previous_translation,
+                        previous_translation_secondary=previous_translation_secondary,
+                        previous_source_segment=previous_source_segment,
+                        request_id=my_final_tid,
+                        async_result_seq=async_result_seq,
+                        session_generation=session_generation,
+                    ):
+                        return
+                    self._dispatch_final_translation_to_executor(
+                        text=text,
+                        source_lang=source_lang,
+                        normalized_source=normalized_source,
+                        actual_target=actual_target,
+                        actual_secondary_target=actual_secondary_target,
+                        primary_should_translate=primary_should_translate,
+                        secondary_should_translate=secondary_should_translate,
+                        use_secondary_output=use_secondary_output,
+                        use_deepl_final=use_deepl_final,
+                        previous_translation=previous_translation,
+                        previous_translation_secondary=previous_translation_secondary,
+                        previous_source_segment=previous_source_segment,
+                        async_result_seq=async_result_seq,
+                        session_generation=session_generation,
+                    )
                     return
 
                 if use_secondary_output:

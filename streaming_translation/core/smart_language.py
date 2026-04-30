@@ -17,6 +17,18 @@ class SmartTargetLanguageSelector:
         self._config = config
         self._history: deque[str] = deque()
 
+    def reload_config(self, config: TranslationConfig) -> None:
+        """Hot-reload configuration without recreating the selector.
+
+        Call this when the caller's config changes at runtime so the
+        selector picks up new ``smart_target_*`` settings immediately.
+        History is preserved.
+        """
+        self._config = config
+        window_size = self._config.smart_target_window_size
+        if self._history.maxlen != window_size:
+            self._history = deque(self._history, maxlen=window_size)
+
     def clear_history(self) -> None:
         self._history.clear()
 

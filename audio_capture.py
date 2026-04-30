@@ -279,7 +279,7 @@ async def send_audio_frame_async(state, recognizer, data: bytes):
     """异步发送音频帧。"""
     loop = asyncio.get_event_loop()
     try:
-        await loop.run_in_executor(state.executor, recognizer.send_audio_frame, data)
+        await loop.run_in_executor(state.audio_executor, recognizer.send_audio_frame, data)
     except Exception:
         pass
 
