@@ -804,6 +804,12 @@ input:checked + .slider:before {
     line-height: 1.25;
 }
 
+.activated-badge {
+    color: var(--primary-color);
+    font-weight: bold;
+    margin-left: 0.5em;
+}
+
 .card.collapsible-container {
     padding-top: 12px;
 }

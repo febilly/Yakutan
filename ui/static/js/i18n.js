@@ -235,6 +235,7 @@ const translations = {
 
         // 智能目标语言
         'section.smartTargetLanguage': '智能目标语言',
+        'badge.activated': '已激活',
         'label.smartTargetPrimaryEnabled': '主目标语言自动推断',
         'label.smartTargetSecondaryEnabled': '第二目标语言自动推断',
         'label.excludeSelfLanguage': '排除自身语言',
@@ -561,6 +562,7 @@ const translations = {
 
         // Smart Target Language
         'section.smartTargetLanguage': 'Smart Target Language',
+        'badge.activated': 'Activated',
         'label.smartTargetPrimaryEnabled': 'Auto-detect primary target language',
         'label.smartTargetSecondaryEnabled': 'Auto-detect secondary target language',
         'label.excludeSelfLanguage': 'Exclude self language',
@@ -879,6 +881,7 @@ const translations = {
 
         // スマートターゲット言語
         'section.smartTargetLanguage': 'スマートターゲット言語',
+        'badge.activated': '有効',
         'label.smartTargetPrimaryEnabled': '主要ターゲット言語を自動推定',
         'label.smartTargetSecondaryEnabled': '第二ターゲット言語を自動推定',
         'label.excludeSelfLanguage': '自身の言語を除外',
@@ -1193,6 +1196,7 @@ const translations = {
 
         // 스마트 대상 언어
         'section.smartTargetLanguage': '스마트 대상 언어',
+        'badge.activated': '활성화됨',
         'label.smartTargetPrimaryEnabled': '주 대상 언어 자동 추론',
         'label.smartTargetSecondaryEnabled': '두 번째 대상 언어 자동 추론',
         'label.excludeSelfLanguage': '자신의 언어 제외',

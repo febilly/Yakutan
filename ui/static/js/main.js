@@ -3608,12 +3608,13 @@ function updateSmartTargetVisibility() {
     const secondaryEnabled = document.getElementById('smart-target-secondary-enabled')?.checked ?? false;
     const details = document.getElementById('smart-target-settings');
     const advanced = document.getElementById('smart-target-advanced-settings');
+    const badge = document.getElementById('smart-target-activated-badge');
 
     if (details) {
         details.style.display = '';
     }
-    if (advanced) {
-        advanced.hidden = !(primaryEnabled || secondaryEnabled);
+    if (badge) {
+        badge.hidden = !(primaryEnabled || secondaryEnabled);
     }
     if (details && !details.classList.contains('collapsed') && details.style.maxHeight !== 'none') {
         details.style.maxHeight = `${details.scrollHeight}px`;
