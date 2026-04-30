@@ -66,6 +66,41 @@ def _normalize_qwen_language(lang: Optional[str]) -> Optional[str]:
     return None
 
 
+def _to_dashscope_language(source_language: Optional[str]) -> Optional[str]:
+    """将 source_language 转换为 DashScope language_hints 格式。
+    fun-asr-realtime 支持: zh, en, ja。不支持或 auto 返回 None。"""
+    if not source_language:
+        return None
+    s = source_language.strip().lower()
+    if not s or s in ('auto', 'auto-detect'):
+        return None
+    if s in ('zh', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant'):
+        return 'zh'
+    if s in ('en', 'en-us', 'en-gb'):
+        return 'en'
+    if s.startswith('ja'):
+        return 'ja'
+    return None
+
+
+def _to_doubao_language(source_language: Optional[str]) -> Optional[str]:
+    """将 source_language 转换为豆包火山引擎 request.language 格式。
+    auto/空返回 None。"""
+    if not source_language:
+        return None
+    s = source_language.strip().lower()
+    if not s or s in ('auto', 'auto-detect'):
+        return None
+    lang_map = {
+        'zh': 'zh-CN', 'zh-cn': 'zh-CN', 'zh-tw': 'zh-CN', 'zh-hans': 'zh-CN', 'zh-hant': 'zh-CN',
+        'en': 'en-US', 'en-us': 'en-US', 'en-gb': 'en-US',
+        'ja': 'ja-JP', 'ja-jp': 'ja-JP',
+        'ko': 'ko-KR', 'ko-kr': 'ko-KR',
+        'yue': 'yue-CN', 'yue-cn': 'yue-CN',
+    }
+    return lang_map.get(s, None)
+
+
 def _resolve_doubao_credentials() -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Resolve Doubao credentials from env vars.
 
@@ -195,6 +230,11 @@ def create_recognizer(
         # 热词表
         if vocabulary_id:
             recognition_kwargs['vocabulary_id'] = vocabulary_id
+
+        # 语言提示（仅当 source_language 非 auto 且在模型支持范围内）
+        lang_hint = _to_dashscope_language(source_language)
+        if lang_hint:
+            recognition_kwargs['language_hints'] = [lang_hint]
         
         # 合并额外参数
         recognition_kwargs.update(extra_kwargs)
@@ -218,10 +258,17 @@ def create_recognizer(
             'sample_rate': sample_rate,
             'num_channels': 1,
             'audio_format': 'pcm_s16le',
-            'language_hints': getattr(config, 'SONIOX_LANGUAGE_HINTS', ['en', 'zh', 'ja', 'ko']),
             'enable_endpoint_detection': getattr(config, 'SONIOX_ENABLE_ENDPOINT_DETECTION', True),
         }
-        
+
+        # 语言提示：合并 source_language（若非 auto）到固定 hints 列表首位
+        hints = list(getattr(config, 'SONIOX_LANGUAGE_HINTS', ['en', 'zh', 'ja', 'ko']))
+        s_lang = source_language.strip().lower() if source_language else ''
+        if s_lang and s_lang not in ('auto', 'auto-detect'):
+            if s_lang not in hints:
+                hints.insert(0, s_lang)
+        recognition_kwargs['language_hints'] = hints
+
         # 合并额外参数
         recognition_kwargs.update(extra_kwargs)
 
@@ -248,6 +295,10 @@ def create_recognizer(
             'timeout_seconds': getattr(config, 'DOUBAO_ASR_TIMEOUT_SECONDS', 60),
             'max_buffer_seconds': getattr(config, 'DOUBAO_ASR_MAX_BUFFER_SECONDS', 60),
         }
+
+        doubao_lang = _to_doubao_language(source_language)
+        if doubao_lang:
+            recognition_kwargs['request_options'] = {'language': doubao_lang}
 
         recognition_kwargs.update(extra_kwargs)
 
