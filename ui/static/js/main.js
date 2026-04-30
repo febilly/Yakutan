@@ -1697,6 +1697,11 @@ document.addEventListener('DOMContentLoaded', async function () {
         await loadConfigFromServer();
     }
 
+    const startBtn = document.getElementById('start-btn');
+    if (startBtn) {
+        startBtn.disabled = false;
+    }
+
     loadPanelFloatingModeSetting();
     loadQuickLanguageSettings();
     loadAPIKeys();
