@@ -971,7 +971,6 @@ function updateLLMTemplateKeySourceHint(templateName = activeLLMTemplate) {
     const source = resolveLLMTemplateKeySource(templateName);
     if (!source) {
         container.style.display = 'none';
-        rotationHint.style.display = 'none';
         label.textContent = '';
         link.textContent = '';
         link.removeAttribute('href');
