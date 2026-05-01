@@ -123,6 +123,9 @@ def _is_primary_config_changed(state, cfg: TranslationConfig) -> bool:
         or cfg.llm_formality != getattr(state, "_last_llm_formality", None)
         or cfg.llm_style != getattr(state, "_last_llm_style", None)
         or cfg.deepl_formality != getattr(state, "_last_deepl_formality", None)
+        or cfg.llm_parallel_fastest_mode != getattr(
+            state, "_last_parallel_fastest_mode", None
+        )
     )
 
 
@@ -233,6 +236,7 @@ def reinitialize_translator(state, cfg: TranslationConfig) -> None:
     state._last_llm_formality = cfg.llm_formality
     state._last_llm_style = cfg.llm_style
     state._last_deepl_formality = cfg.deepl_formality
+    state._last_parallel_fastest_mode = cfg.llm_parallel_fastest_mode
 
 
 def update_secondary_translator(state, cfg: TranslationConfig) -> None:
