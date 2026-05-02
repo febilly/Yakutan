@@ -4,6 +4,7 @@
 from typing import Optional
 
 import config
+from shared.vrchat_text_limits import trim_text_prefix_to_limit
 
 # ============ 双语输出常量 ============
 DUAL_OUTPUT_SEPARATOR = "\n"
@@ -443,7 +444,7 @@ def limit_dual_output_text(
         return sanitized
     if len(sanitized) <= max_chars:
         return sanitized
-    return sanitized[:max_chars].rstrip()
+    return trim_text_prefix_to_limit(sanitized, max_chars)
 
 
 def build_dual_output_display(

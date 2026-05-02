@@ -5,6 +5,10 @@ import os
 import time
 from typing import Optional
 from dotenv import load_dotenv
+from shared.vrchat_text_limits import (
+    VRCHAT_OSC_TEXT_MAX_LENGTH,
+    normalize_osc_text_max_length,
+)
 
 load_dotenv()
 
@@ -267,7 +271,7 @@ TEXT_FANCY_STYLE = 'none'
 
 # 发往 VRChat / OSC 的显示文本最大长度。
 # 项目内所有与聊天框文本上限相关的裁剪逻辑都应统一使用这个值。
-OSC_TEXT_MAX_LENGTH = 144
+OSC_TEXT_MAX_LENGTH = VRCHAT_OSC_TEXT_MAX_LENGTH
 
 
 def is_osc_compat_mode_enabled() -> bool:
@@ -278,11 +282,9 @@ def get_effective_osc_text_max_length() -> Optional[int]:
     """兼容模式下取消长度限制；其它模式沿用统一上限。"""
     if is_osc_compat_mode_enabled():
         return None
-    try:
-        value = int(globals().get('OSC_TEXT_MAX_LENGTH', 144))
-    except (TypeError, ValueError):
-        value = 144
-    return max(1, value)
+    return normalize_osc_text_max_length(
+        globals().get('OSC_TEXT_MAX_LENGTH', VRCHAT_OSC_TEXT_MAX_LENGTH)
+    )
 
 # 是否启用反向翻译功能
 ENABLE_REVERSE_TRANSLATION = False  # True: 翻译后再反向翻译回源语言

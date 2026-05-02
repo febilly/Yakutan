@@ -18,6 +18,10 @@ import vrchat_oscquery.common as vrchat_osc_common
 from vrchat_oscquery.threaded import vrc_osc
 
 import config as app_config
+from shared.vrchat_text_limits import (
+    normalize_osc_text_max_length,
+    trim_text_prefix_to_limit,
+)
 from text_processor import (
     ARABIC_PDI,
     ARABIC_RLI,
@@ -132,10 +136,9 @@ class OSCManager:
         getter = getattr(app_config, "get_effective_osc_text_max_length", None)
         if callable(getter):
             return getter()
-        try:
-            return max(1, int(getattr(app_config, "OSC_TEXT_MAX_LENGTH", 144)))
-        except (TypeError, ValueError):
-            return 144
+        return normalize_osc_text_max_length(
+            getattr(app_config, "OSC_TEXT_MAX_LENGTH", None)
+        )
 
     def _compat_listen_target(self) -> Tuple[str, int]:
         host = (getattr(app_config, "OSC_SERVER_IP", None) or "127.0.0.1").strip() or "127.0.0.1"
@@ -490,34 +493,7 @@ class OSCManager:
         if self._contains_only_wrapped_arabic_lines(text):
             return self._truncate_wrapped_arabic_lines(text, max_length)
         
-        # 句子结束标记
-        SENTENCE_ENDERS = [
-            '.', '?', '!', ',',           # Common
-            '。', '？', '！', '，',        # CJK
-            '…', '...', '‽',             # Stylistic & Special (includes 3-dot ellipsis)
-            '։', '؟', ';', '،',           # Armenian, Arabic, Greek (as question mark), Arabic comma
-            '।', '॥', '።', '။', '།',    # Indic, Ethiopic, Myanmar, Tibetan
-            '、', '‚', '٫'               # Japanese enumeration comma, low comma, Arabic decimal separator
-        ]
-        
-        # 当文本超长时，删除最前面的句子而不是截断末尾
-        while len(text) > max_length:
-            # 尝试找到第一个句子的结束位置
-            first_sentence_end = -1
-            for ender in SENTENCE_ENDERS:
-                idx = text.find(ender)
-                if idx != -1 and (first_sentence_end == -1 or idx < first_sentence_end):
-                    first_sentence_end = idx
-            
-            if first_sentence_end != -1:
-                # 删除第一个句子（包括标点符号后的空格）
-                text = text[first_sentence_end + 1:].lstrip()
-            else:
-                # 如果没有找到标点符号，删除前面的字符直到长度合适
-                text = text[len(text) - max_length:]
-                break
-        
-        return text
+        return trim_text_prefix_to_limit(text, max_length)
 
     @staticmethod
     def _prepare_text_for_osc(text: str, max_length: Optional[int] = None) -> str:
@@ -623,6 +599,9 @@ class OSCManager:
                         timestamp=self._message_history[-1].timestamp,
                         speaker=self._message_history[-1].speaker,
                     )
+                combined = assemble(lines)
+            elif header_enabled and len(lines) == 1:
+                lines[0] = self._truncate_text(lines[0], max_length=max_length)
                 combined = assemble(lines)
 
         return combined
