@@ -52,6 +52,8 @@ hiddenimports = [
     'jieba',
     'fancify_text',
     'arabic_reshaper',
+    'bidi',
+    'bidi.algorithm',
     'panel_app',
     'webview',
 ]

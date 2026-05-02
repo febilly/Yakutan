@@ -21,6 +21,7 @@ TEXT_FANCY_STYLE_OPTIONS = (
 TEXT_FANCY_STYLE_VALUES = frozenset(value for value, _ in TEXT_FANCY_STYLE_OPTIONS)
 ARABIC_RLI = "\u2067"
 ARABIC_PDI = "\u2069"
+ARABIC_OSC_LINE_MAX_CHARS = 30
 
 try:
     import fancify_text as _fancify_text
@@ -31,6 +32,11 @@ try:
     import arabic_reshaper as _arabic_reshaper
 except Exception:
     _arabic_reshaper = None
+
+try:
+    from bidi.algorithm import get_display as _bidi_get_display
+except Exception:
+    _bidi_get_display = None
 
 _TEXT_POST_PROCESSING_DEGRADATION_WARNINGS = set()
 
@@ -204,9 +210,152 @@ def wrap_arabic_rtl_isolate(text: str) -> str:
     return f"{ARABIC_RLI}{text}{ARABIC_PDI}"
 
 
+def _wrap_text_at_word_boundaries(text: str, max_chars: int) -> list[str]:
+    if not text or max_chars <= 0:
+        return []
+
+    lines: list[str] = []
+    normalized = text.replace('\r\n', '\n').replace('\r', '\n')
+    for source_line in normalized.split('\n'):
+        words = source_line.split()
+        current = ""
+
+        for word in words:
+            if len(word) > max_chars:
+                if current:
+                    lines.append(current)
+                    current = ""
+                for start in range(0, len(word), max_chars):
+                    lines.append(word[start:start + max_chars])
+                continue
+
+            if not current:
+                current = word
+            elif len(current) + 1 + len(word) <= max_chars:
+                current = f"{current} {word}"
+            else:
+                lines.append(current)
+                current = word
+
+        if current:
+            lines.append(current)
+
+    return lines
+
+
+def _limit_line_at_word_boundary(text: str, max_chars: int) -> str:
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+
+    words = text.split()
+    current = ""
+    for word in words:
+        if len(word) > max_chars:
+            return current or word[:max_chars]
+        if not current:
+            current = word
+        elif len(current) + 1 + len(word) <= max_chars:
+            current = f"{current} {word}"
+        else:
+            break
+    return current
+
+
+def _line_needs_arabic_processing(line: str) -> bool:
+    return _contains_arabic_reshapable_text(line)
+
+
+def _process_arabic_line(line: str) -> str:
+    if not _line_needs_arabic_processing(line):
+        return line
+
+    if _arabic_reshaper is None:
+        _warn_text_post_processing_degraded_once(
+            'arabic_reshaper_missing',
+            '阿拉伯文显示重排降级：arabic-reshaper 不可用，仅添加方向隔离控制符。',
+        )
+        return wrap_arabic_rtl_isolate(line)
+
+    try:
+        reshaped = str(_arabic_reshaper.reshape(line))
+        if _bidi_get_display is None:
+            _warn_text_post_processing_degraded_once(
+                'python_bidi_missing',
+                '阿拉伯文显示重排降级：python-bidi 不可用，混排英文/数字可能显示异常。',
+            )
+            return wrap_arabic_rtl_isolate(reshaped)
+        # Run bidi after manual line wrapping so mixed LTR/RTL text is fixed
+        # without letting renderer auto-wrap split punctuation across lines.
+        return wrap_arabic_rtl_isolate(str(_bidi_get_display(reshaped)))
+    except Exception as exc:
+        _warn_text_post_processing_degraded_once(
+            'arabic_reshaper_failed',
+            f'阿拉伯文显示重排降级：处理失败（{exc!r}），仅添加方向隔离控制符。',
+        )
+        return wrap_arabic_rtl_isolate(line)
+
+
+def _arabic_processed_line_for_budget(line: str, inner_budget: int) -> str:
+    logical_line = _limit_line_at_word_boundary(line, inner_budget)
+    while logical_line:
+        processed_line = _process_arabic_line(logical_line)
+        line_overhead = (
+            len(ARABIC_RLI) + len(ARABIC_PDI)
+            if is_arabic_rtl_isolate_wrapped(processed_line)
+            else 0
+        )
+        if len(processed_line) <= inner_budget + line_overhead:
+            return processed_line
+        logical_line = logical_line[:-1].rstrip()
+    return ""
+
+
+def _build_arabic_reshaped_lines(
+    text: str,
+    max_chars: Optional[int] = None,
+) -> str:
+    logical_lines = _wrap_text_at_word_boundaries(text, ARABIC_OSC_LINE_MAX_CHARS)
+    if not logical_lines:
+        return ""
+
+    processed_lines: list[str] = []
+    current_length = 0
+
+    for logical_line in logical_lines:
+        processed_line = _process_arabic_line(logical_line)
+        separator_length = 1 if processed_lines else 0
+
+        if max_chars is None:
+            processed_lines.append(processed_line)
+            continue
+
+        if current_length + separator_length + len(processed_line) <= max_chars:
+            processed_lines.append(processed_line)
+            current_length += separator_length + len(processed_line)
+            continue
+
+        remaining = max_chars - current_length - separator_length
+        line_overhead = (
+            len(ARABIC_RLI) + len(ARABIC_PDI)
+            if _line_needs_arabic_processing(logical_line)
+            else 0
+        )
+        inner_budget = min(ARABIC_OSC_LINE_MAX_CHARS, remaining - line_overhead)
+        if inner_budget > 0:
+            shortened_line = _arabic_processed_line_for_budget(logical_line, inner_budget)
+            if shortened_line:
+                processed_lines.append(shortened_line)
+        break
+
+    return "\n".join(processed_lines)
+
+
 def apply_arabic_reshaper_if_needed(
     text: str,
     language: Optional[str] = None,
+    max_chars: Optional[int] = None,
 ) -> str:
     if not text or not getattr(config, 'ENABLE_ARABIC_RESHAPER', True):
         return text
@@ -214,24 +363,7 @@ def apply_arabic_reshaper_if_needed(
         return text
     if not _contains_arabic_reshapable_text(text):
         return text
-    if _arabic_reshaper is None:
-        _warn_text_post_processing_degraded_once(
-            'arabic_reshaper_missing',
-            '阿拉伯文显示重排降级：arabic-reshaper 不可用，仅添加方向隔离控制符。',
-        )
-        return wrap_arabic_rtl_isolate(text)
-
-    try:
-        reshaped = _arabic_reshaper.reshape(text)
-        # Keep logical order here. RLI/PDI lets the renderer handle bidi and line
-        # wrapping; precomputing visual order breaks punctuation around wraps.
-        return wrap_arabic_rtl_isolate(str(reshaped))
-    except Exception as exc:
-        _warn_text_post_processing_degraded_once(
-            'arabic_reshaper_failed',
-            f'阿拉伯文显示重排降级：处理失败（{exc!r}），仅添加方向隔离控制符。',
-        )
-        return wrap_arabic_rtl_isolate(text)
+    return _build_arabic_reshaped_lines(text, max_chars=max_chars)
 
 
 def remove_trailing_sentence_period_if_needed(text: str) -> str:

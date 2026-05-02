@@ -433,6 +433,36 @@ class OSCManager:
         if pending_message is not None:
             self._send_message_immediately(pending_message.text, pending_message.ongoing)
         self._last_mute_value = None
+
+    @staticmethod
+    def _contains_only_wrapped_arabic_lines(text: str) -> bool:
+        lines = [line for line in (text or "").split("\n") if line]
+        return bool(lines) and all(is_arabic_rtl_isolate_wrapped(line) for line in lines)
+
+    def _truncate_wrapped_arabic_lines(self, text: str, max_length: int) -> str:
+        lines = [line for line in (text or "").split("\n") if line]
+        if not lines or max_length <= 0:
+            return ""
+
+        def assemble(line_list):
+            return "\n".join(line_list)
+
+        while len(lines) > 1 and len(assemble(lines)) > max_length:
+            lines.pop(0)
+
+        combined = assemble(lines)
+        if len(combined) <= max_length:
+            return combined
+
+        line_overhead = len(ARABIC_RLI) + len(ARABIC_PDI)
+        if max_length <= line_overhead:
+            return ""
+
+        inner_text = lines[-1][len(ARABIC_RLI):-len(ARABIC_PDI)]
+        inner_text = self._truncate_text(inner_text, max_length=max_length - line_overhead)
+        if not inner_text:
+            return ""
+        return f"{ARABIC_RLI}{inner_text}{ARABIC_PDI}"
     
     def _truncate_text(self, text: str, max_length: Optional[int] = None) -> str:
         """
@@ -457,14 +487,8 @@ class OSCManager:
         if len(text) <= max_length:
             return text
 
-        if is_arabic_rtl_isolate_wrapped(text):
-            isolate_overhead = len(ARABIC_RLI) + len(ARABIC_PDI)
-            if max_length < isolate_overhead:
-                return ""
-            inner_budget = max_length - isolate_overhead
-            inner_text = text[len(ARABIC_RLI):-len(ARABIC_PDI)]
-            truncated_inner = self._truncate_text(inner_text, max_length=inner_budget)
-            return f"{ARABIC_RLI}{truncated_inner}{ARABIC_PDI}"
+        if self._contains_only_wrapped_arabic_lines(text):
+            return self._truncate_wrapped_arabic_lines(text, max_length)
         
         # 句子结束标记
         SENTENCE_ENDERS = [
@@ -496,18 +520,24 @@ class OSCManager:
         return text
 
     @staticmethod
-    def _prepare_text_for_osc(text: str) -> str:
+    def _prepare_text_for_osc(text: str, max_length: Optional[int] = None) -> str:
         """Apply OSC-only text transforms while keeping panel text unchanged."""
         raw_text = text or ""
-        processed_text = apply_arabic_reshaper_if_needed(raw_text)
+        processed_text = apply_arabic_reshaper_if_needed(raw_text, max_chars=max_length)
         if processed_text != raw_text:
             print(f"[TextPost] OSC发送原文：{raw_text}")
             print(f"[TextPost] OSC发送处理后：{processed_text} (repr={processed_text!r})")
         return processed_text
 
     def _prepare_outgoing_text_for_osc(self, text: str) -> str:
-        text = self._prepare_text_for_osc(text)
-        return self._truncate_text(text)
+        max_length = self._effective_text_max_length()
+        if not getattr(self, "_truncate_enabled", True):
+            max_length = None
+
+        text = self._prepare_text_for_osc(text, max_length=max_length)
+        if max_length is None:
+            return text
+        return self._truncate_text(text, max_length=max_length)
 
     def _prune_history_locked(self, now: float):
         """移除超过 TTL 的历史消息（需要在锁内调用）"""

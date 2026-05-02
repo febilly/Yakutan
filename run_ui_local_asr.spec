@@ -53,6 +53,8 @@ hiddenimports = [
     'jieba',
     'fancify_text',
     'arabic_reshaper',
+    'bidi',
+    'bidi.algorithm',
     'panel_app',
     'webview',
     'speech_recognizers.local_speech_recognizer',
