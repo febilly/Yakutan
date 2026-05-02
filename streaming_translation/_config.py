@@ -8,7 +8,9 @@ importing a project-wide config module.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import os
+
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -108,6 +110,17 @@ class TranslationConfig:
     """DeepL formality setting (``"default"``, ``"prefer_more"``, ``"prefer_less"``)."""
 
 
+def _get_module_attr_or_env(module: object, attr_name: str, *env_names: str) -> Optional[str]:
+    value = getattr(module, attr_name, None)
+    if value is not None:
+        return value
+    for env_name in env_names:
+        env_value = os.getenv(env_name)
+        if env_value:
+            return env_value
+    return None
+
+
 def config_from_module(module: object) -> TranslationConfig:
     """Build a ``TranslationConfig`` from a module-like object (e.g. ``import config``).
 
@@ -149,9 +162,9 @@ def config_from_module(module: object) -> TranslationConfig:
         llm_parallel_fastest_mode=getattr(module, "LLM_PARALLEL_FASTEST_MODE", "off"),
         use_international_endpoint=getattr(module, "USE_INTERNATIONAL_ENDPOINT", False),
         proxy_url=None,
-        deepl_api_key=getattr(module, "DEEPL_API_KEY", None),
-        dashscope_api_key=getattr(module, "DASHSCOPE_API_KEY", None),
-        llm_api_key=getattr(module, "LLM_API_KEY", None),
-        openai_api_key=getattr(module, "OPENAI_API_KEY", None),
+        deepl_api_key=_get_module_attr_or_env(module, "DEEPL_API_KEY", "DEEPL_API_KEY"),
+        dashscope_api_key=_get_module_attr_or_env(module, "DASHSCOPE_API_KEY", "DASHSCOPE_API_KEY"),
+        llm_api_key=_get_module_attr_or_env(module, "LLM_API_KEY", "LLM_API_KEY", "OPENROUTER_API_KEY"),
+        openai_api_key=_get_module_attr_or_env(module, "OPENAI_API_KEY", "OPENAI_API_KEY"),
         deepl_formality=getattr(module, "DEEPL_FORMALITY", "default"),
     )

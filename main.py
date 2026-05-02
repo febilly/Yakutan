@@ -39,6 +39,7 @@ from ipc_client import IPCClient
 # ---- 新模块 ----
 from app_state import AppState, get_state, set_state
 from streaming_translation import (
+    clear_translation_contexts,
     config_from_module,
     reinitialize_translator,
     update_secondary_translator,
@@ -117,9 +118,27 @@ def reinitialize_translator_compat():
             reinitialize_translator(state, cfg)
         else:
             update_secondary_translator(state, cfg)
+        _refresh_ipc_translator_reference(state)
         loop = state.main_loop
         if loop is not None and loop.is_running():
             loop.create_task(osc_manager.apply_runtime_config(app_name="Yakutan"))
+
+
+def clear_translator_contexts_compat():
+    state = get_state()
+    if state:
+        cleared = clear_translation_contexts(state)
+        if cleared:
+            logger.info('[Translator] Cleared %s context buffer(s)', cleared)
+
+
+def _refresh_ipc_translator_reference(state):
+    ipc_client = getattr(osc_manager, '_ipc_client', None)
+    if ipc_client is None:
+        return
+    setter = getattr(ipc_client, 'set_translator', None)
+    if callable(setter):
+        setter(state.translator)
 
 
 # ============ 识别控制 ============
@@ -482,6 +501,7 @@ async def main(
 
     finally:
         emit_lifecycle('stopping', state.recognition_active)
+        clear_translator_contexts_compat()
         osc_manager.clear_mute_callback()
         osc_manager.reset_runtime_state()
         if ipc_client is not None:

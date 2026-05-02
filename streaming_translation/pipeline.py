@@ -7,6 +7,7 @@ suitable for reuse outside of the original host application.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Optional
 
@@ -35,6 +36,14 @@ TRANSLATION_API_CLASS_REGISTRY: dict[str, type[BaseTranslationAPI]] = {
 
 DEFAULT_API_TYPE = "qwen_mt"
 
+TRANSLATOR_CONTEXT_ATTRS = (
+    "translator",
+    "secondary_translator",
+    "backwards_translator",
+    "deepl_fallback_translator",
+    "secondary_deepl_fallback_translator",
+)
+
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -58,6 +67,87 @@ def _get_api_class(api_type: str) -> type[BaseTranslationAPI]:
         api_type,
         TRANSLATION_API_CLASS_REGISTRY[DEFAULT_API_TYPE],
     )
+
+
+def _secret_fingerprint(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value)
+    if not normalized:
+        return ""
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _primary_config_signature(cfg: TranslationConfig) -> tuple:
+    api_type = cfg.translation_api_type
+    signature = [
+        ("api_type", api_type),
+        ("target_language", cfg.target_language),
+        ("context_size", cfg.translation_context_size),
+        ("context_aware", cfg.translation_context_aware),
+        ("proxy_url", cfg.proxy_url),
+    ]
+
+    if api_type in (
+        "openrouter",
+        "openrouter_streaming",
+        "openrouter_streaming_deepl_hybrid",
+    ):
+        signature.extend(
+            [
+                ("llm_base_url", cfg.llm_base_url),
+                ("llm_model", cfg.llm_model),
+                ("llm_api_key", _secret_fingerprint(cfg.llm_api_key)),
+                ("openai_api_key", _secret_fingerprint(cfg.openai_api_key)),
+                ("llm_temperature", cfg.llm_temperature),
+                ("llm_timeout", cfg.llm_timeout),
+                ("llm_max_retries", cfg.llm_max_retries),
+                ("llm_formality", cfg.llm_formality),
+                ("llm_style", cfg.llm_style),
+                ("llm_extra_body_json", cfg.llm_extra_body_json),
+                ("llm_parallel_fastest_mode", cfg.llm_parallel_fastest_mode),
+            ]
+        )
+
+    if api_type in ("deepl", "openrouter_streaming_deepl_hybrid"):
+        signature.extend(
+            [
+                ("deepl_api_key", _secret_fingerprint(cfg.deepl_api_key)),
+                ("deepl_formality", cfg.deepl_formality),
+            ]
+        )
+
+    if api_type == "qwen_mt":
+        signature.extend(
+            [
+                ("dashscope_api_key", _secret_fingerprint(cfg.dashscope_api_key)),
+                ("use_international_endpoint", cfg.use_international_endpoint),
+            ]
+        )
+
+    return tuple(signature)
+
+
+def clear_translation_contexts(
+    state,
+    attributes: Optional[tuple[str, ...]] = None,
+) -> int:
+    """Clear accumulated context buffers from translator instances on *state*."""
+    cleared = 0
+    seen: set[int] = set()
+    for attr in attributes or TRANSLATOR_CONTEXT_ATTRS:
+        translator = getattr(state, attr, None)
+        if translator is None:
+            continue
+        translator_id = id(translator)
+        if translator_id in seen:
+            continue
+        seen.add(translator_id)
+        clear = getattr(translator, "clear_contexts", None)
+        if callable(clear):
+            clear()
+            cleared += 1
+    return cleared
 
 
 # ── Factory ───────────────────────────────────────────────────────────
@@ -117,12 +207,30 @@ def _build_context_translator(
 # ── State helpers (for host-app state objects) ────────────────────────
 
 def _is_primary_config_changed(state, cfg: TranslationConfig) -> bool:
+    signature = _primary_config_signature(cfg)
+    current_signature = getattr(state, "_primary_translation_config_signature", None)
+    if current_signature is not None:
+        return signature != current_signature
+
     return (
         cfg.translation_api_type != getattr(state, "translation_api_type", None)
         or cfg.target_language != getattr(state, "target_language", None)
+        or cfg.translation_context_size != getattr(state, "_last_translation_context_size", None)
+        or cfg.translation_context_aware != getattr(state, "_last_translation_context_aware", None)
+        or cfg.llm_base_url != getattr(state, "_last_llm_base_url", None)
+        or cfg.llm_model != getattr(state, "_last_llm_model", None)
+        or _secret_fingerprint(cfg.llm_api_key) != getattr(state, "_last_llm_api_key_fingerprint", None)
+        or _secret_fingerprint(cfg.openai_api_key) != getattr(state, "_last_openai_api_key_fingerprint", None)
+        or cfg.llm_temperature != getattr(state, "_last_llm_temperature", None)
+        or cfg.llm_timeout != getattr(state, "_last_llm_timeout", None)
+        or cfg.llm_max_retries != getattr(state, "_last_llm_max_retries", None)
         or cfg.llm_formality != getattr(state, "_last_llm_formality", None)
         or cfg.llm_style != getattr(state, "_last_llm_style", None)
+        or cfg.llm_extra_body_json != getattr(state, "_last_llm_extra_body_json", None)
         or cfg.deepl_formality != getattr(state, "_last_deepl_formality", None)
+        or _secret_fingerprint(cfg.deepl_api_key) != getattr(state, "_last_deepl_api_key_fingerprint", None)
+        or _secret_fingerprint(cfg.dashscope_api_key) != getattr(state, "_last_dashscope_api_key_fingerprint", None)
+        or cfg.use_international_endpoint != getattr(state, "_last_use_international_endpoint", None)
         or cfg.llm_parallel_fastest_mode != getattr(
             state, "_last_parallel_fastest_mode", None
         )
@@ -187,6 +295,7 @@ def reinitialize_translator(state, cfg: TranslationConfig) -> None:
     if is_streaming_translation_mode(cfg.translation_api_type):
         cfg.translate_partial_results = True
 
+    clear_translation_contexts(state)
     api_class = _get_api_class(cfg.translation_api_type)
 
     # Primary
@@ -233,9 +342,24 @@ def reinitialize_translator(state, cfg: TranslationConfig) -> None:
     state.translation_api_type = cfg.translation_api_type
     state.target_language = cfg.target_language
     state.secondary_target_language = secondary_target
+    state._translation_config = cfg
+    state._primary_translation_config_signature = _primary_config_signature(cfg)
+    state._last_translation_context_size = cfg.translation_context_size
+    state._last_translation_context_aware = cfg.translation_context_aware
+    state._last_llm_base_url = cfg.llm_base_url
+    state._last_llm_model = cfg.llm_model
+    state._last_llm_api_key_fingerprint = _secret_fingerprint(cfg.llm_api_key)
+    state._last_openai_api_key_fingerprint = _secret_fingerprint(cfg.openai_api_key)
+    state._last_llm_temperature = cfg.llm_temperature
+    state._last_llm_timeout = cfg.llm_timeout
+    state._last_llm_max_retries = cfg.llm_max_retries
     state._last_llm_formality = cfg.llm_formality
     state._last_llm_style = cfg.llm_style
+    state._last_llm_extra_body_json = cfg.llm_extra_body_json
     state._last_deepl_formality = cfg.deepl_formality
+    state._last_deepl_api_key_fingerprint = _secret_fingerprint(cfg.deepl_api_key)
+    state._last_dashscope_api_key_fingerprint = _secret_fingerprint(cfg.dashscope_api_key)
+    state._last_use_international_endpoint = cfg.use_international_endpoint
     state._last_parallel_fastest_mode = cfg.llm_parallel_fastest_mode
 
 
@@ -244,8 +368,16 @@ def update_secondary_translator(state, cfg: TranslationConfig) -> None:
     new_secondary = _normalize_optional_language_code(cfg.secondary_target_language)
     current_secondary = getattr(state, "secondary_target_language", None)
     if new_secondary == current_secondary:
+        state._translation_config = cfg
         return
 
+    clear_translation_contexts(
+        state,
+        (
+            "secondary_translator",
+            "secondary_deepl_fallback_translator",
+        ),
+    )
     state.secondary_translation_api = None
     state.secondary_translator = None
     state.secondary_deepl_fallback_translation_api = None
@@ -266,6 +398,7 @@ def update_secondary_translator(state, cfg: TranslationConfig) -> None:
                 logger.warning("DeepL secondary update failed: %s", e)
 
     state.secondary_target_language = new_secondary
+    state._translation_config = cfg
     logger.info("Secondary translator updated: %s -> %s", current_secondary, new_secondary)
 
 

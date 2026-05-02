@@ -130,3 +130,17 @@ class TestConfigFromModule:
         assert cfg.llm_extra_body_json == '{"custom": true}'
         assert cfg.llm_parallel_fastest_mode == "final_only"
         assert cfg.use_international_endpoint is True
+
+    def test_reads_runtime_api_keys_from_environment(self, monkeypatch):
+        monkeypatch.setenv("LLM_API_KEY", "llm-key")
+        monkeypatch.setenv("DEEPL_API_KEY", "deepl-key")
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
+
+        class Empty:
+            pass
+
+        cfg = config_from_module(Empty)
+
+        assert cfg.llm_api_key == "llm-key"
+        assert cfg.deepl_api_key == "deepl-key"
+        assert cfg.dashscope_api_key == "dashscope-key"

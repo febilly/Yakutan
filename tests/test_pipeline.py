@@ -8,6 +8,7 @@ from streaming_translation import (
     DEFAULT_API_TYPE,
     TRANSLATION_API_CLASS_REGISTRY,
     TranslationConfig,
+    clear_translation_contexts,
     ensure_secondary_translator,
     is_streaming_deepl_hybrid_mode,
     is_streaming_translation_mode,
@@ -18,6 +19,7 @@ from streaming_translation import (
 )
 from streaming_translation.pipeline import (
     _get_api_class,
+    _is_primary_config_changed,
     _normalize_optional_language_code,
 )
 
@@ -177,6 +179,125 @@ class TestReinitializeTranslator:
         with patch("streaming_translation.api.openrouter.OpenAI"):
             reinitialize_translator(state, cfg)
         assert cfg.translate_partial_results is True
+
+    def test_reinitialize_clears_existing_contexts_before_switch(self):
+        state = MockState()
+        old_primary = MagicMock()
+        old_secondary = MagicMock()
+        old_backwards = MagicMock()
+        state.translator = old_primary
+        state.secondary_translator = old_secondary
+        state.backwards_translator = old_backwards
+        cfg = TranslationConfig(
+            target_language="de",
+            translation_api_type="qwen_mt",
+            dashscope_api_key="test-key",
+        )
+        with patch("streaming_translation.api.qwen_mt.OpenAI") as mock_openai:
+            mock_openai.return_value = MagicMock()
+            reinitialize_translator(state, cfg)
+
+        old_primary.clear_contexts.assert_called_once()
+        old_secondary.clear_contexts.assert_called_once()
+        old_backwards.clear_contexts.assert_called_once()
+
+
+class TestPrimaryConfigChanged:
+    def test_detects_active_llm_config_changes(self):
+        state = MockState()
+        cfg = TranslationConfig(
+            target_language="ja",
+            translation_api_type="openrouter",
+            llm_base_url="https://api.example.com/v1",
+            llm_model="model-a",
+            llm_api_key="key-a",
+            llm_extra_body_json='{"provider": "a"}',
+        )
+        with patch("streaming_translation.api.openrouter.OpenAI"):
+            reinitialize_translator(state, cfg)
+
+        assert _is_primary_config_changed(state, cfg) is False
+        assert _is_primary_config_changed(
+            state,
+            TranslationConfig(
+                target_language="ja",
+                translation_api_type="openrouter",
+                llm_base_url="https://api.example.com/v2",
+                llm_model="model-a",
+                llm_api_key="key-a",
+                llm_extra_body_json='{"provider": "a"}',
+            ),
+        ) is True
+        assert _is_primary_config_changed(
+            state,
+            TranslationConfig(
+                target_language="ja",
+                translation_api_type="openrouter",
+                llm_base_url="https://api.example.com/v1",
+                llm_model="model-b",
+                llm_api_key="key-a",
+                llm_extra_body_json='{"provider": "a"}',
+            ),
+        ) is True
+        assert _is_primary_config_changed(
+            state,
+            TranslationConfig(
+                target_language="ja",
+                translation_api_type="openrouter",
+                llm_base_url="https://api.example.com/v1",
+                llm_model="model-a",
+                llm_api_key="key-b",
+                llm_extra_body_json='{"provider": "a"}',
+            ),
+        ) is True
+        assert _is_primary_config_changed(
+            state,
+            TranslationConfig(
+                target_language="ja",
+                translation_api_type="openrouter",
+                llm_base_url="https://api.example.com/v1",
+                llm_model="model-a",
+                llm_api_key="key-a",
+                llm_extra_body_json='{"provider": "b"}',
+            ),
+        ) is True
+
+    def test_ignores_inactive_llm_config_changes(self):
+        state = MockState()
+        cfg = TranslationConfig(
+            target_language="ja",
+            translation_api_type="qwen_mt",
+            dashscope_api_key="dashscope-key",
+            llm_base_url="https://api.example.com/v1",
+            llm_model="model-a",
+        )
+        with patch("streaming_translation.api.qwen_mt.OpenAI") as mock_openai:
+            mock_openai.return_value = MagicMock()
+            reinitialize_translator(state, cfg)
+
+        changed_inactive_llm = TranslationConfig(
+            target_language="ja",
+            translation_api_type="qwen_mt",
+            dashscope_api_key="dashscope-key",
+            llm_base_url="https://api.example.com/v2",
+            llm_model="model-b",
+        )
+        assert _is_primary_config_changed(state, changed_inactive_llm) is False
+
+
+class TestClearTranslationContexts:
+    def test_clears_each_translator_once(self):
+        state = MockState()
+        shared = MagicMock()
+        state.translator = shared
+        state.secondary_translator = shared
+        state.backwards_translator = MagicMock()
+
+        cleared = clear_translation_contexts(state)
+
+        assert cleared == 2
+        shared.clear_contexts.assert_called_once()
+        state.backwards_translator.clear_contexts.assert_called_once()
 
 
 # ── update_secondary_translator ───────────────────────────────────────

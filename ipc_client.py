@@ -45,6 +45,9 @@ class IPCClient:
     def get_mode(self) -> str:
         return self._mode
 
+    def set_translator(self, translator) -> None:
+        self._translator = translator
+
     async def start(self):
         try:
             await asyncio.wait_for(self._try_connect(), timeout=self._connect_timeout)
@@ -202,6 +205,7 @@ class IPCClient:
     async def stop(self):
         async with self._lock:
             self._mode = "standalone"
+            self._translator = None
 
         for task in (self._read_task, self._wait_task, self._reconnect_task):
             if task is not None and not task.done():

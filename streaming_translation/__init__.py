@@ -18,6 +18,7 @@ from .core.smart_language import SmartTargetLanguageSelector
 from .pipeline import (
     TRANSLATION_API_CLASS_REGISTRY,
     DEFAULT_API_TYPE,
+    clear_translation_contexts,
     ensure_secondary_translator,
     is_streaming_deepl_hybrid_mode,
     is_streaming_translation_mode,
@@ -42,6 +43,7 @@ __all__ = [
     "TranslationConfig",
     "TranslationHistoryEntry",
     "config_from_module",
+    "clear_translation_contexts",
     "ensure_secondary_translator",
     "is_streaming_deepl_hybrid_mode",
     "is_streaming_translation_mode",

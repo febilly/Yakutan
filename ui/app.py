@@ -629,6 +629,20 @@ def run_service_async():
         _set_service_status(lifecycle='stopped', recognition_active=False)
 
 
+def _request_translator_context_clear():
+    try:
+        if service_loop is not None:
+            import main as main_module
+            clear_contexts = getattr(
+                main_module,
+                'clear_translator_contexts_compat',
+                lambda: None,
+            )
+            service_loop.call_soon_threadsafe(clear_contexts)
+    except Exception as e:
+        print(f'Error requesting translator context clear: {e}')
+
+
 @app.route('/')
 def index():
     """主页面"""
@@ -1152,6 +1166,7 @@ def stop_service():
     try:
         # 从 main 模块获取最新的 stop_event
         import main
+        _request_translator_context_clear()
         _set_service_status(lifecycle='stopping', recognition_active=False)
         current_stop_event = main.stop_event
         
@@ -1211,6 +1226,7 @@ def restart_service():
     try:
         # 从 main 模块获取最新的 stop_event
         import main
+        _request_translator_context_clear()
         _set_service_status(lifecycle='stopping', recognition_active=False)
         current_stop_event = main.stop_event
         
