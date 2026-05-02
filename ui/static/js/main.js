@@ -1697,11 +1697,6 @@ document.addEventListener('DOMContentLoaded', async function () {
         await loadConfigFromServer();
     }
 
-    const startBtn = document.getElementById('start-btn');
-    if (startBtn) {
-        startBtn.disabled = false;
-    }
-
     loadPanelFloatingModeSetting();
     loadQuickLanguageSettings();
     loadAPIKeys();
@@ -1714,7 +1709,15 @@ document.addEventListener('DOMContentLoaded', async function () {
     refreshMicDevices(true);
     setupMicDeviceAutoRefresh();
     updateDashscopeKeyFieldState();
-    updateStatus();
+    const statusLoaded = await updateStatus();
+    if (!statusLoaded) {
+        const startBtn = document.getElementById('start-btn');
+        const t = window.i18n ? window.i18n.t : (key) => key;
+        if (startBtn) {
+            setElementI18nText(startBtn, 'btn.startService', t);
+            startBtn.disabled = false;
+        }
+    }
     updateIpcStatus();
     // 每2秒更新一次状态
     setInterval(updateStatus, 2000);
@@ -2941,6 +2944,12 @@ function getServiceLifecycle(status) {
     return status?.lifecycle || (status?.running ? 'running' : 'stopped');
 }
 
+function setElementI18nText(element, key, t) {
+    if (!element) return;
+    element.setAttribute('data-i18n', key);
+    element.textContent = t(key);
+}
+
 function renderServiceLifecycle(status, t) {
     const lifecycle = getServiceLifecycle(status);
     const statusText = document.getElementById('status-text');
@@ -2954,9 +2963,9 @@ function renderServiceLifecycle(status, t) {
         statusText.textContent = t('status.running');
         statusDot.classList.add('running');
         startBtn.disabled = true;
-        startBtn.textContent = t('btn.startService');
+        setElementI18nText(startBtn, 'btn.startService', t);
         stopBtn.disabled = false;
-        stopBtn.textContent = t('btn.stopService');
+        setElementI18nText(stopBtn, 'btn.stopService', t);
         return;
     }
 
@@ -2964,9 +2973,9 @@ function renderServiceLifecycle(status, t) {
         statusText.textContent = t('status.starting');
         statusDot.classList.add('starting');
         startBtn.disabled = true;
-        startBtn.textContent = t('btn.starting');
+        setElementI18nText(startBtn, 'btn.starting', t);
         stopBtn.disabled = true;
-        stopBtn.textContent = t('btn.stopService');
+        setElementI18nText(stopBtn, 'btn.stopService', t);
         return;
     }
 
@@ -2974,17 +2983,17 @@ function renderServiceLifecycle(status, t) {
         statusText.textContent = t('status.stopping');
         statusDot.classList.add('stopping');
         startBtn.disabled = true;
-        startBtn.textContent = t('btn.startService');
+        setElementI18nText(startBtn, 'btn.startService', t);
         stopBtn.disabled = true;
-        stopBtn.textContent = t('btn.stopping');
+        setElementI18nText(stopBtn, 'btn.stopping', t);
         return;
     }
 
     statusText.textContent = t('status.notRunning');
     startBtn.disabled = false;
-    startBtn.textContent = t('btn.startService');
+    setElementI18nText(startBtn, 'btn.startService', t);
     stopBtn.disabled = true;
-    stopBtn.textContent = t('btn.stopService');
+    setElementI18nText(stopBtn, 'btn.stopService', t);
 }
 
 async function updateStatus() {
@@ -3007,8 +3016,10 @@ async function updateStatus() {
             }
             setMainConfigTouchMs(serverTs);
         }
+        return true;
     } catch (error) {
         console.error('更新状态失败:', error);
+        return false;
     }
 }
 
