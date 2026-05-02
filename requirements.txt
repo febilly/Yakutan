@@ -23,6 +23,7 @@ pykakasi>=2.2.1
 pypinyin>=0.51.0
 jieba>=0.42.1
 fancify-text>=1.0.0
+arabic-reshaper>=3.0.1
 
 # 语言检测库（用于自动检测源语言）
 fast-langdetect>=0.2.0

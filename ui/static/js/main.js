@@ -2121,6 +2121,7 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
                 document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
                 document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
+                document.getElementById('enable-arabic-reshaper').checked = config.translation.enable_arabic_reshaper ?? true;
                 document.getElementById('remove-trailing-period').checked = config.translation.remove_trailing_period ?? false;
                 document.getElementById('text-fancy-style').value = config.translation.text_fancy_style || 'none';
                 document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? false;
@@ -2296,6 +2297,7 @@ function loadDefaultConfig() {
     document.getElementById('show-partial-results').checked = false;
     document.getElementById('enable-furigana').checked = false;
     document.getElementById('enable-pinyin').checked = false;
+    document.getElementById('enable-arabic-reshaper').checked = true;
     document.getElementById('remove-trailing-period').checked = false;
     document.getElementById('text-fancy-style').value = 'none';
     document.getElementById('enable-reverse-translation').checked = false;
@@ -2439,6 +2441,7 @@ function applyServerConfigPayload(config) {
     document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
     document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
     document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
+    document.getElementById('enable-arabic-reshaper').checked = config.translation.enable_arabic_reshaper ?? true;
     document.getElementById('remove-trailing-period').checked = config.translation.remove_trailing_period ?? false;
     document.getElementById('text-fancy-style').value = config.translation.text_fancy_style || 'none';
     document.getElementById('enable-reverse-translation').checked = config.translation.enable_reverse_translation ?? false;
@@ -2629,6 +2632,7 @@ function saveConfigToLocalStorage() {
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
                 enable_pinyin: document.getElementById('enable-pinyin').checked,
+                enable_arabic_reshaper: document.getElementById('enable-arabic-reshaper').checked,
                 remove_trailing_period: document.getElementById('remove-trailing-period').checked,
                 text_fancy_style: document.getElementById('text-fancy-style').value || 'none',
                 enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,
@@ -2847,6 +2851,7 @@ async function saveConfig(autoSave = false) {
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
                 enable_pinyin: document.getElementById('enable-pinyin').checked,
+                enable_arabic_reshaper: document.getElementById('enable-arabic-reshaper').checked,
                 remove_trailing_period: document.getElementById('remove-trailing-period').checked,
                 text_fancy_style: document.getElementById('text-fancy-style').value || 'none',
                 enable_reverse_translation: document.getElementById('enable-reverse-translation').checked,

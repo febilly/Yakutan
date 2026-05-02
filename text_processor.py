@@ -12,7 +12,6 @@ DUAL_OUTPUT_SEPARATOR = "\n"
 COMPACT_SCRIPT_LANGUAGE_BASES = {'zh', 'ja', 'ko'}
 COMPACT_SCRIPT_BUDGET_WEIGHT = 1
 ALPHABETIC_SCRIPT_BUDGET_WEIGHT = 2
-
 TEXT_FANCY_STYLE_OPTIONS = (
     ('none', 'No Effect'),
     ('smallCaps', 'SMALLCAPS'),
@@ -20,11 +19,27 @@ TEXT_FANCY_STYLE_OPTIONS = (
     ('magic', 'magic'),
 )
 TEXT_FANCY_STYLE_VALUES = frozenset(value for value, _ in TEXT_FANCY_STYLE_OPTIONS)
+ARABIC_RLI = "\u2067"
+ARABIC_PDI = "\u2069"
 
 try:
     import fancify_text as _fancify_text
 except ImportError:
     _fancify_text = None
+
+try:
+    import arabic_reshaper as _arabic_reshaper
+except Exception:
+    _arabic_reshaper = None
+
+_TEXT_POST_PROCESSING_DEGRADATION_WARNINGS = set()
+
+
+def _warn_text_post_processing_degraded_once(key: str, message: str) -> None:
+    if key in _TEXT_POST_PROCESSING_DEGRADATION_WARNINGS:
+        return
+    _TEXT_POST_PROCESSING_DEGRADATION_WARNINGS.add(key)
+    print(f"[TextPost] {message}")
 
 
 def _get_dual_output_limits() -> tuple[Optional[int], Optional[int], Optional[int]]:
@@ -149,7 +164,13 @@ def apply_text_fancy_style_if_needed(text: str) -> str:
         return ""
 
     style = sanitize_text_fancy_style(getattr(config, 'TEXT_FANCY_STYLE', 'none'))
-    if style == 'none' or _fancify_text is None:
+    if style == 'none':
+        return sanitized
+    if _fancify_text is None:
+        _warn_text_post_processing_degraded_once(
+            'fancify_text_missing',
+            '文本风格后处理降级：fancify-text 不可用，输出原文。',
+        )
         return sanitized
 
     style_fn = getattr(_fancify_text, style, None)
@@ -160,6 +181,57 @@ def apply_text_fancy_style_if_needed(text: str) -> str:
         return str(style_fn(sanitized))
     except Exception:
         return sanitized
+
+
+def _contains_arabic_reshapable_text(text: str) -> bool:
+    """Detect Arabic-script source characters, excluding presentation-form output."""
+    return any(
+        '\u0600' <= ch <= '\u06ff'
+        or '\u0750' <= ch <= '\u077f'
+        or '\u0870' <= ch <= '\u089f'
+        or '\u08a0' <= ch <= '\u08ff'
+        for ch in text
+    )
+
+
+def is_arabic_rtl_isolate_wrapped(text: str) -> bool:
+    return bool(text) and text.startswith(ARABIC_RLI) and text.endswith(ARABIC_PDI)
+
+
+def wrap_arabic_rtl_isolate(text: str) -> str:
+    if not text or is_arabic_rtl_isolate_wrapped(text):
+        return text
+    return f"{ARABIC_RLI}{text}{ARABIC_PDI}"
+
+
+def apply_arabic_reshaper_if_needed(
+    text: str,
+    language: Optional[str] = None,
+) -> str:
+    if not text or not getattr(config, 'ENABLE_ARABIC_RESHAPER', True):
+        return text
+    if is_arabic_rtl_isolate_wrapped(text):
+        return text
+    if not _contains_arabic_reshapable_text(text):
+        return text
+    if _arabic_reshaper is None:
+        _warn_text_post_processing_degraded_once(
+            'arabic_reshaper_missing',
+            '阿拉伯文显示重排降级：arabic-reshaper 不可用，仅添加方向隔离控制符。',
+        )
+        return wrap_arabic_rtl_isolate(text)
+
+    try:
+        reshaped = _arabic_reshaper.reshape(text)
+        # Keep logical order here. RLI/PDI lets the renderer handle bidi and line
+        # wrapping; precomputing visual order breaks punctuation around wraps.
+        return wrap_arabic_rtl_isolate(str(reshaped))
+    except Exception as exc:
+        _warn_text_post_processing_degraded_once(
+            'arabic_reshaper_failed',
+            f'阿拉伯文显示重排降级：处理失败（{exc!r}），仅添加方向隔离控制符。',
+        )
+        return wrap_arabic_rtl_isolate(text)
 
 
 def remove_trailing_sentence_period_if_needed(text: str) -> str:
@@ -175,7 +247,9 @@ def remove_trailing_sentence_period_if_needed(text: str) -> str:
 
 
 def apply_basic_text_post_processing(text: str) -> str:
-    return apply_text_fancy_style_if_needed(remove_trailing_sentence_period_if_needed(text))
+    return apply_text_fancy_style_if_needed(
+        remove_trailing_sentence_period_if_needed(text)
+    )
 
 
 def _normalize_language_base(language: Optional[str]) -> str:
@@ -296,7 +370,7 @@ except Exception:
 try:
     from pypinyin import pinyin, Style
     _pypinyin_available = True
-except ImportError:
+except Exception:
     _pypinyin_available = False
 
 
@@ -331,7 +405,11 @@ def add_furigana(text: str) -> str:
                 parts.append(orig)
 
         return "".join(parts)
-    except Exception:
+    except Exception as exc:
+        _warn_text_post_processing_degraded_once(
+            'pykakasi_failed',
+            f'日语假名后处理降级：处理失败（{exc!r}），输出原文。',
+        )
         return text
 
 
@@ -340,7 +418,13 @@ def add_pinyin(text: str) -> str:
 
     Uses jieba for word segmentation. Output format: 大家dà'jiā晚上好wǎn'shàng'hǎo
     """
-    if not text or not _pypinyin_available:
+    if not text:
+        return text
+    if not _pypinyin_available:
+        _warn_text_post_processing_degraded_once(
+            'pypinyin_missing',
+            '中文拼音后处理降级：pypinyin 不可用，输出原文。',
+        )
         return text
 
     if not _contains_chinese(text):
@@ -381,9 +465,17 @@ def add_pinyin(text: str) -> str:
                 char_index += len(word)
 
         return "".join(result_parts)
-    except ImportError:
+    except ImportError as exc:
+        _warn_text_post_processing_degraded_once(
+            'jieba_missing',
+            f'中文拼音后处理降级：jieba 不可用（{exc!r}），输出原文。',
+        )
         return text
-    except Exception:
+    except Exception as exc:
+        _warn_text_post_processing_degraded_once(
+            'pinyin_failed',
+            f'中文拼音后处理降级：处理失败（{exc!r}），输出原文。',
+        )
         return text
 
 
@@ -394,6 +486,12 @@ def add_furigana_if_needed(text: str, language: str) -> str:
 
     lang = (language or '').lower()
     if not lang.startswith('ja'):
+        return text
+    if _kakasi is None:
+        _warn_text_post_processing_degraded_once(
+            'pykakasi_missing',
+            '日语假名后处理降级：pykakasi 不可用，输出原文。',
+        )
         return text
 
     return add_furigana(text)

@@ -52,6 +52,7 @@ hiddenimports = [
     'pypinyin',
     'jieba',
     'fancify_text',
+    'arabic_reshaper',
     'panel_app',
     'webview',
     'speech_recognizers.local_speech_recognizer',

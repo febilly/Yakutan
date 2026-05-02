@@ -51,6 +51,7 @@ hiddenimports = [
     'pypinyin',
     'jieba',
     'fancify_text',
+    'arabic_reshaper',
     'panel_app',
     'webview',
 ]

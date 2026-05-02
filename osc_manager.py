@@ -18,6 +18,12 @@ import vrchat_oscquery.common as vrchat_osc_common
 from vrchat_oscquery.threaded import vrc_osc
 
 import config as app_config
+from text_processor import (
+    ARABIC_PDI,
+    ARABIC_RLI,
+    apply_arabic_reshaper_if_needed,
+    is_arabic_rtl_isolate_wrapped,
+)
 
 __all__ = ["OSCManager", "osc_manager"]
 
@@ -450,6 +456,15 @@ class OSCManager:
 
         if len(text) <= max_length:
             return text
+
+        if is_arabic_rtl_isolate_wrapped(text):
+            isolate_overhead = len(ARABIC_RLI) + len(ARABIC_PDI)
+            if max_length < isolate_overhead:
+                return ""
+            inner_budget = max_length - isolate_overhead
+            inner_text = text[len(ARABIC_RLI):-len(ARABIC_PDI)]
+            truncated_inner = self._truncate_text(inner_text, max_length=inner_budget)
+            return f"{ARABIC_RLI}{truncated_inner}{ARABIC_PDI}"
         
         # 句子结束标记
         SENTENCE_ENDERS = [
@@ -479,6 +494,20 @@ class OSCManager:
                 break
         
         return text
+
+    @staticmethod
+    def _prepare_text_for_osc(text: str) -> str:
+        """Apply OSC-only text transforms while keeping panel text unchanged."""
+        raw_text = text or ""
+        processed_text = apply_arabic_reshaper_if_needed(raw_text)
+        if processed_text != raw_text:
+            print(f"[TextPost] OSC发送原文：{raw_text}")
+            print(f"[TextPost] OSC发送处理后：{processed_text} (repr={processed_text!r})")
+        return processed_text
+
+    def _prepare_outgoing_text_for_osc(self, text: str) -> str:
+        text = self._prepare_text_for_osc(text)
+        return self._truncate_text(text)
 
     def _prune_history_locked(self, now: float):
         """移除超过 TTL 的历史消息（需要在锁内调用）"""
@@ -680,6 +709,7 @@ class OSCManager:
         if (self._ipc_client is not None 
                 and self._ipc_client.is_connected() 
                 and self._ipc_client.is_delegate_osc_enabled()):
+            text = self._prepare_outgoing_text_for_osc(text)
             await self._ipc_client.send_message(text, ongoing)
             return
         if hasattr(asyncio, "to_thread"):
@@ -690,8 +720,7 @@ class OSCManager:
 
     def send_text_sync(self, text: str, ongoing: bool):
         """发送文本到 VRChat（带冷却，最多保留一个待发消息）"""
-        # 截断过长的文本
-        text = self._truncate_text(text)
+        text = self._prepare_outgoing_text_for_osc(text)
 
         if self._compat_mode_enabled():
             with self._state_lock:

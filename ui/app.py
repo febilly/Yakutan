@@ -346,6 +346,7 @@ def get_config_dict():
             'show_partial_results': config.SHOW_PARTIAL_RESULTS,
             'enable_furigana': getattr(config, 'ENABLE_JA_FURIGANA', False),
             'enable_pinyin': getattr(config, 'ENABLE_ZH_PINYIN', False),
+            'enable_arabic_reshaper': getattr(config, 'ENABLE_ARABIC_RESHAPER', True),
             'remove_trailing_period': getattr(config, 'REMOVE_TRAILING_PERIOD', False),
             'text_fancy_style': sanitize_text_fancy_style(
                 getattr(config, 'TEXT_FANCY_STYLE', 'none')
@@ -478,6 +479,8 @@ def update_config(config_data):
                 config.ENABLE_JA_FURIGANA = trans['enable_furigana']
             if 'enable_pinyin' in trans:
                 config.ENABLE_ZH_PINYIN = trans['enable_pinyin']
+            if 'enable_arabic_reshaper' in trans:
+                config.ENABLE_ARABIC_RESHAPER = bool(trans['enable_arabic_reshaper'])
             if 'remove_trailing_period' in trans:
                 config.REMOVE_TRAILING_PERIOD = bool(trans['remove_trailing_period'])
             if 'text_fancy_style' in trans:
@@ -1267,6 +1270,7 @@ def get_defaults():
             'show_partial_results': False,
             'enable_furigana': False,
             'enable_pinyin': False,
+            'enable_arabic_reshaper': True,
             'remove_trailing_period': False,
             'text_fancy_style': 'none',
             'enable_reverse_translation': False,
