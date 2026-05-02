@@ -1,6 +1,6 @@
 keywords,instruction
 # 模型
-模型; avatar,"Use 'アバター' when referring to a VRChat avatar."
+模型; avatar,"Use 'アバター' when referring to a VRChat avatar. Use 'モデル' for 3D models in general, or a AI model."
 改模; avatar mod, Use 'アバター改変' (or just '改変' when the context is clear) for VRChat avatar modifications.
 功能; 机关; gimmick,"Use 'ギミック' for VRChat avatar props, effects, or interactive features."
 骨骼; 动骨; physbone, Use 'PhysBone' for VRChat avatar physics bones.
