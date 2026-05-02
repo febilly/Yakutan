@@ -191,6 +191,17 @@ main {
     margin-left: auto;
 }
 
+.vrcx-bridge-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.vrcx-bridge-controls .form-text {
+    margin-top: 0;
+}
+
 .panel-mode-toggle {
     display: flex;
     align-items: center;

@@ -29,10 +29,15 @@ from streaming_translation import (
     reverse_translation,
     translate_with_backend,
 )
+from vrcx_context_bridge import build_translation_context_prefix
 
 logger = logging.getLogger(__name__)
 
 PAUSE_RESUME_BACKENDS = {'qwen', 'soniox', 'doubao_file', 'local'}
+
+
+def _translation_context_prefix() -> str:
+    return build_translation_context_prefix(getattr(config, 'CONTEXT_PREFIX', ''))
 
 
 def is_doubao_file_backend(backend: str) -> bool:
@@ -406,7 +411,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             previous_translation, use_deepl_final,
                             previous_source_segment, source_lang,
                             source_language=config.SOURCE_LANGUAGE,
-                            context_prefix=config.CONTEXT_PREFIX,
+                            context_prefix=_translation_context_prefix(),
                             record_history=False,
                         )
                     if secondary_should_translate and secondary_translator is not None:
@@ -416,7 +421,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             previous_translation_secondary, use_deepl_final,
                             previous_source_segment, source_lang,
                             source_language=config.SOURCE_LANGUAGE,
-                            context_prefix=config.CONTEXT_PREFIX,
+                            context_prefix=_translation_context_prefix(),
                             record_history=False,
                         )
                 else:
@@ -428,7 +433,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             previous_translation, use_deepl_final,
                             previous_source_segment, source_lang,
                             source_language=config.SOURCE_LANGUAGE,
-                            context_prefix=config.CONTEXT_PREFIX,
+                            context_prefix=_translation_context_prefix(),
                             record_history=False,
                         )
                     else:
@@ -712,7 +717,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         segment,
                         source_language='auto',
                         target_language=actual_target,
-                        context_prefix=config.CONTEXT_PREFIX,
+                        context_prefix=_translation_context_prefix(),
                         is_partial=True,
                         record_history=False,
                         previous_translation=self.last_partial_translation,
@@ -727,7 +732,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         segment,
                         source_language='auto',
                         target_language=actual_secondary_target,
-                        context_prefix=config.CONTEXT_PREFIX,
+                        context_prefix=_translation_context_prefix(),
                         is_partial=True,
                         record_history=False,
                         previous_translation=self.last_partial_translation_secondary,
@@ -917,7 +922,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         previous_source_segment,
                         source_lang,
                         source_language=config.SOURCE_LANGUAGE,
-                        context_prefix=config.CONTEXT_PREFIX,
+                        context_prefix=_translation_context_prefix(),
                         record_history=False,
                     ),
                 )
@@ -936,7 +941,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         previous_source_segment,
                         source_lang,
                         source_language=config.SOURCE_LANGUAGE,
-                        context_prefix=config.CONTEXT_PREFIX,
+                        context_prefix=_translation_context_prefix(),
                         record_history=False,
                     ),
                 )
@@ -1297,7 +1302,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             previous_source_segment,
                             source_lang,
                             source_language=config.SOURCE_LANGUAGE,
-                            context_prefix=config.CONTEXT_PREFIX,
+                            context_prefix=_translation_context_prefix(),
                             record_history=False,
                         )
                     if secondary_should_translate and secondary_translator is not None:
@@ -1311,7 +1316,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             previous_source_segment,
                             source_lang,
                             source_language=config.SOURCE_LANGUAGE,
-                            context_prefix=config.CONTEXT_PREFIX,
+                            context_prefix=_translation_context_prefix(),
                             record_history=False,
                         )
                 else:
@@ -1326,7 +1331,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             previous_source_segment,
                             source_lang,
                             source_language=config.SOURCE_LANGUAGE,
-                            context_prefix=config.CONTEXT_PREFIX,
+                            context_prefix=_translation_context_prefix(),
                             record_history=False,
                         )
                     else:

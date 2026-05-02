@@ -9,6 +9,7 @@ from contextlib import suppress
 from typing import Any, Dict, List, Optional
 import config as app_config
 from resource_path import get_resource_path, get_user_data_path, ensure_dir
+from vrcx_context_bridge import build_asr_context_text, get_asr_context_terms
 
 try:
     from websockets.sync.client import connect as ws_connect
@@ -200,6 +201,36 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
             except Exception:
                 # Fail silently; do not prevent recognizer from starting
                 context_payload = None
+
+        vrcx_terms = get_asr_context_terms()
+        vrcx_text = build_asr_context_text("")
+        if vrcx_terms or vrcx_text:
+            if context_payload is None:
+                context_payload = {}
+            elif not isinstance(context_payload, dict):
+                context_payload = {"terms": list(context_payload)}
+
+            merged_terms: List[str] = []
+            seen_terms = set()
+            existing_terms = context_payload.get("terms")
+            if isinstance(existing_terms, list):
+                for term in existing_terms:
+                    text = str(term or "").strip()
+                    if text and text not in seen_terms:
+                        seen_terms.add(text)
+                        merged_terms.append(text)
+            for term in vrcx_terms:
+                if term and term not in seen_terms:
+                    seen_terms.add(term)
+                    merged_terms.append(term)
+            if merged_terms:
+                context_payload["terms"] = merged_terms[:500]
+
+            if vrcx_text:
+                existing_text = str(context_payload.get("text") or "").strip()
+                context_payload["text"] = (
+                    f"{existing_text}\n\n{vrcx_text}" if existing_text else vrcx_text
+                )
 
         if context_payload:
             config["context"] = context_payload

@@ -24,6 +24,7 @@ from .base_speech_recognizer import (
     SpeechRecognitionCallback,
     SpeechRecognizer,
 )
+from vrcx_context_bridge import build_asr_context_text
 
 __all__ = ["QwenSpeechRecognizer"]
 
@@ -195,6 +196,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         self._pause_finalize_timeout_ms = max(0, int(options.pop("pause_finalize_timeout_ms", 500)))
         self._language = options.pop("language", None)
         self._corpus_text = options.pop("corpus_text", None)
+        self._applied_transcription_corpus_text: Optional[str] = None
         self._enable_input_audio_transcription = options.pop("enable_input_audio_transcription", True)
         self._transcription_params: Optional[TranscriptionParams] = options.pop("transcription_params", None)
         self._keepalive_interval = options.pop("keepalive_interval", 30)  # 心跳间隔（秒）
@@ -240,32 +242,17 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._pause_started_at = None
             self._pause_sequence = 0
             self._suppressed_server_final_sequence = None
+            self._applied_transcription_corpus_text = None
 
         conversation = self._conversation
         assert conversation is not None  # for type checkers
         try:
             conversation.connect()
-            transcription_params = self._resolve_transcription_params()
-            update_kwargs: Dict[str, Any] = {
-                "output_modalities": [MultiModality.TEXT],
-                "enable_input_audio_transcription": self._enable_input_audio_transcription,
-                "transcription_params": transcription_params,
-            }
-            if self._enable_turn_detection is not None:
-                update_kwargs["enable_turn_detection"] = self._enable_turn_detection
-            if self._enable_turn_detection:
-                update_kwargs.setdefault("turn_detection_type", "server_vad")
-                if self._turn_detection_threshold is not None:
-                    update_kwargs.setdefault("turn_detection_threshold", self._turn_detection_threshold)
-                if self._turn_detection_silence_duration_ms is not None:
-                    update_kwargs.setdefault(
-                        "turn_detection_silence_duration_ms",
-                        self._turn_detection_silence_duration_ms,
-                    )
-            else:
-                update_kwargs.setdefault("turn_detection_type", None)
-            update_kwargs.update(self._update_session_overrides)
+            corpus_text = self._resolve_corpus_text()
+            update_kwargs = self._build_update_session_kwargs(corpus_text)
             conversation.update_session(**update_kwargs)
+            with self._lock:
+                self._applied_transcription_corpus_text = corpus_text
             
             # 启动心跳线程
             self._start_keepalive()
@@ -329,6 +316,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
                     self._connection_closed = True  # 重连失败，重新标记
                 return
         
+        self._refresh_dynamic_transcription_context()
         conversation = self._require_conversation()
         audio_b64 = base64.b64encode(data).decode("ascii")
         try:
@@ -452,15 +440,70 @@ class QwenSpeechRecognizer(SpeechRecognizer):
     def _resolve_transcription_params(self) -> TranscriptionParams:
         if self._transcription_params is not None:
             return self._transcription_params
+        corpus_text = self._resolve_corpus_text()
+        return self._build_transcription_params(corpus_text)
+
+    def _resolve_corpus_text(self) -> str:
+        return build_asr_context_text(self._corpus_text or "")
+
+    def _build_transcription_params(self, corpus_text: Optional[str] = None) -> TranscriptionParams:
         params: Dict[str, Any] = {
             "sample_rate": self._sample_rate,
             "input_audio_format": self._input_audio_format,
         }
         if self._language:
             params["language"] = self._language
-        if self._corpus_text:
-            params["corpus_text"] = self._corpus_text
+        if corpus_text:
+            params["corpus_text"] = corpus_text
         return TranscriptionParams(**params)
+
+    def _build_update_session_kwargs(self, corpus_text: Optional[str] = None) -> Dict[str, Any]:
+        transcription_params = (
+            self._transcription_params
+            if self._transcription_params is not None
+            else self._build_transcription_params(corpus_text)
+        )
+        update_kwargs: Dict[str, Any] = {
+            "output_modalities": [MultiModality.TEXT],
+            "enable_input_audio_transcription": self._enable_input_audio_transcription,
+            "transcription_params": transcription_params,
+        }
+        if self._enable_turn_detection is not None:
+            update_kwargs["enable_turn_detection"] = self._enable_turn_detection
+        if self._enable_turn_detection:
+            update_kwargs.setdefault("turn_detection_type", "server_vad")
+            if self._turn_detection_threshold is not None:
+                update_kwargs.setdefault("turn_detection_threshold", self._turn_detection_threshold)
+            if self._turn_detection_silence_duration_ms is not None:
+                update_kwargs.setdefault(
+                    "turn_detection_silence_duration_ms",
+                    self._turn_detection_silence_duration_ms,
+                )
+        else:
+            update_kwargs.setdefault("turn_detection_type", None)
+        update_kwargs.update(self._update_session_overrides)
+        return update_kwargs
+
+    def _refresh_dynamic_transcription_context(self) -> None:
+        if self._transcription_params is not None:
+            return
+
+        corpus_text = self._resolve_corpus_text()
+        with self._lock:
+            conversation = self._conversation
+            applied_corpus_text = self._applied_transcription_corpus_text
+        if conversation is None or corpus_text == applied_corpus_text:
+            return
+
+        try:
+            conversation.update_session(**self._build_update_session_kwargs(corpus_text))
+        except Exception as e:
+            print(f"[Qwen] Failed to refresh ASR context: {e}")
+            return
+
+        with self._lock:
+            if self._conversation is conversation:
+                self._applied_transcription_corpus_text = corpus_text
 
     def _finish_conversation(self, conversation: OmniRealtimeConversation) -> None:
         conversation.end_session()
@@ -560,27 +603,11 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         
         try:
             conversation.connect()
-            transcription_params = self._resolve_transcription_params()
-            update_kwargs: Dict[str, Any] = {
-                "output_modalities": [MultiModality.TEXT],
-                "enable_input_audio_transcription": self._enable_input_audio_transcription,
-                "transcription_params": transcription_params,
-            }
-            if self._enable_turn_detection is not None:
-                update_kwargs["enable_turn_detection"] = self._enable_turn_detection
-            if self._enable_turn_detection:
-                update_kwargs.setdefault("turn_detection_type", "server_vad")
-                if self._turn_detection_threshold is not None:
-                    update_kwargs.setdefault("turn_detection_threshold", self._turn_detection_threshold)
-                if self._turn_detection_silence_duration_ms is not None:
-                    update_kwargs.setdefault(
-                        "turn_detection_silence_duration_ms",
-                        self._turn_detection_silence_duration_ms,
-                    )
-            else:
-                update_kwargs.setdefault("turn_detection_type", None)
-            update_kwargs.update(self._update_session_overrides)
+            corpus_text = self._resolve_corpus_text()
+            update_kwargs = self._build_update_session_kwargs(corpus_text)
             conversation.update_session(**update_kwargs)
+            with self._lock:
+                self._applied_transcription_corpus_text = corpus_text
             
             # 重新启动心跳线程
             self._start_keepalive()

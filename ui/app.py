@@ -21,6 +21,11 @@ import config
 from audio_runtime_guard import hold_portaudio, _suppress_stderr
 from text_processor import sanitize_text_fancy_style
 from udp_port_check import get_non_vrchat_udp_port_occupants
+from vrcx_context_bridge import (
+    build_console_script,
+    get_status as get_vrcx_bridge_status,
+    store_payload as store_vrcx_context_payload,
+)
 try:
     from local_asr import (
         LOCAL_ASR_DISPLAY_NAMES,
@@ -643,6 +648,16 @@ def _request_translator_context_clear():
         print(f'Error requesting translator context clear: {e}')
 
 
+def _vrcx_context_endpoint_from_request() -> str:
+    host = request.host or '127.0.0.1:5001'
+    port = request.environ.get('SERVER_PORT') or '5001'
+    if ':' in host:
+        maybe_port = host.rsplit(':', 1)[-1]
+        if maybe_port.isdigit():
+            port = maybe_port
+    return f'http://127.0.0.1:{port}/vrcx/context'
+
+
 @app.route('/')
 def index():
     """主页面"""
@@ -659,6 +674,38 @@ def get_config():
 def get_features():
     """获取按构建/依赖裁剪后的前端功能开关。"""
     return jsonify(_get_feature_flags())
+
+
+@app.route('/api/vrcx-bridge/script', methods=['GET'])
+def get_vrcx_bridge_script():
+    """Return the VRCX console bridge script with the current localhost endpoint."""
+    endpoint = _vrcx_context_endpoint_from_request()
+    return jsonify({
+        'success': True,
+        'endpoint': endpoint,
+        'script': build_console_script(endpoint),
+        'status': get_vrcx_bridge_status(),
+    })
+
+
+@app.route('/api/vrcx-bridge/status', methods=['GET'])
+def get_vrcx_bridge_status_api():
+    """Return the latest VRCX bridge receive status without exposing the token."""
+    return jsonify(get_vrcx_bridge_status())
+
+
+@app.route('/vrcx/context', methods=['POST', 'OPTIONS'])
+def receive_vrcx_context():
+    """Receive compact VRCX context posted by the console bridge script."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    token = request.args.get('token', '')
+    ok, reason = store_vrcx_context_payload(token, request.get_data(cache=False))
+    if not ok:
+        status_code = 403 if reason == 'invalid token' else 400
+        return jsonify({'success': False, 'message': reason}), status_code
+    return ('', 204)
 
 
 @app.route('/api/local-asr/status', methods=['GET'])

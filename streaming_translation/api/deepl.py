@@ -43,6 +43,18 @@ class DeepLAPI(BaseTranslationAPI):
         # warm-up
         self.translate("Hello", source_language="auto", target_language="en")
 
+    @staticmethod
+    def _extract_vrcx_context(context: Optional[str]) -> str:
+        if not context:
+            return ""
+        start_marker = "<VRCHAT_CONTEXT>"
+        end_marker = "</VRCHAT_CONTEXT>"
+        start = context.find(start_marker)
+        end = context.find(end_marker, start + len(start_marker))
+        if start < 0 or end <= start:
+            return ""
+        return context[start + len(start_marker):end].strip()[:3000].rstrip()
+
     def translate(
         self,
         text: str,
@@ -71,9 +83,15 @@ class DeepLAPI(BaseTranslationAPI):
             source_lang = None if source_language.lower() == "auto" else source_language.upper()
 
             final_context = None
+            vrcx_context = self._extract_vrcx_context(context)
             if context_pairs:
                 context_texts = [p["source"] for p in context_pairs]
                 final_context = " ".join(context_texts)
+                if vrcx_context:
+                    final_context = (
+                        "VRChat context for names, world and references: "
+                        f"{vrcx_context}\n{final_context}"
+                    )
             elif context:
                 final_context = context
 

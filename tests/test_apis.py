@@ -122,6 +122,27 @@ class TestDeepLAPI:
             assert "context" in kwargs
             assert "Hi" in kwargs["context"]
 
+    def test_vrcx_context_kept_with_context_pairs(self):
+        mock_client = MagicMock()
+        with patch("streaming_translation.api.deepl.deepl") as mock_deepl:
+            mock_deepl.DeepLClient.return_value = mock_client
+            mock_deepl.AuthorizationException = type("AuthExc", (Exception,), {})
+            mock_deepl.QuotaExceededException = type("QuotaExc", (Exception,), {})
+            mock_deepl.DeepLException = type("DeepLExc", (Exception,), {})
+            from streaming_translation.api.deepl import DeepLAPI
+            api = DeepLAPI(api_key="test-key", proxy_url=None)
+            mock_client.reset_mock()
+            mock_client.translate_text.return_value.text = "Hola"
+            api.translate(
+                "Hello",
+                context="Base\n<VRCHAT_CONTEXT>\nWorld: Test World\n</VRCHAT_CONTEXT>",
+                context_pairs=[{"source": "Hi", "target": "Hola"}],
+                target_language="es",
+            )
+            _, kwargs = mock_client.translate_text.call_args
+            assert "World: Test World" in kwargs["context"]
+            assert "Hi" in kwargs["context"]
+
 
 # ── GoogleWebAPI ──────────────────────────────────────────────────────
 
@@ -245,6 +266,24 @@ class TestQwenMTAPI:
         assert len(opts["tm_list"]) == 1
         assert opts["tm_list"][0]["source"] == "Hi"
 
+    @patch("streaming_translation.api.qwen_mt.OpenAI")
+    def test_vrcx_context_added_to_domains(self, mock_openai):
+        mock_openai.return_value = MagicMock()
+        from streaming_translation.api.qwen_mt import QwenMTAPI
+        api = QwenMTAPI(api_key="test-key", proxy_url=None)
+        api.client = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = "Hola"
+        api.client.chat.completions.create.return_value = MagicMock(choices=[mock_choice])
+        api.translate(
+            "Hello",
+            context="Base\n<VRCHAT_CONTEXT>\nWorld: Test World\n</VRCHAT_CONTEXT>",
+            target_language="es",
+        )
+        _, kwargs = api.client.chat.completions.create.call_args
+        opts = kwargs["extra_body"]["translation_options"]
+        assert "World: Test World" in opts["domains"]
+
 
 # ── OpenRouterAPI ─────────────────────────────────────────────────────
 
@@ -356,6 +395,14 @@ class TestOpenRouterAPI:
         block2 = OpenRouterAPI._build_context_block("Previous chat.", None)
         assert block2 is not None
         assert "Previous chat." in block2
+        # VRCX context is preserved even when translation-memory pairs are present
+        block3 = OpenRouterAPI._build_context_block(
+            "Base\n<VRCHAT_CONTEXT>\nWorld: Test World\n</VRCHAT_CONTEXT>",
+            [{"source": "Hi", "target": "Hola"}],
+        )
+        assert block3 is not None
+        assert "World: Test World" in block3
+        assert "Hi" in block3
         # Neither
         assert OpenRouterAPI._build_context_block(None, None) is None
         assert OpenRouterAPI._build_context_block("", None) is None

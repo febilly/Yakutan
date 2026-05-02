@@ -9,6 +9,7 @@ let lastMicDefaultIdentity = null;
 
 // 配置键名
 const CONFIG_STORAGE_KEY = 'vrchat_translator_config';
+const VRCX_BRIDGE_BUTTON_VISIBLE_STORAGE_KEY = 'vrcx_bridge_button_visible';
 
 // ===================== 大面板 ↔ 后端 同步基础设施 =====================
 //
@@ -301,6 +302,129 @@ async function loadServerFeatures() {
         updateLocalAsrUiVisibility();
     } catch (error) {
         console.warn('加载功能开关失败:', error);
+    }
+}
+
+function isVrcxBridgeButtonVisible() {
+    return localStorage.getItem(VRCX_BRIDGE_BUTTON_VISIBLE_STORAGE_KEY) === 'true';
+}
+
+function setVrcxBridgeStatusText(messageId, params = {}) {
+    const statusEl = document.getElementById('vrcx-bridge-status');
+    if (!statusEl) return;
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    statusEl.textContent = t(messageId, params);
+    statusEl.setAttribute('data-i18n', messageId);
+}
+
+function updateVrcxBridgeControlsVisibility() {
+    const visible = isVrcxBridgeButtonVisible();
+    const toggle = document.getElementById('show-vrcx-bridge-button');
+    const controls = document.getElementById('vrcx-bridge-controls');
+    if (toggle) {
+        toggle.checked = visible;
+    }
+    if (controls) {
+        controls.style.display = visible ? 'flex' : 'none';
+    }
+    if (visible) {
+        void refreshVrcxBridgeStatus();
+    }
+}
+
+function onVrcxBridgeVisibilityChange() {
+    const toggle = document.getElementById('show-vrcx-bridge-button');
+    localStorage.setItem(
+        VRCX_BRIDGE_BUTTON_VISIBLE_STORAGE_KEY,
+        toggle && toggle.checked ? 'true' : 'false',
+    );
+    updateVrcxBridgeControlsVisibility();
+}
+
+function loadVrcxBridgeUiPreference() {
+    if (!localStorage.getItem(VRCX_BRIDGE_BUTTON_VISIBLE_STORAGE_KEY)) {
+        localStorage.setItem(VRCX_BRIDGE_BUTTON_VISIBLE_STORAGE_KEY, 'false');
+    }
+    updateVrcxBridgeControlsVisibility();
+}
+
+async function writeTextToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch (error) {
+            console.warn('Clipboard API failed, using fallback:', error);
+        }
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let ok = false;
+    try {
+        ok = document.execCommand('copy');
+    } finally {
+        document.body.removeChild(textarea);
+    }
+    return ok;
+}
+
+async function copyVrcxBridgeScript() {
+    const button = document.getElementById('copy-vrcx-bridge-btn');
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    if (button) {
+        button.disabled = true;
+        button.textContent = t('btn.copying');
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/vrcx-bridge/script`, { cache: 'no-store' });
+        const payload = await response.json();
+        if (!response.ok || !payload.success || !payload.script) {
+            throw new Error(payload.message || 'script unavailable');
+        }
+
+        const copied = await writeTextToClipboard(payload.script);
+        if (!copied) {
+            throw new Error('clipboard unavailable');
+        }
+        setVrcxBridgeStatusText('status.vrcxBridgeWaiting');
+        showLocalizedMessage('msg.vrcxBridgeScriptCopied', 'success');
+        void refreshVrcxBridgeStatus();
+    } catch (error) {
+        console.error('复制 VRCX 上下文脚本失败:', error);
+        showLocalizedMessage('msg.vrcxBridgeScriptCopyFailed', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = t('btn.copyVrcxBridgeScript');
+        }
+    }
+}
+
+async function refreshVrcxBridgeStatus() {
+    if (!isVrcxBridgeButtonVisible()) return;
+    try {
+        const response = await fetch(`${API_BASE}/vrcx-bridge/status`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const status = await response.json();
+        if (status.connected) {
+            const ageSeconds = Math.max(0, Math.round((status.ageMs || 0) / 1000));
+            setVrcxBridgeStatusText('status.vrcxBridgeConnected', { seconds: ageSeconds });
+        } else if (status.ageMs != null) {
+            setVrcxBridgeStatusText('status.vrcxBridgeStale');
+        } else {
+            setVrcxBridgeStatusText('status.vrcxBridgeIdle');
+        }
+    } catch (error) {
+        console.warn('获取 VRCX 上下文桥接状态失败:', error);
     }
 }
 
@@ -1699,6 +1823,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     loadPanelFloatingModeSetting();
     loadQuickLanguageSettings();
+    loadVrcxBridgeUiPreference();
     loadAPIKeys();
     initializeCollapsibleStates();
     applyStoredExtraBodyForActiveLLMTemplate();
@@ -1722,6 +1847,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     // 每2秒更新一次状态
     setInterval(updateStatus, 2000);
     setInterval(updateIpcStatus, 2500);
+    setInterval(refreshVrcxBridgeStatus, 5000);
     setInterval(() => {
         if (isLocalAsrUiEnabled()) {
             void refreshLocalAsrStatus();
@@ -1747,6 +1873,7 @@ document.addEventListener('i18n:languageChanged', function () {
     refreshMicDevices(true);
     updateDashscopeKeyFieldState();
     updateStatus();
+    refreshVrcxBridgeStatus();
     updateLLMTemplateKeySourceHint();
 });
 
@@ -3387,6 +3514,8 @@ async function resetToDefaults() {
         loadDefaultConfig();
         resetPanelFloatingModeSetting();
         resetQuickLanguageSettings();
+        localStorage.setItem(VRCX_BRIDGE_BUTTON_VISIBLE_STORAGE_KEY, 'false');
+        updateVrcxBridgeControlsVisibility();
 
         // 根据翻译开关显示/隐藏翻译选项
         toggleTranslationOptions();

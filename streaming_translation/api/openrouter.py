@@ -277,18 +277,53 @@ class OpenRouterAPI(BaseTranslationAPI):
         )
 
     @staticmethod
+    def _extract_vrcx_context(context: Optional[str]) -> str:
+        if not context:
+            return ""
+        start_marker = "<VRCHAT_CONTEXT>"
+        end_marker = "</VRCHAT_CONTEXT>"
+        start = context.find(start_marker)
+        end = context.find(end_marker, start + len(start_marker))
+        if start < 0 or end <= start:
+            return ""
+        return context[start + len(start_marker):end].strip()[:3000].rstrip()
+
+    @staticmethod
     def _build_context_block(
         context: Optional[str],
         context_pairs: Optional[List[Dict[str, str]]],
     ) -> Optional[str]:
+        blocks = []
+        vrcx_context = OpenRouterAPI._extract_vrcx_context(context)
+        if vrcx_context:
+            blocks.append(
+                "VRChat/VRCX local context for names, world and references. "
+                "Use only for disambiguation; do not output it:\n"
+                f"<VRCHAT_CONTEXT>\n{vrcx_context}\n</VRCHAT_CONTEXT>"
+            )
+
         if context_pairs:
             parts = ["Conversation so far:"]
             for p in context_pairs:
                 parts.append(f"  {p['source']} → {p['target']}")
-            return "\n".join(parts)
+            blocks.append("\n".join(parts))
+            return "\n\n".join(blocks)
         if context and context.strip():
-            return f"Conversation so far:\n{context.strip()}"
-        return None
+            conversation_context = context
+            if vrcx_context:
+                start_marker = "<VRCHAT_CONTEXT>"
+                end_marker = "</VRCHAT_CONTEXT>"
+                start = conversation_context.find(start_marker)
+                end = conversation_context.find(end_marker, start + len(start_marker))
+                if start >= 0 and end > start:
+                    conversation_context = (
+                        conversation_context[:start]
+                        + conversation_context[end + len(end_marker):]
+                    )
+            conversation_context = conversation_context.strip()
+            if conversation_context:
+                blocks.append(f"Conversation so far:\n{conversation_context}")
+        return "\n\n".join(blocks) if blocks else None
 
     @staticmethod
     def _build_extra_body(raw: str) -> Dict:

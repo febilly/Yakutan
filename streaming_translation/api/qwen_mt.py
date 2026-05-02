@@ -66,6 +66,19 @@ class QwenMTAPI(BaseTranslationAPI):
         code = lang_code.lower()
         return self.LANGUAGE_MAP.get(code, code)
 
+    @staticmethod
+    def _extract_vrcx_context(context: Optional[str]) -> str:
+        if not context:
+            return ""
+        start_marker = "<VRCHAT_CONTEXT>"
+        end_marker = "</VRCHAT_CONTEXT>"
+        start = context.find(start_marker)
+        end = context.find(end_marker, start + len(start_marker))
+        if start < 0 or end <= start:
+            return ""
+        text = context[start + len(start_marker):end].strip()
+        return text[:3000].rstrip()
+
     def translate(
         self,
         text: str,
@@ -90,8 +103,17 @@ class QwenMTAPI(BaseTranslationAPI):
                     for p in context_pairs
                 ]
 
-            if self.DOMAINS:
-                translation_options["domains"] = self.DOMAINS
+            domain_text = self.DOMAINS
+            vrcx_context = self._extract_vrcx_context(context)
+            if vrcx_context:
+                domain_text = (
+                    f"{domain_text}\n"
+                    "Local VRChat context for names, world and references:\n"
+                    f"{vrcx_context}"
+                )
+
+            if domain_text:
+                translation_options["domains"] = domain_text
 
             messages = [{"role": "user", "content": text}]
             completion = self.client.chat.completions.create(

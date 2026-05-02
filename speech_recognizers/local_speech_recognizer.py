@@ -13,6 +13,7 @@ import config
 from local_asr import get_engine_runtime_issues
 from local_asr.model_manager import is_asr_cached, is_asr_models_ready, is_silero_cached
 from local_asr.vad_processor import VADProcessor
+from vrcx_context_bridge import build_asr_context_text
 
 from .base_speech_recognizer import RecognitionEvent, SpeechRecognitionCallback, SpeechRecognizer
 
@@ -105,7 +106,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         elif self._engine_name == "qwen3-asr":
             from local_asr.asr_qwen3 import Qwen3ASREngine
 
-            engine = Qwen3ASREngine(corpus_text=self._corpus_text or None)
+            engine = Qwen3ASREngine(corpus_text=build_asr_context_text(self._corpus_text) or None)
         else:
             raise RuntimeError(f"未知的本地识别引擎: {self._engine_name}")
 
@@ -126,6 +127,8 @@ class LocalSpeechRecognizer(SpeechRecognizer):
 
     def _transcribe(self, audio: np.ndarray, *, is_final: bool = True) -> tuple[str, dict] | None:
         engine = self._ensure_engine()
+        if hasattr(engine, "set_corpus_text"):
+            engine.set_corpus_text(build_asr_context_text(self._corpus_text) or None)
         kwargs = {}
         if hasattr(engine, "transcribe") and "update_context" in engine.transcribe.__code__.co_varnames:
             kwargs["update_context"] = is_final

@@ -45,6 +45,12 @@
                             <button id="panel-btn" class="btn btn-primary" onclick="openMiniPanel()"
                                 data-i18n="btn.openPanel"
                                 style="background-color: #5aa1d9; border-color: #5aa1d9; color: white;">小面板</button>
+                            <div id="vrcx-bridge-controls" class="vrcx-bridge-controls" style="display: none;">
+                                <button type="button" id="copy-vrcx-bridge-btn" class="btn btn-primary"
+                                    onclick="copyVrcxBridgeScript()" data-i18n="btn.copyVrcxBridgeScript">复制 VRCX 上下文脚本</button>
+                                <small id="vrcx-bridge-status" class="form-text"
+                                    data-i18n="status.vrcxBridgeIdle">尚未接收 VRCX 上下文</small>
+                            </div>
                         </div>
                         <div class="control-buttons-right">
                             <button id="reset-btn" class="btn btn-warning" onclick="resetToDefaults()"
@@ -783,6 +789,17 @@
                                 <input type="number" id="panel-width" class="form-control" min="300" max="2000"
                                     step="20" value="600" onchange="onSettingChange()">
                                 <small class="form-text" data-i18n="hint.panelWidth">修改后对新打开的小面板生效</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.showVrcxBridgeButton">显示 VRCX 上下文桥接按钮</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="show-vrcx-bridge-button"
+                                            onchange="onVrcxBridgeVisibilityChange()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" data-i18n="hint.showVrcxBridgeButton">开启后可复制脚本到 VRCX 控制台，让当前世界和玩家名辅助翻译</small>
                             </div>
                         </div>
 
