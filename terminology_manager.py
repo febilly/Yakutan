@@ -97,7 +97,7 @@ class TerminologyManager:
         if not matched:
             return None
 
-        lines = ["Terminology hints:"]
+        lines = ["Terminology hints (only apply these when the original text clearly matches the term's intended meaning — do not force-fit if the context differs):"]
         for keyword, inst in matched:
             lines.append(f"  '{keyword}': {inst}")
         return "\n".join(lines)
