@@ -5,6 +5,7 @@ from typing import Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..api.base import BaseTranslationAPI
+    from terminology_manager import TerminologyManager
 
 CONTEXT_MARKER = "\U0001f524"  # 🔤
 
@@ -39,12 +40,14 @@ class ContextAwareTranslator:
         max_context_size: int = 6,
         target_language: str = "zh-CN",
         context_aware: bool = True,
+        terminology_manager: Optional[TerminologyManager] = None,
     ):
         self.translation_api = translation_api
         self.api_name = api_name
         self.max_context_size = max_context_size
         self.target_language = target_language
         self.context_aware = context_aware
+        self.terminology_manager = terminology_manager
         self._native_context_support = getattr(translation_api, "SUPPORTS_CONTEXT", False)
         self._contexts: deque = deque(maxlen=max_context_size)
         self._lock = __import__("threading").RLock()
@@ -198,6 +201,11 @@ class ContextAwareTranslator:
             if ctx and not ctx.endswith(" "):
                 ctx += " "
 
+            if self.terminology_manager is not None:
+                hints = self.terminology_manager.get_terminology_hints(text.strip(), target_language)
+                if hints:
+                    ctx = f"{ctx}\n{hints}\n"
+
             pairs = self._previous_context_pairs()
             pairs.append({"source": text.strip(), "target": "", "speaker": "me"})
 
@@ -210,6 +218,16 @@ class ContextAwareTranslator:
                 **kwargs,
             )
         else:
+            if self.terminology_manager is not None:
+                hints = self.terminology_manager.get_terminology_hints(text.strip(), target_language)
+                if hints:
+                    return self.translation_api.translate(
+                        text,
+                        source_language=source_language,
+                        target_language=target_language,
+                        context=hints,
+                        **kwargs,
+                    )
             return self.translation_api.translate(
                 text,
                 source_language=source_language,

@@ -19,6 +19,7 @@ from .api.google_web import GoogleWebAPI
 from .api.openrouter import OpenRouterAPI, OpenRouterStreamingAPI
 from .api.qwen_mt import QwenMTAPI
 from .core.context_aware import ContextAwareTranslator
+from terminology_manager import get_terminology_manager
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,7 @@ def _build_context_translator(
     api_class: type[BaseTranslationAPI],
     target_language: str,
     cfg: TranslationConfig,
+    terminology_manager=None,
 ) -> tuple[BaseTranslationAPI, ContextAwareTranslator]:
     api_instance = _build_api(api_class, cfg)
     translator = ContextAwareTranslator(
@@ -200,6 +202,7 @@ def _build_context_translator(
         max_context_size=cfg.translation_context_size,
         target_language=target_language,
         context_aware=cfg.translation_context_aware,
+        terminology_manager=terminology_manager if cfg.terminology_enabled else None,
     )
     return api_instance, translator
 
@@ -273,8 +276,9 @@ def ensure_secondary_translator(
         cfg = TranslationConfig()
 
     api_class = _get_api_class(cfg.translation_api_type)
+    tm = get_terminology_manager()
     state.secondary_translation_api, state.secondary_translator = _build_context_translator(
-        api_class, target_language, cfg,
+        api_class, target_language, cfg, tm,
     )
     if is_streaming_deepl_hybrid_mode(cfg.translation_api_type):
         try:
@@ -297,10 +301,11 @@ def reinitialize_translator(state, cfg: TranslationConfig) -> None:
 
     clear_translation_contexts(state)
     api_class = _get_api_class(cfg.translation_api_type)
+    tm = get_terminology_manager()
 
     # Primary
     state.translation_api, state.translator = _build_context_translator(
-        api_class, cfg.target_language, cfg,
+        api_class, cfg.target_language, cfg, tm,
     )
 
     # Secondary
@@ -309,7 +314,7 @@ def reinitialize_translator(state, cfg: TranslationConfig) -> None:
     secondary_target = _normalize_optional_language_code(cfg.secondary_target_language)
     if secondary_target:
         state.secondary_translation_api, state.secondary_translator = _build_context_translator(
-            api_class, secondary_target, cfg,
+            api_class, secondary_target, cfg, tm,
         )
 
     # Backwards (always Google Dictionary)
@@ -329,13 +334,13 @@ def reinitialize_translator(state, cfg: TranslationConfig) -> None:
     if is_streaming_deepl_hybrid_mode(cfg.translation_api_type):
         try:
             state.deepl_fallback_translation_api, state.deepl_fallback_translator = (
-                _build_context_translator(DeepLAPI, cfg.target_language, cfg)
+                _build_context_translator(DeepLAPI, cfg.target_language, cfg, tm)
             )
             if secondary_target:
                 (
                     state.secondary_deepl_fallback_translation_api,
                     state.secondary_deepl_fallback_translator,
-                ) = _build_context_translator(DeepLAPI, secondary_target, cfg)
+                ) = _build_context_translator(DeepLAPI, secondary_target, cfg, tm)
         except Exception as e:
             logger.warning("DeepL fallback init failed: %s", e)
 

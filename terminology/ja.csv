@@ -1,0 +1,44 @@
+keywords,instruction
+# 模型
+模型; avatar,"Use 'アバター' when referring to a VRChat avatar."
+改模; avatar mod, Use 'アバター改変' (or just '改変' when the context is clear) for VRChat avatar modifications.
+功能; 机关; gimmick,"Use 'ギミック' for VRChat avatar props, effects, or interactive features."
+骨骼; 动骨; physbone, Use 'PhysBone' for VRChat avatar physics bones.
+booth, Use 'Booth' when referring to Booth the online store.
+unity, Use 'Unity' when referring to the Unity game engine.
+
+# 好友
+好友; friend,"Use 'フレンド' for online or in-game friends, and '友達' for real-life friends. Use 'フレンド申請' for sending a friend request in VRChat."
+
+# 状态
+蓝灯; on blue; blue status, "Use '青ステータス' for the 'Join me' status or the 'blue status' in VRChat. Use this term only for VRChat status, and not for general use of the color."
+绿灯; on green; green status, "Use '緑ステータス' for the 'Online' status or the 'green status' in VRChat. Use this term only for VRChat status, and not for general use of the color."
+黄灯; 橙灯; on orange; orange status; on yellow; yellow status, "Use 'オレンジステータス' for the 'Ask me' status or the 'orange/yellow status' in VRChat. Use this term only for VRChat status, and not for general use of the color."
+红灯; on red; red status, "Use '赤ステータス' for the 'Do Not Disturb' status or the 'red status' in VRChat. Use this term only for VRChat status, and not for general use of the color."
+
+# 世界
+世界; 地图; world; map,"Use 'ワールド' for a VRChat world, and '世界' for the general term 'world'."
+实例; 房间; instance; room,"Use 'インスタンス' when referring to a specific session or 'instance' of a VRChat world."
+公开; public,Use 'パブリック' for the VRChat instance type 'public'.
+好友+; 好友加; friends+; friends plus,"Use 'フレプラ' for the VRChat instance type 'friends+'."
+好友房; friends only,Use 'フレオン' for the friends-only instance type 'friends only'.
+私人房; invite; private,Use 'インバイト' or 'プラベ' or 'プライベートなインスタンス' for the VRChat instance type 'invite' or 'private'.
+传送门; portal,Use 'ポータル' for a VRChat portal.
+
+# 人的类别
+砂糖; sugar, Use 'お砂糖' for VRChat relationship slang if the word is referring to the affectionate term.
+无言势; mute, Use '無言勢' for players who do not speak by voice.
+
+# 动作
+摸摸; 摸头; pat; headpat, Use '撫でる' or 'なでなで' for headpats.
+贴贴; cuddles; cuddling, "A broad Chinese slang term for affectionate physical closeness in VRChat. It may mean staying close, cuddling, hugging, head-patting, sleeping side by side, or flirtatious/couple-like interaction. Choose the Japanese rendering based on context. When in doubt, choose 'ハグ(する)'."
+V睡; VR sleep, Use 'V睡' for sleeping in VRChat.
+幻触; phantom sense, "Use 'V感' for the psychological phenomena experienced among some VRChat users, where one may perceive physical sensations from actions and stimuli, from their avatar within virtual reality."
+
+# 游玩类别类
+桌面; 桌面模式; desktop, Use 'デスクトップ' for non-VR desktop play mode.
+半身; 3点; 3-point tracking; three point, Use '3点トラッキング' for headset-and-controller tracking.
+全身追踪; 全追; full body tracking; full-body; FBT, Use 'フルトラ' (or 'フルボディトラッキング' when other users are asking for clarification) for full-body tracking.
+quest, Use 'Quest勢' for players using Meta Quest headsets.
+一体机; standalone, Use '単体勢' for players using standalone headsets.
+安卓; 苹果; ios; 手机; mobile, Use 'スマホ勢' for players using VRChat Mobile on Android or iOS.

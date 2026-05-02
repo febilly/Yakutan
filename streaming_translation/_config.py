@@ -109,6 +109,8 @@ class TranslationConfig:
     deepl_formality: str = "default"
     """DeepL formality setting (``"default"``, ``"prefer_more"``, ``"prefer_less"``)."""
 
+    terminology_enabled: bool = True
+
 
 def _get_module_attr_or_env(module: object, attr_name: str, *env_names: str) -> Optional[str]:
     value = getattr(module, attr_name, None)
@@ -167,4 +169,5 @@ def config_from_module(module: object) -> TranslationConfig:
         llm_api_key=_get_module_attr_or_env(module, "LLM_API_KEY", "LLM_API_KEY", "OPENROUTER_API_KEY"),
         openai_api_key=_get_module_attr_or_env(module, "OPENAI_API_KEY", "OPENAI_API_KEY"),
         deepl_formality=getattr(module, "DEEPL_FORMALITY", "default"),
+        terminology_enabled=getattr(module, "TERMINOLOGY_ENABLED", True),
     )

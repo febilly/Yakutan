@@ -307,7 +307,6 @@ class OpenRouterAPI(BaseTranslationAPI):
             for p in context_pairs:
                 parts.append(f"  {p['source']} → {p['target']}")
             blocks.append("\n".join(parts))
-            return "\n\n".join(blocks)
         if context and context.strip():
             conversation_context = context
             if vrcx_context:
@@ -322,7 +321,10 @@ class OpenRouterAPI(BaseTranslationAPI):
                     )
             conversation_context = conversation_context.strip()
             if conversation_context:
-                blocks.append(f"Conversation so far:\n{conversation_context}")
+                if not context_pairs:
+                    blocks.append(f"Conversation so far:\n{conversation_context}")
+                else:
+                    blocks.append(conversation_context)
         return "\n\n".join(blocks) if blocks else None
 
     @staticmethod
@@ -493,6 +495,9 @@ class OpenRouterAPI(BaseTranslationAPI):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": "\n\n".join(parts)},
         ]
+        
+        print(messages)
+        
         return self._call_api(messages, is_partial=False)
 
     def _translate_streaming(
@@ -540,6 +545,8 @@ class OpenRouterAPI(BaseTranslationAPI):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": "\n\n".join(parts)},
         ]
+
+        print(messages)
 
         stable = self._call_api(messages, is_partial=is_partial)
 
