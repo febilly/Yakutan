@@ -64,7 +64,7 @@ const translations = {
         'hint.enableFurigana': '为日语文本的汉字标注假名读音',
         'label.enablePinyin': '中文添加拼音',
         'hint.enablePinyin': '为中文标注拼音（带声调）',
-        'label.enableArabicReshaper': '阿拉伯文显示重排',
+        'label.enableArabicReshaper': '阿拉伯文重排',
         'hint.enableArabicReshaper': '让阿拉伯文在 VRChat 中按正确字形和方向显示',
         'label.textFancyStyle': '文本风格',
         'hint.textFancyStyle': '使用 fancify-text 为文本增加 Unicode 风格',

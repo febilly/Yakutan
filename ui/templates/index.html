@@ -643,16 +643,6 @@
                             </div>
                             <div class="form-group">
                                 <label class="switch-label">
-                                    <span data-i18n="label.enableArabicReshaper">阿拉伯文显示重排</span>
-                                    <label class="switch">
-                                        <input type="checkbox" id="enable-arabic-reshaper" onchange="onSettingChange()">
-                                        <span class="slider"></span>
-                                    </label>
-                                </label>
-                                <small class="form-text" data-i18n="hint.enableArabicReshaper">让阿拉伯文在 VRChat 中按正确字形和方向显示</small>
-                            </div>
-                            <div class="form-group">
-                                <label class="switch-label">
                                     <span data-i18n="label.removeTrailingPeriod">去除句尾句号</span>
                                     <label class="switch">
                                         <input type="checkbox" id="remove-trailing-period" onchange="onSettingChange()">
@@ -841,6 +831,16 @@
                         <!-- OSC / 端口 -->
                         <div class="subsection">
                             <h3 data-i18n="subsection.oscNetwork">OSC</h3>
+                            <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.enableArabicReshaper">阿拉伯文重排</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="enable-arabic-reshaper" onchange="onSettingChange()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" data-i18n="hint.enableArabicReshaper">让阿拉伯文在 VRChat 中按正确字形和方向显示</small>
+                            </div>
                             <div class="form-group">
                                 <label class="switch-label">
                                     <span data-i18n="label.oscCompatMode">兼容模式</span>
