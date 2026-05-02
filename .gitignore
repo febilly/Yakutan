@@ -17,8 +17,6 @@ models/lid.176.bin
 hot_words_private/*.txt
 temp/
 
-tests/
-
 # PyInstaller build files
 build/
 dist/
