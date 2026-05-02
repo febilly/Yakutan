@@ -496,7 +496,7 @@ class OpenRouterAPI(BaseTranslationAPI):
             {"role": "user", "content": "\n\n".join(parts)},
         ]
         
-        print(messages)
+        # print(messages)
         
         return self._call_api(messages, is_partial=False)
 
@@ -546,7 +546,7 @@ class OpenRouterAPI(BaseTranslationAPI):
             {"role": "user", "content": "\n\n".join(parts)},
         ]
 
-        print(messages)
+        # print(messages)
 
         stable = self._call_api(messages, is_partial=is_partial)
 
