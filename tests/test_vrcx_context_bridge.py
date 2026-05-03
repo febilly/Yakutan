@@ -13,11 +13,14 @@ class TestVrcxContextBridge:
         assert "__VRCX_CONTEXT_TOKEN__" not in script
         assert "http://127.0.0.1:5001/vrcx/context" in script
         assert bridge.get_token() in script
-        assert "1.3-compact" in script
+        assert "1.4-labeled" in script
         assert "heartbeatIntervalMs: 30000" in script
         assert "printContextOnPush: true" in script
         assert "sent context #" in script
         assert 'reason: unchanged ? "heartbeat" : reason' in script
+        assert "Pronouns" in script
+        assert "renderUserLine" in script
+        assert "entry.pronounce" in script
 
     def test_store_payload_rejects_invalid_token(self):
         ok, reason = bridge.store_payload(

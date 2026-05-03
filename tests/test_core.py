@@ -74,7 +74,7 @@ class TestContextAwareTranslatorTranslate:
         call = api.calls[0]
         assert call["target"] == "ja"
         assert "VRChat:" in call["context"]
-        assert call["pairs"][-1]["source"] == "Hello"
+        assert call["pairs"] is None
 
     def test_native_context_builds_history(self):
         api = MockNativeAPI()
@@ -83,8 +83,10 @@ class TestContextAwareTranslatorTranslate:
         t.translate("Second", context_prefix="Test:")
         assert len(api.calls) == 2
         second = api.calls[1]
+        assert len(second["pairs"]) == 1
         assert second["pairs"][0]["source"] == "[Me] First"
         assert second["pairs"][0]["target"] == "[ja] First"
+        assert "Second" not in second["context"]
 
     def test_non_native_context(self):
         api = MockNonNativeAPI()

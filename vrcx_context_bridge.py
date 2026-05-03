@@ -50,6 +50,14 @@ VRCX_CONSOLE_SCRIPT_TEMPLATE = r"""
         return String(value).replace(/\s+/g, " ").trim().slice(0, maxLen || 120);
     }
 
+    function firstText(maxLen) {
+        for (let i = 1; i < arguments.length; i++) {
+            const text = safeText(arguments[i], maxLen);
+            if (text) return text;
+        }
+        return "";
+    }
+
     function valuesOf(m) {
         m = unref(m);
         if (!m) return [];
@@ -189,6 +197,25 @@ VRCX_CONSOLE_SCRIPT_TEMPLATE = r"""
             friend: Boolean(friendCtx || entry.isFriend),
             status: safeText(ref.status || (friendCtx && friendCtx.state) || entry.status || "", 24),
             statusDescription: safeText(ref.statusDescription || "", 80),
+            pronouns: firstText(
+                80,
+                entry.pronouns,
+                entry.pronoun,
+                entry.pronounsText,
+                entry.pronounce,
+                entry.pronunciation,
+                ref.pronouns,
+                ref.pronoun,
+                ref.pronounsText,
+                ref.pronounce,
+                ref.pronunciation,
+                friendCtx && friendCtx.pronouns,
+                friendCtx && friendCtx.pronoun,
+                friendCtx && friendCtx.pronounsText,
+                friendRef.pronouns,
+                friendRef.pronoun,
+                friendRef.pronounsText
+            ),
             master: Boolean(entry.isMaster),
             moderator: Boolean(entry.isModerator)
         };
@@ -252,7 +279,15 @@ VRCX_CONSOLE_SCRIPT_TEMPLATE = r"""
             self: {
                 name: safeText(currentUser.displayName, 80),
                 status: safeText(currentUser.status, 24),
-                statusDescription: safeText(currentUser.statusDescription, 100)
+                statusDescription: safeText(currentUser.statusDescription, 100),
+                pronouns: firstText(
+                    80,
+                    currentUser.pronouns,
+                    currentUser.pronoun,
+                    currentUser.pronounsText,
+                    currentUser.pronounce,
+                    currentUser.pronunciation
+                )
             },
             game: {
                 running: Boolean(unref(gameStore && gameStore.isGameRunning)),
@@ -293,55 +328,70 @@ VRCX_CONSOLE_SCRIPT_TEMPLATE = r"""
         if (!ctx.ok) return "VRCX context unavailable: " + ctx.error;
 
         const lines = [];
-        const selfBits = [ctx.self.name || "unknown"];
-        if (ctx.self.status) selfBits.push(ctx.self.status);
-        if (ctx.self.statusDescription) selfBits.push(ctx.self.statusDescription);
-        lines.push("Self: " + selfBits.join(" | "));
+        lines.push("[VRChat/VRCX local context]");
 
-        const worldBits = [ctx.world.name || "unknown world"];
-        if (ctx.world.author) worldBits.push("by " + ctx.world.author);
-        lines.push("World: " + worldBits.join(" | "));
-        if (ctx.world.description) lines.push("World note: " + ctx.world.description);
+        function addField(fields, label, value) {
+            const text = safeText(value, 180);
+            if (text) fields.push(label + ": " + text);
+        }
 
-        const locBits = [];
-        if (ctx.location.type) locBits.push(ctx.location.type);
-        if (ctx.location.instance) locBits.push("instance " + ctx.location.instance);
-        if (ctx.location.region) locBits.push(ctx.location.region);
-        if (ctx.location.traveling) locBits.push("traveling");
-        if (ctx.location.offline) locBits.push("offline");
-        if (locBits.length) lines.push("Instance: " + locBits.join(" | "));
+        function renderUserLine(user) {
+            const fields = [];
+            const tags = [];
+            addField(fields, "Name", user && user.name);
+            addField(fields, "Status", user && user.status);
+            addField(fields, "Status note", user && user.statusDescription);
+            addField(fields, "Pronouns", user && user.pronouns);
+            if (user && user.friend) tags.push("friend");
+            if (user && user.master) tags.push("master");
+            if (user && user.moderator) tags.push("moderator");
+            if (tags.length) fields.push("Tags: " + tags.join(", "));
+            return "- " + (fields.length ? fields.join("; ") : "Name: unknown");
+        }
+
+        lines.push("## Self");
+        lines.push(renderUserLine(ctx.self));
+
+        lines.push("## World");
+        const worldFields = [];
+        addField(worldFields, "Name", ctx.world.name || "unknown world");
+        addField(worldFields, "Author", ctx.world.author);
+        lines.push("- " + worldFields.join("; "));
+        if (ctx.world.description) lines.push("- Description: " + ctx.world.description);
+
+        const locFields = [];
+        addField(locFields, "Access", ctx.location.type);
+        addField(locFields, "Instance", ctx.location.instance);
+        addField(locFields, "Region", ctx.location.region);
+        if (ctx.location.traveling) locFields.push("State: traveling");
+        if (ctx.location.offline) locFields.push("State: offline");
+        if (locFields.length) {
+            lines.push("## Instance");
+            lines.push("- " + locFields.join("; "));
+        }
 
         lines.push(
-            "Counts: players " +
+            "## Counts\n" +
+            "- Players: " +
             (ctx.counts.players || 0) +
             "/" +
             (ctx.counts.capacity || "?") +
-            ", friends " +
+            "; Friends: " +
             (ctx.counts.friends || 0)
         );
 
         if (ctx.friends.length) {
-            lines.push(
-                "Friends here: " +
-                ctx.friends.map(function (f) {
-                    const bits = [f.name];
-                    if (f.status) bits.push(f.status);
-                    return bits.join(" ");
-                }).join("; ")
-            );
+            lines.push("## Friends in instance");
+            ctx.friends.forEach(function (f) {
+                lines.push(renderUserLine(f));
+            });
         }
 
         if (ctx.players.length) {
-            lines.push(
-                "Known players here: " +
-                ctx.players.map(function (p) {
-                    const tags = [];
-                    if (p.friend) tags.push("friend");
-                    if (p.master) tags.push("master");
-                    if (p.moderator) tags.push("moderator");
-                    return p.name + (tags.length ? " (" + tags.join(", ") + ")" : "");
-                }).join("; ")
-            );
+            lines.push("## Known players in instance");
+            ctx.players.forEach(function (p) {
+                lines.push(renderUserLine(p));
+            });
         }
 
         return lines.join("\n");
@@ -476,7 +526,7 @@ VRCX_CONSOLE_SCRIPT_TEMPLATE = r"""
     }, CONFIG.checkIntervalMs);
 
     window.VRCXLocalContextBridge = {
-        version: "1.3-compact",
+        version: "1.4-labeled",
         getContext: function () {
             latestContext = buildContext();
             latestContextText = renderContextText(latestContext);
@@ -497,7 +547,7 @@ VRCX_CONSOLE_SCRIPT_TEMPLATE = r"""
         },
         getStatus: function () {
             return {
-                version: "1.3-compact",
+                version: "1.4-labeled",
                 stopped: stopped,
                 sequence: sequence,
                 lastPushAt: lastPushAt ? new Date(lastPushAt).toISOString() : "",

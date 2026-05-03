@@ -85,7 +85,12 @@ class DeepLAPI(BaseTranslationAPI):
             final_context = None
             vrcx_context = self._extract_vrcx_context(context)
             if context_pairs:
-                context_texts = [p["source"] for p in context_pairs]
+                context_texts = [
+                    p["source"]
+                    for p in context_pairs
+                    if str(p.get("source") or "").strip()
+                    and str(p.get("target") or "").strip()
+                ]
                 final_context = " ".join(context_texts)
                 if vrcx_context:
                     final_context = (

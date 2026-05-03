@@ -389,20 +389,30 @@ class TestOpenRouterAPI:
         block = OpenRouterAPI._build_context_block(
             None, [{"source": "Hi", "target": "Hola"}])
         assert block is not None
+        assert "Previous completed translations" in block
         assert "Hi" in block
         assert "Hola" in block
         # With context string
         block2 = OpenRouterAPI._build_context_block("Previous chat.", None)
         assert block2 is not None
+        assert "Additional context notes" in block2
         assert "Previous chat." in block2
         # VRCX context is preserved even when translation-memory pairs are present
         block3 = OpenRouterAPI._build_context_block(
-            "Base\n<VRCHAT_CONTEXT>\nWorld: Test World\n</VRCHAT_CONTEXT>",
-            [{"source": "Hi", "target": "Hola"}],
+            "Base\n"
+            "VRChat/VRCX local context for disambiguating world names.\n"
+            "<VRCHAT_CONTEXT>\nWorld: Test World\n</VRCHAT_CONTEXT>",
+            [{"source": "Hi", "target": "Hola"}, {"source": "Current", "target": ""}],
         )
         assert block3 is not None
         assert "World: Test World" in block3
         assert "Hi" in block3
+        assert "Current" not in block3
+        assert "local context for disambiguating" not in block3
+        assert "Additional context notes:\nBase" in block3
+        assert OpenRouterAPI._build_context_block(
+            None, [{"source": "Current", "target": ""}]
+        ) is None
         # Neither
         assert OpenRouterAPI._build_context_block(None, None) is None
         assert OpenRouterAPI._build_context_block("", None) is None
@@ -439,6 +449,22 @@ class TestOpenRouterAPI:
         from streaming_translation.api.openrouter import OpenRouterAPI
         guide = OpenRouterAPI._get_style_guide("en")
         assert isinstance(guide, str)
+
+    @patch("streaming_translation.api.openrouter.OpenAI")
+    def test_system_prompt_uses_configured_formality_and_style(self, mock_openai):
+        mock_openai.return_value = MagicMock()
+        from streaming_translation.api.openrouter import OpenRouterAPI
+        api = OpenRouterAPI(
+            base_url="https://test.ai/v1",
+            model="m",
+            api_key="k",
+            formality="high",
+            style="standard",
+            proxy_url=None,
+        )
+        prompt = api._build_system_prompt("JAPANESE (ja)", "ja")
+        assert "clearly polite and refined teineigo" in prompt
+        assert "natural, stable, and neutral" in prompt
 
 
 # ── OpenRouterStreamingAPI ────────────────────────────────────────────

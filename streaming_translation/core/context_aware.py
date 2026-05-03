@@ -186,54 +186,43 @@ class ContextAwareTranslator:
         context_prefix: str,
         **kwargs,
     ) -> str:
-        if self.context_aware and (len(self._contexts) > 0 or context_prefix):
-            prev = self._previous_caption()
-            current = f"[Me] {text.strip()}"
-            if prev:
-                ctx = f"{context_prefix}\n{prev}{current}"
-            else:
-                ctx = f"{context_prefix}\n{current}"
-            if ctx and not ctx.endswith((".", "\u3002", "!", "\uff01", "?", "\uff1f")):
-                if any("\u4e00" <= c <= "\u9fff" for c in ctx):
-                    ctx += "\u3002"
-                else:
-                    ctx += "."
-            if ctx and not ctx.endswith(" "):
-                ctx += " "
+        hints = ""
+        if self.terminology_manager is not None:
+            hints = self.terminology_manager.get_terminology_hints(text.strip(), target_language)
 
-            if self.terminology_manager is not None:
-                hints = self.terminology_manager.get_terminology_hints(text.strip(), target_language)
-                if hints:
-                    ctx = f"{ctx}\n{hints}\n"
+        if self.context_aware and (len(self._contexts) > 0 or context_prefix or hints):
+            context_parts = []
+            prefix = (context_prefix or "").strip()
+            if prefix:
+                context_parts.append(prefix)
+            if hints:
+                context_parts.append(hints.strip())
 
+            ctx = "\n\n".join(part for part in context_parts if part) or None
             pairs = self._previous_context_pairs()
-            pairs.append({"source": text.strip(), "target": "", "speaker": "me"})
-
             return self.translation_api.translate(
                 text,
                 source_language=source_language,
                 target_language=target_language,
                 context=ctx,
-                context_pairs=pairs,
+                context_pairs=pairs or None,
                 **kwargs,
             )
-        else:
-            if self.terminology_manager is not None:
-                hints = self.terminology_manager.get_terminology_hints(text.strip(), target_language)
-                if hints:
-                    return self.translation_api.translate(
-                        text,
-                        source_language=source_language,
-                        target_language=target_language,
-                        context=hints,
-                        **kwargs,
-                    )
+
+        if hints:
             return self.translation_api.translate(
                 text,
                 source_language=source_language,
                 target_language=target_language,
+                context=hints,
                 **kwargs,
             )
+        return self.translation_api.translate(
+            text,
+            source_language=source_language,
+            target_language=target_language,
+            **kwargs,
+        )
 
     def _translate_marker(
         self,

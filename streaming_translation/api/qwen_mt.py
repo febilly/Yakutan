@@ -98,10 +98,14 @@ class QwenMTAPI(BaseTranslationAPI):
             }
 
             if context_pairs:
-                translation_options["tm_list"] = [
+                tm_list = [
                     {"source": p["source"], "target": p["target"]}
                     for p in context_pairs
+                    if str(p.get("source") or "").strip()
+                    and str(p.get("target") or "").strip()
                 ]
+                if tm_list:
+                    translation_options["tm_list"] = tm_list
 
             domain_text = self.DOMAINS
             vrcx_context = self._extract_vrcx_context(context)

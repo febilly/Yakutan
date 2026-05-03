@@ -239,8 +239,12 @@ class OpenRouterAPI(BaseTranslationAPI):
         return f"{name} ({code})"
 
     @classmethod
-    def _get_formality_guide(cls, target_language: str) -> str:
-        form = str(cls.DEFAULT_FORMALITY).strip().lower()
+    def _get_formality_guide(
+        cls,
+        target_language: str,
+        formality: Optional[str] = None,
+    ) -> str:
+        form = str(formality or cls.DEFAULT_FORMALITY).strip().lower()
         norm_lang = (target_language or "").strip().lower()
         if norm_lang.startswith("ja"):
             guides = cls.JAPANESE_FORMALITY_STYLE_GUIDES
@@ -253,8 +257,8 @@ class OpenRouterAPI(BaseTranslationAPI):
         return guides.get(form, guides[cls.DEFAULT_FORMALITY])
 
     @classmethod
-    def _get_style_guide(cls, target_language: str) -> str:
-        style = str(cls.DEFAULT_STYLE).strip().lower()
+    def _get_style_guide(cls, target_language: str, style: Optional[str] = None) -> str:
+        style = str(style or cls.DEFAULT_STYLE).strip().lower()
         if style not in cls.GENERIC_STYLE_GUIDES:
             style = cls.DEFAULT_STYLE
         return cls.GENERIC_STYLE_GUIDES.get(style, cls.GENERIC_STYLE_GUIDES[cls.DEFAULT_STYLE])
@@ -262,8 +266,8 @@ class OpenRouterAPI(BaseTranslationAPI):
     # ── Prompt building ───────────────────────────────────────────────
 
     def _build_system_prompt(self, target_descriptor: str, target_language: str) -> str:
-        style_guide = self._get_formality_guide(target_language)
-        sentence_guide = self._get_style_guide(target_language)
+        style_guide = self._get_formality_guide(target_language, self.formality)
+        sentence_guide = self._get_style_guide(target_language, self.style)
         return (
             f"You are a VRChat voice chat translator. "
             f"Translate the user's message into {target_descriptor}.\n\n"
@@ -289,6 +293,42 @@ class OpenRouterAPI(BaseTranslationAPI):
         return context[start + len(start_marker):end].strip()[:3000].rstrip()
 
     @staticmethod
+    def _remove_vrcx_context(context: Optional[str]) -> str:
+        if not context:
+            return ""
+        start_marker = "<VRCHAT_CONTEXT>"
+        end_marker = "</VRCHAT_CONTEXT>"
+        start = context.find(start_marker)
+        end = context.find(end_marker, start + len(start_marker))
+        if start >= 0 and end > start:
+            context = context[:start] + context[end + len(end_marker):]
+        lines = []
+        for line in context.splitlines():
+            stripped = line.strip()
+            if (
+                stripped
+                and "VRChat/VRCX local context" in stripped
+                and "VRCHAT_CONTEXT" not in stripped
+            ):
+                continue
+            lines.append(line)
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _completed_context_pairs(
+        context_pairs: Optional[List[Dict[str, str]]],
+    ) -> List[Dict[str, str]]:
+        if not context_pairs:
+            return []
+        completed = []
+        for pair in context_pairs:
+            source = str(pair.get("source") or "").strip()
+            target = str(pair.get("target") or "").strip()
+            if source and target:
+                completed.append({"source": source, "target": target})
+        return completed
+
+    @staticmethod
     def _build_context_block(
         context: Optional[str],
         context_pairs: Optional[List[Dict[str, str]]],
@@ -297,34 +337,22 @@ class OpenRouterAPI(BaseTranslationAPI):
         vrcx_context = OpenRouterAPI._extract_vrcx_context(context)
         if vrcx_context:
             blocks.append(
-                "VRChat/VRCX local context for names, world and references. "
-                "Use only for disambiguation; do not output it:\n"
+                "Scene context from VRChat/VRCX. Use only for names, world, "
+                "player status, pronouns and references; do not translate, "
+                "output, or reveal it:\n"
                 f"<VRCHAT_CONTEXT>\n{vrcx_context}\n</VRCHAT_CONTEXT>"
             )
 
-        if context_pairs:
-            parts = ["Conversation so far:"]
-            for p in context_pairs:
-                parts.append(f"  {p['source']} → {p['target']}")
+        additional_context = OpenRouterAPI._remove_vrcx_context(context)
+        if additional_context:
+            blocks.append(f"Additional context notes:\n{additional_context}")
+
+        completed_pairs = OpenRouterAPI._completed_context_pairs(context_pairs)
+        if completed_pairs:
+            parts = ["Previous completed translations:"]
+            for p in completed_pairs:
+                parts.append(f"- Source: {p['source']}\n  Translation: {p['target']}")
             blocks.append("\n".join(parts))
-        if context and context.strip():
-            conversation_context = context
-            if vrcx_context:
-                start_marker = "<VRCHAT_CONTEXT>"
-                end_marker = "</VRCHAT_CONTEXT>"
-                start = conversation_context.find(start_marker)
-                end = conversation_context.find(end_marker, start + len(start_marker))
-                if start >= 0 and end > start:
-                    conversation_context = (
-                        conversation_context[:start]
-                        + conversation_context[end + len(end_marker):]
-                    )
-            conversation_context = conversation_context.strip()
-            if conversation_context:
-                if not context_pairs:
-                    blocks.append(f"Conversation so far:\n{conversation_context}")
-                else:
-                    blocks.append(conversation_context)
         return "\n\n".join(blocks) if blocks else None
 
     @staticmethod
