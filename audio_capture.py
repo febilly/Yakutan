@@ -3,6 +3,7 @@
 """
 import asyncio
 import logging
+import time
 from typing import Optional
 
 import numpy as np
@@ -16,6 +17,8 @@ from audio_runtime_guard import hold_portaudio, _suppress_stderr
 logger = logging.getLogger(__name__)
 
 RECOGNIZER_CHANNELS = 1
+ASR_SEND_QUEUE_SECONDS = 3.0
+ASR_SEND_QUEUE_MIN_FRAMES = 10
 
 
 async def init_audio_stream(state):
@@ -278,15 +281,48 @@ async def read_audio_data(state):
 async def send_audio_frame_async(state, recognizer, data: bytes):
     """异步发送音频帧。"""
     loop = asyncio.get_event_loop()
+    state.ensure_asr_send_executor()
     try:
-        await loop.run_in_executor(state.audio_executor, recognizer.send_audio_frame, data)
+        await loop.run_in_executor(state.asr_send_executor, recognizer.send_audio_frame, data)
     except Exception:
+        pass
+
+
+def _asr_send_queue_maxsize() -> int:
+    sample_rate = max(1, int(getattr(config, 'SAMPLE_RATE', 16000) or 16000))
+    block_size = max(1, int(getattr(config, 'BLOCK_SIZE', 1600) or 1600))
+    block_seconds = block_size / sample_rate
+    return max(ASR_SEND_QUEUE_MIN_FRAMES, int(ASR_SEND_QUEUE_SECONDS / block_seconds))
+
+
+def _drop_oldest_queue_item(queue: asyncio.Queue) -> None:
+    try:
+        queue.get_nowait()
+        queue.task_done()
+    except asyncio.QueueEmpty:
         pass
 
 
 async def audio_capture_task(state, recognizer):
     """异步音频捕获任务。"""
     print('Starting audio capture...')
+    send_queue: asyncio.Queue = asyncio.Queue(maxsize=_asr_send_queue_maxsize())
+    last_queue_warning_at = 0.0
+
+    async def _sender_worker():
+        while True:
+            generation, frame = await send_queue.get()
+            try:
+                if (
+                    state.recognition_active
+                    and generation == getattr(state, 'audio_send_generation', 0)
+                ):
+                    await send_audio_frame_async(state, recognizer, frame)
+            finally:
+                send_queue.task_done()
+
+    sender_task = asyncio.create_task(_sender_worker())
+
     try:
         while not state.stop_event.is_set():
             # 始终读取音频数据,避免缓冲区积压
@@ -299,7 +335,19 @@ async def audio_capture_task(state, recognizer):
 
             # 只有在识别激活时才发送音频数据,否则丢弃
             if state.recognition_active:
-                await send_audio_frame_async(state, recognizer, data)
+                item = (getattr(state, 'audio_send_generation', 0), data)
+                try:
+                    send_queue.put_nowait(item)
+                except asyncio.QueueFull:
+                    _drop_oldest_queue_item(send_queue)
+                    send_queue.put_nowait(item)
+                    now = time.monotonic()
+                    if now - last_queue_warning_at > 5.0:
+                        print('[Audio] ASR发送队列已满，丢弃最旧音频帧以保持实时采集')
+                        last_queue_warning_at = now
+            elif not send_queue.empty():
+                while not send_queue.empty():
+                    _drop_oldest_queue_item(send_queue)
 
             await asyncio.sleep(0.001)  # 避免阻塞事件循环
     except asyncio.CancelledError:
@@ -307,4 +355,9 @@ async def audio_capture_task(state, recognizer):
     except Exception as e:
         print(f'Audio capture error: {e}')
     finally:
+        sender_task.cancel()
+        try:
+            await sender_task
+        except asyncio.CancelledError:
+            pass
         print('Audio capture stopped.')

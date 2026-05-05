@@ -37,6 +37,11 @@ class AppState:
             max_workers=1,
             thread_name_prefix="yakutan-audio-io",
         )
+        self.asr_send_executor: ThreadPoolExecutor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="yakutan-asr-send",
+        )
+        self.audio_send_generation: int = 0
         self.stop_event: Optional[asyncio.Event] = None
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -99,6 +104,19 @@ class AppState:
                 max_workers=1,
                 thread_name_prefix="yakutan-audio-io",
             )
+
+    def ensure_asr_send_executor(self):
+        """如果 asr_send_executor 已关闭，重新创建。"""
+        if self.asr_send_executor._shutdown:
+            self.asr_send_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="yakutan-asr-send",
+            )
+
+    def bump_audio_send_generation(self) -> int:
+        """让旧识别会话排队中的音频帧失效。"""
+        self.audio_send_generation += 1
+        return self.audio_send_generation
 
 
 # ---- 模块级单例访问 ----

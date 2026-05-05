@@ -156,6 +156,8 @@ async def stop_recognition_async(state):
     except Exception:
         pass
 
+    state.bump_audio_send_generation()
+
 
 async def start_recognition_async(state):
     """异步开始或恢复识别服务"""
@@ -176,6 +178,7 @@ async def start_recognition_async(state):
         print(f'[ASR] 启动识别失败: {e}')
         raise
 
+    state.bump_audio_send_generation()
     state.recognition_active = True
 
 
@@ -524,6 +527,7 @@ async def main(
             await osc_manager.stop_server()
 
         await loop.run_in_executor(None, state.audio_executor.shutdown, True)
+        await loop.run_in_executor(None, state.asr_send_executor.shutdown, True)
         await loop.run_in_executor(None, state.executor.shutdown, False)
         emit_lifecycle('stopped', False)
 

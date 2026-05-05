@@ -307,6 +307,12 @@ def _make_mock_state(executor=None, loop=None):
     state = MagicMock()
     state.executor = executor or ThreadPoolExecutor(max_workers=4)
     state.audio_executor = ThreadPoolExecutor(max_workers=1)
+    state.asr_send_executor = ThreadPoolExecutor(
+        max_workers=1,
+        thread_name_prefix="test-asr-send",
+    )
+    state.audio_send_generation = 1
+    state.ensure_asr_send_executor = MagicMock()
     state.translator = MagicMock()
     state.secondary_translator = None
     state.deepl_fallback_translator = None
@@ -626,18 +632,29 @@ class TestExecutorDispatchPath:
 
 
 class TestAudioExecutorSeparation:
-    """Verify audio frame sending uses dedicated audio_executor, not shared executor."""
+    """Verify audio capture and ASR sending do not block each other."""
 
     @patch("recognition_handler.config")
-    def test_audio_capture_uses_audio_executor(self, mock_config):
-        """send_audio_frame must use audio_executor, not the shared executor."""
+    def test_audio_frame_send_uses_asr_send_executor(self, mock_config):
+        """send_audio_frame must use the ASR sender executor."""
         import audio_capture
 
         state = _make_mock_state()
         state.executor = ThreadPoolExecutor(max_workers=8)
         state.audio_executor = ThreadPoolExecutor(max_workers=1)
+        state.asr_send_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="test-asr-send",
+        )
+        state.ensure_asr_send_executor = MagicMock()
 
         recognizer = MagicMock()
+        send_thread_names = []
+
+        def _record_thread(_data):
+            send_thread_names.append(threading.current_thread().name)
+
+        recognizer.send_audio_frame.side_effect = _record_thread
 
         async def _test():
             await audio_capture.send_audio_frame_async(state, recognizer, b"\x00" * 1024)
@@ -645,6 +662,55 @@ class TestAudioExecutorSeparation:
         asyncio.run(_test())
 
         recognizer.send_audio_frame.assert_called_once()
+        assert send_thread_names[0].startswith("test-asr-send")
 
         state.executor.shutdown(wait=True)
         state.audio_executor.shutdown(wait=True)
+        state.asr_send_executor.shutdown(wait=True)
+
+    @patch("recognition_handler.config")
+    def test_audio_capture_keeps_reading_while_send_blocks(self, mock_config):
+        """A slow WebSocket send must not stop the mic read loop."""
+        import audio_capture
+
+        state = _make_mock_state()
+        state.stop_event = asyncio.Event()
+        state.recognition_active = True
+        state.audio_send_generation = 1
+
+        send_block = threading.Event()
+        send_started = threading.Event()
+        read_count = 0
+
+        async def fake_read_audio_data(_state):
+            nonlocal read_count
+            read_count += 1
+            if read_count >= 3:
+                state.stop_event.set()
+            return b"\x01" * 3200
+
+        recognizer = MagicMock()
+
+        def slow_send(_data):
+            send_started.set()
+            send_block.wait(timeout=2.0)
+
+        recognizer.send_audio_frame.side_effect = slow_send
+
+        async def _test():
+            with patch("audio_capture.read_audio_data", side_effect=fake_read_audio_data):
+                await asyncio.wait_for(
+                    audio_capture.audio_capture_task(state, recognizer),
+                    timeout=1.0,
+                )
+
+        try:
+            asyncio.run(_test())
+        finally:
+            send_block.set()
+            state.executor.shutdown(wait=True)
+            state.audio_executor.shutdown(wait=True)
+            state.asr_send_executor.shutdown(wait=True)
+
+        assert send_started.wait(timeout=1.0)
+        assert read_count >= 3

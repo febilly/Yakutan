@@ -146,7 +146,7 @@ def create_recognizer(
     corpus_text: Optional[str] = None,
     enable_vad: bool = True,
     vad_threshold: float = 0.2,
-    vad_silence_duration_ms: int = 1300,
+    vad_silence_duration_ms: int = 800,
     keepalive_interval: int = 30,
     **extra_kwargs: Any
 ) -> SpeechRecognizer:

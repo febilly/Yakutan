@@ -96,6 +96,47 @@ def test_qwen_realtime_refreshes_session_when_vrcx_context_changes(monkeypatch):
     assert "Test World" in corpus_text
 
 
+def test_qwen_realtime_defers_context_refresh_until_next_segment(monkeypatch):
+    import speech_recognizers.qwen_speech_recognizer as qwen_mod
+
+    class DummyTranscriptionParams:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class DummyConversation:
+        def __init__(self):
+            self.updates = []
+
+        def update_session(self, **kwargs):
+            self.updates.append(kwargs)
+
+    _store_vrcx_context()
+    monkeypatch.setattr(qwen_mod, "TranscriptionParams", DummyTranscriptionParams)
+
+    recognizer = qwen_mod.QwenSpeechRecognizer(callback=DummyCallback(), corpus_text="HotTerm")
+    conversation = DummyConversation()
+    recognizer._conversation = conversation
+    recognizer._applied_transcription_corpus_text = "HotTerm"
+
+    recognizer._mark_input_speech_started("item-1")
+    recognizer._refresh_dynamic_transcription_context()
+
+    assert conversation.updates == []
+    assert recognizer._pending_transcription_corpus_text is not None
+
+    recognizer._mark_input_speech_stopped("item-1")
+    recognizer._mark_transcription_item_done("item-1")
+
+    assert conversation.updates == []
+
+    recognizer._refresh_dynamic_transcription_context()
+
+    assert len(conversation.updates) == 1
+    corpus_text = conversation.updates[0]["transcription_params"].kwargs["corpus_text"]
+    assert "VRChat ASR hints" in corpus_text
+    assert "Test World" in corpus_text
+
+
 def test_soniox_config_merges_vrcx_context_with_existing_context(monkeypatch):
     import speech_recognizers.soniox_speech_recognizer as soniox_mod
 

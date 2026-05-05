@@ -4,7 +4,7 @@ import base64
 from contextlib import suppress
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 
 from dashscope.audio.qwen_omni import (
     MultiModality,
@@ -67,6 +67,12 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
             self._handle_session_created(message)
         elif event_type == "session.updated":
             self._handle_session_updated(message)
+        elif event_type == "input_audio_buffer.speech_started":
+            self._handle_speech_started(message)
+        elif event_type == "input_audio_buffer.speech_stopped":
+            self._handle_speech_stopped(message)
+        elif event_type == "input_audio_buffer.committed":
+            self._handle_audio_committed(message)
         elif event_type == "conversation.item.input_audio_transcription.text":
             self._handle_transcription_text(message)
         elif event_type == "conversation.item.input_audio_transcription.completed":
@@ -95,10 +101,20 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
         if session_id:
             self._recognizer._update_session_id(str(session_id))
 
+    def _handle_speech_started(self, message: Dict[str, Any]) -> None:
+        self._recognizer._mark_input_speech_started(message.get("item_id"))
+
+    def _handle_speech_stopped(self, message: Dict[str, Any]) -> None:
+        self._recognizer._mark_input_speech_stopped(message.get("item_id"))
+
+    def _handle_audio_committed(self, message: Dict[str, Any]) -> None:
+        self._recognizer._track_transcription_item(message.get("item_id"))
+
     def _handle_transcription_text(self, message: Dict[str, Any]) -> None:
         item_id = message.get("item_id")
         if not item_id:
             return
+        self._recognizer._track_transcription_item(item_id)
         fixed = message.get("text") or ""
         stash = message.get("stash") or ""
         combined = f"{fixed}{stash}"
@@ -134,8 +150,13 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
                 self._user_callback.on_result(event)
         if item_id:
             self._items.pop(item_id, None)
+            self._recognizer._mark_transcription_item_done(item_id)
 
     def _handle_transcription_failed(self, message: Dict[str, Any]) -> None:
+        item_id = message.get("item_id")
+        if item_id:
+            self._items.pop(item_id, None)
+            self._recognizer._mark_transcription_item_done(item_id)
         error = message.get("error") or {}
         detail = error.get("message") or "Recognition failed"
         code = error.get("code")
@@ -197,6 +218,9 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         self._language = options.pop("language", None)
         self._corpus_text = options.pop("corpus_text", None)
         self._applied_transcription_corpus_text: Optional[str] = None
+        self._input_speech_active: bool = False
+        self._active_transcription_item_ids: Set[str] = set()
+        self._pending_transcription_corpus_text: Optional[str] = None
         self._enable_input_audio_transcription = options.pop("enable_input_audio_transcription", True)
         self._transcription_params: Optional[TranscriptionParams] = options.pop("transcription_params", None)
         self._keepalive_interval = options.pop("keepalive_interval", 30)  # 心跳间隔（秒）
@@ -243,6 +267,9 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._pause_sequence = 0
             self._suppressed_server_final_sequence = None
             self._applied_transcription_corpus_text = None
+            self._input_speech_active = False
+            self._active_transcription_item_ids.clear()
+            self._pending_transcription_corpus_text = None
 
         conversation = self._conversation
         assert conversation is not None  # for type checkers
@@ -291,6 +318,9 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._pause_started_at = None
             self._pause_sequence = 0
             self._suppressed_server_final_sequence = None
+            self._input_speech_active = False
+            self._active_transcription_item_ids.clear()
+            self._pending_transcription_corpus_text = None
 
     def send_audio_frame(self, data: bytes) -> None:
         if not data:
@@ -484,17 +514,37 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         update_kwargs.update(self._update_session_overrides)
         return update_kwargs
 
-    def _refresh_dynamic_transcription_context(self) -> None:
-        if self._transcription_params is not None:
-            return
+    def _is_transcription_context_idle_locked(self) -> bool:
+        return not self._input_speech_active and not self._active_transcription_item_ids
 
-        corpus_text = self._resolve_corpus_text()
+    def _mark_input_speech_started(self, item_id: Optional[Any]) -> None:
         with self._lock:
-            conversation = self._conversation
-            applied_corpus_text = self._applied_transcription_corpus_text
-        if conversation is None or corpus_text == applied_corpus_text:
-            return
+            self._input_speech_active = True
+            if item_id:
+                self._active_transcription_item_ids.add(str(item_id))
 
+    def _mark_input_speech_stopped(self, item_id: Optional[Any]) -> None:
+        with self._lock:
+            self._input_speech_active = False
+            if item_id:
+                self._active_transcription_item_ids.add(str(item_id))
+
+    def _track_transcription_item(self, item_id: Optional[Any]) -> None:
+        if not item_id:
+            return
+        with self._lock:
+            self._active_transcription_item_ids.add(str(item_id))
+
+    def _mark_transcription_item_done(self, item_id: Optional[Any]) -> None:
+        if item_id:
+            with self._lock:
+                self._active_transcription_item_ids.discard(str(item_id))
+
+    def _apply_transcription_context_update(
+        self,
+        conversation: OmniRealtimeConversation,
+        corpus_text: str,
+    ) -> None:
         try:
             conversation.update_session(**self._build_update_session_kwargs(corpus_text))
         except Exception as e:
@@ -504,6 +554,26 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         with self._lock:
             if self._conversation is conversation:
                 self._applied_transcription_corpus_text = corpus_text
+                self._pending_transcription_corpus_text = None
+
+    def _refresh_dynamic_transcription_context(self) -> None:
+        if self._transcription_params is not None:
+            return
+
+        corpus_text = self._resolve_corpus_text()
+        with self._lock:
+            conversation = self._conversation
+            applied_corpus_text = self._applied_transcription_corpus_text
+            if conversation is not None and corpus_text != applied_corpus_text:
+                # Freeze the ASR context for the utterance currently being decoded.
+                # Any changes are picked up before the next cloud recognition segment.
+                if not self._is_transcription_context_idle_locked():
+                    self._pending_transcription_corpus_text = corpus_text
+                    return
+        if conversation is None or corpus_text == applied_corpus_text:
+            return
+
+        self._apply_transcription_context_update(conversation, corpus_text)
 
     def _finish_conversation(self, conversation: OmniRealtimeConversation) -> None:
         conversation.end_session()
@@ -522,6 +592,9 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._conversation = None
             self._adapter = None
             self._paused = False
+            self._input_speech_active = False
+            self._active_transcription_item_ids.clear()
+            self._pending_transcription_corpus_text = None
         if close:
             with suppress(Exception):
                 conversation.close()
@@ -575,6 +648,9 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._adapter = None
             # 注意：不要重置 _paused，因为可能需要保持暂停状态
             # 也不要重置 _should_run，因为可能需要自动重连
+            self._input_speech_active = False
+            self._active_transcription_item_ids.clear()
+            self._pending_transcription_corpus_text = None
         return True
 
     def _reconnect(self) -> None:
@@ -597,6 +673,9 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._adapter = adapter
             # 保留之前的暂停状态
             paused = self._paused
+            self._input_speech_active = False
+            self._active_transcription_item_ids.clear()
+            self._pending_transcription_corpus_text = None
 
         conversation = self._conversation
         assert conversation is not None

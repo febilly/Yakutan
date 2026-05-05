@@ -57,6 +57,20 @@ class TestAppState:
         state.ensure_audio_executor()
         assert state.audio_executor._shutdown is False
 
+    def test_ensure_asr_send_executor(self):
+        state = AppState()
+        assert state.asr_send_executor is not None
+        state.asr_send_executor.shutdown(wait=False)
+        state.ensure_asr_send_executor()
+        assert state.asr_send_executor._shutdown is False
+
+    def test_bump_audio_send_generation(self):
+        state = AppState()
+        first = state.audio_send_generation
+        second = state.bump_audio_send_generation()
+        assert second == first + 1
+        assert state.audio_send_generation == second
+
 
 class TestGetSetState:
     def test_get_state_initially_none(self):
