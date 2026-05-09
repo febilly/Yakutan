@@ -1,0 +1,3 @@
+## 2024-05-09 - Add focus visible styles for keyboard navigation
+**Learning:** The application uses several custom interactive elements (like .switch, .language-combo-toggle, and .secret-visibility-toggle) that lack native focus indicators. Adding :focus-visible rules using outline and outline-offset drastically improves keyboard accessibility without negatively impacting the visual experience for mouse users.
+**Action:** Always ensure custom interactive elements have explicitly defined :focus-visible styles. Use outline: 2px solid var(--primary-color) along with outline-offset for consistent and clear focus rings across the application.
