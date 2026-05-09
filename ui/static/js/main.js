@@ -1826,7 +1826,6 @@ document.addEventListener('DOMContentLoaded', async function () {
     loadVrcxBridgeUiPreference();
     loadAPIKeys();
     initializeCollapsibleStates();
-    setupAutoExpandCollapsibleOnFocus();
     applyStoredExtraBodyForActiveLLMTemplate();
     setupSecretVisibilityToggles();
     applyAsrBackendLocks();
@@ -3599,13 +3598,22 @@ function syncCollapsibleContainerState(content) {
     );
 }
 
-function setupAutoExpandCollapsibleOnFocus() {
-    document.querySelectorAll('.collapsible-content').forEach(content => {
-        content.addEventListener('focusin', (event) => {
-            if (content.classList.contains('collapsed') && content.id) {
-                toggleCollapsible(content.id);
+function updateCollapsibleTabbing(content) {
+    if (!content) return;
+    const isCollapsed = content.classList.contains('collapsed');
+    const focusableElements = content.querySelectorAll('a, button, input, textarea, select, [tabindex]:not([tabindex="-1"])');
+    focusableElements.forEach(el => {
+        if (isCollapsed) {
+            el.dataset.originalTabindex = el.getAttribute('tabindex') || '';
+            el.setAttribute('tabindex', '-1');
+        } else {
+            const original = el.dataset.originalTabindex;
+            if (original) {
+                el.setAttribute('tabindex', original);
+            } else {
+                el.removeAttribute('tabindex');
             }
-        });
+        }
     });
 }
 
@@ -3613,6 +3621,7 @@ function initializeCollapsibleStates() {
     document.querySelectorAll('.collapsible-content').forEach((content) => {
         bindCollapsibleTransitionCleanup(content);
         syncCollapsibleContainerState(content);
+        updateCollapsibleTabbing(content);
 
         if (!content.id) return;
         const icon = document.getElementById(`${content.id}-icon`);
@@ -3656,6 +3665,7 @@ function toggleCollapsible(id) {
         content.classList.remove('collapsed');
         updateCollapsibleIcon(icon, false);
         syncCollapsibleContainerState(content);
+        updateCollapsibleTabbing(content);
 
         content.style.maxHeight = '0px';
         void content.offsetHeight;
