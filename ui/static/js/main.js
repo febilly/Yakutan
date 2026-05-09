@@ -2066,6 +2066,7 @@ function loadAPIKeys() {
             apiKeysSection.classList.add('collapsed');
             updateCollapsibleIcon(apiKeysIcon, true);
             syncCollapsibleContainerState(apiKeysSection);
+            syncCollapsibleAccessibility(apiKeysSection);
         }
     }
 
@@ -3584,6 +3585,110 @@ function updateCollapsibleIcon(icon, collapsed) {
     icon.textContent = collapsed ? '▶' : '▼';
 }
 
+const COLLAPSIBLE_FOCUSABLE_SELECTOR = [
+    'a[href]',
+    'area[href]',
+    'button',
+    'input',
+    'select',
+    'textarea',
+    'iframe',
+    'object',
+    'embed',
+    '[contenteditable]:not([contenteditable="false"])',
+    '[tabindex]',
+].join(',');
+
+function getCollapsibleHeader(content) {
+    if (!content) return null;
+
+    const header = content.previousElementSibling;
+    if (header && header.classList.contains('collapsible-header')) {
+        return header;
+    }
+
+    return null;
+}
+
+function setCollapsedTabStop(element, disabled) {
+    if (!element) {
+        return;
+    }
+
+    if (disabled) {
+        if (element.dataset.collapseOriginalTabindex === undefined) {
+            element.dataset.collapseOriginalTabindex = element.hasAttribute('tabindex')
+                ? element.getAttribute('tabindex')
+                : '';
+        }
+        element.setAttribute('tabindex', '-1');
+        element.dataset.collapseTabDisabled = 'true';
+        return;
+    }
+
+    if (element.dataset.collapseTabDisabled !== 'true') {
+        return;
+    }
+
+    const originalTabindex = element.dataset.collapseOriginalTabindex || '';
+    if (originalTabindex) {
+        element.setAttribute('tabindex', originalTabindex);
+    } else {
+        element.removeAttribute('tabindex');
+    }
+
+    delete element.dataset.collapseOriginalTabindex;
+    delete element.dataset.collapseTabDisabled;
+}
+
+function syncCollapsedDescendantTabStops() {
+    document.querySelectorAll(COLLAPSIBLE_FOCUSABLE_SELECTOR).forEach((element) => {
+        setCollapsedTabStop(element, !!element.closest('.collapsible-content.collapsed'));
+    });
+}
+
+function syncCollapsibleAccessibility(content) {
+    if (!content) return;
+
+    const collapsed = content.classList.contains('collapsed');
+    const header = getCollapsibleHeader(content);
+    if (header) {
+        header.setAttribute('role', 'button');
+        header.setAttribute('tabindex', '0');
+        if (content.id) {
+            header.setAttribute('aria-controls', content.id);
+        }
+        header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+
+        if (header.dataset.collapsibleKeyboardBound !== 'true') {
+            header.addEventListener('keydown', (event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') {
+                    return;
+                }
+
+                event.preventDefault();
+                if (content.id) {
+                    toggleCollapsible(content.id);
+                }
+            });
+            header.dataset.collapsibleKeyboardBound = 'true';
+        }
+    }
+
+    const shouldMoveFocusToHeader = collapsed && content.contains(document.activeElement) && header;
+
+    content.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
+    if ('inert' in content) {
+        content.inert = collapsed;
+    }
+
+    if (shouldMoveFocusToHeader) {
+        header.focus({ preventScroll: true });
+    }
+
+    syncCollapsedDescendantTabStops();
+}
+
 function syncCollapsibleContainerState(content) {
     if (!content) return;
 
@@ -3602,6 +3707,7 @@ function initializeCollapsibleStates() {
     document.querySelectorAll('.collapsible-content').forEach((content) => {
         bindCollapsibleTransitionCleanup(content);
         syncCollapsibleContainerState(content);
+        syncCollapsibleAccessibility(content);
 
         if (!content.id) return;
         const icon = document.getElementById(`${content.id}-icon`);
@@ -3645,6 +3751,7 @@ function toggleCollapsible(id) {
         content.classList.remove('collapsed');
         updateCollapsibleIcon(icon, false);
         syncCollapsibleContainerState(content);
+        syncCollapsibleAccessibility(content);
 
         content.style.maxHeight = '0px';
         void content.offsetHeight;
@@ -3660,6 +3767,7 @@ function toggleCollapsible(id) {
     content.classList.add('collapsed');
     updateCollapsibleIcon(icon, true);
     syncCollapsibleContainerState(content);
+    syncCollapsibleAccessibility(content);
     content.style.maxHeight = '0px';
 }
 

@@ -14,6 +14,8 @@
     --text-color: #333;
     --border-color: #ddd;
     --shadow: 0 2px 4px rgba(0,0,0,0.1);
+    --focus-ring-color: #0b63ce;
+    --focus-ring-shadow: 0 0 0 4px rgba(11, 99, 206, 0.18);
 }
 
 body {
@@ -82,6 +84,11 @@ header h1 {
 .language-selector:focus {
     outline: none;
     border-color: var(--primary-color);
+}
+
+.language-selector:focus-visible {
+    border-color: var(--focus-ring-color);
+    box-shadow: var(--focus-ring-shadow);
 }
 
 .status-indicator {
@@ -240,6 +247,15 @@ main {
     transform: none;
 }
 
+.btn:focus-visible,
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+    outline: 3px solid var(--focus-ring-color);
+    outline-offset: 3px;
+    box-shadow: var(--focus-ring-shadow);
+}
+
 .btn-primary {
     background-color: var(--primary-color);
     color: white;
@@ -348,6 +364,11 @@ main {
 .form-control:focus {
     outline: none;
     border-color: var(--primary-color);
+}
+
+.form-control:focus-visible {
+    border-color: var(--focus-ring-color);
+    box-shadow: var(--focus-ring-shadow);
 }
 
 .form-control.readonly-field,
@@ -778,6 +799,12 @@ input:checked + .slider:before {
     background-color: #bcc6d1;
 }
 
+.switch input:focus-visible + .slider {
+    outline: 3px solid var(--focus-ring-color);
+    outline-offset: 3px;
+    box-shadow: var(--focus-ring-shadow);
+}
+
 /* Collapsible */
 .collapsible-header {
     display: flex;
@@ -787,10 +814,21 @@ input:checked + .slider:before {
     user-select: none;
     padding: 6px 0;
     min-height: 40px;
+    border-radius: 6px;
 }
 
-.collapsible-header:hover h2 {
+.collapsible-header:hover h2,
+.collapsible-header:hover h3 {
     color: var(--primary-color);
+}
+
+.collapsible-header:focus-visible {
+    background: #eef7ff;
+}
+
+.collapsible-header:focus-visible h2,
+.collapsible-header:focus-visible h3 {
+    color: var(--focus-ring-color);
 }
 
 .collapse-icon {
