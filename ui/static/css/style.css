@@ -821,6 +821,12 @@ input:checked + .slider:before {
     min-height: 40px;
 }
 
+.collapsible-header:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 4px;
+    border-radius: 4px;
+}
+
 .collapsible-header:hover h2 {
     color: var(--primary-color);
 }

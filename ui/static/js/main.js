@@ -1826,6 +1826,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     loadVrcxBridgeUiPreference();
     loadAPIKeys();
     initializeCollapsibleStates();
+    setupAutoExpandCollapsibleOnFocus();
     applyStoredExtraBodyForActiveLLMTemplate();
     setupSecretVisibilityToggles();
     applyAsrBackendLocks();
@@ -3596,6 +3597,16 @@ function syncCollapsibleContainerState(content) {
         'collapsible-container-collapsed',
         content.classList.contains('collapsed'),
     );
+}
+
+function setupAutoExpandCollapsibleOnFocus() {
+    document.querySelectorAll('.collapsible-content').forEach(content => {
+        content.addEventListener('focusin', (event) => {
+            if (content.classList.contains('collapsed') && content.id) {
+                toggleCollapsible(content.id);
+            }
+        });
+    });
 }
 
 function initializeCollapsibleStates() {

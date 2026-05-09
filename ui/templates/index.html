@@ -145,7 +145,7 @@
                         </div>
                         
                         <div class="subsection smart-target-wrapper" id="smart-target-language-section" style="display: none; margin-top: 15px;">
-                            <div class="collapsible-header smart-target-header" onclick="toggleCollapsible('smart-target-settings')">
+                            <div class="collapsible-header smart-target-header" tabindex="0" role="button" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' ') { event.preventDefault(); toggleCollapsible('smart-target-settings'); }" onclick="toggleCollapsible('smart-target-settings')">
                                 <h3>
                                     <span data-i18n="section.smartTargetLanguage">智能目标语言</span>
                                     <span class="activated-badge" id="smart-target-activated-badge" data-i18n="badge.activated" hidden>已激活</span>
@@ -229,7 +229,7 @@
 
                 <!-- 翻译API设置 -->
                 <section class="card">
-                    <div class="collapsible-header" onclick="toggleCollapsible('translation-api')">
+                    <div class="collapsible-header" tabindex="0" role="button" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' ') { event.preventDefault(); toggleCollapsible('translation-api'); }" onclick="toggleCollapsible('translation-api')">
                         <h2 data-i18n="section.translationApi">翻译API设置</h2>
                         <span class="collapse-icon" id="translation-api-icon">▼</span>
                     </div>
@@ -290,7 +290,7 @@
                         </div>
 
                         <div class="subsection llm-settings-wrapper" id="llm-settings-wrapper" style="display: none;">
-                            <div class="collapsible-header llm-settings-header"
+                            <div class="collapsible-header llm-settings-header" tabindex="0" role="button" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' ') { event.preventDefault(); toggleCollapsible('llm-settings'); }"
                                 onclick="toggleCollapsible('llm-settings')">
                                 <h3 data-i18n="section.llmSettings">LLM 设置</h3>
                                 <span class="collapse-icon collapsed" id="llm-settings-icon">▶</span>
@@ -400,7 +400,7 @@
 
                 <!-- API Keys配置 -->
                 <section class="card">
-                    <div class="collapsible-header" onclick="toggleCollapsible('api-keys')">
+                    <div class="collapsible-header" tabindex="0" role="button" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' ') { event.preventDefault(); toggleCollapsible('api-keys'); }" onclick="toggleCollapsible('api-keys')">
                         <h2 data-i18n="section.apiKeys">API Keys 配置</h2>
                         <span class="collapse-icon" id="api-keys-icon">▼</span>
                     </div>
@@ -473,7 +473,7 @@
 
                 <!-- 语音识别设置 -->
                 <section class="card">
-                    <div class="collapsible-header" onclick="toggleCollapsible('asr-settings')">
+                    <div class="collapsible-header" tabindex="0" role="button" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' ') { event.preventDefault(); toggleCollapsible('asr-settings'); }" onclick="toggleCollapsible('asr-settings')">
                         <h2 data-i18n="section.asrSettings">语音识别设置</h2>
                         <span class="collapse-icon" id="asr-settings-icon">▼</span>
                     </div>
@@ -539,7 +539,7 @@
                 </section>
 
                 <section class="card" id="local-asr-card" style="display: none;">
-                    <div class="collapsible-header" onclick="toggleCollapsible('local-asr-settings')">
+                    <div class="collapsible-header" tabindex="0" role="button" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' ') { event.preventDefault(); toggleCollapsible('local-asr-settings'); }" onclick="toggleCollapsible('local-asr-settings')">
                         <h2 data-i18n="section.localAsrSettings">本地音频识别</h2>
                         <span class="collapse-icon collapsed" id="local-asr-settings-icon">▶</span>
                     </div>
@@ -623,7 +623,7 @@
 
                 <!-- 文本后处理（折叠） -->
                 <section class="card">
-                    <div class="collapsible-header" onclick="toggleCollapsible('text-post-processing')">
+                    <div class="collapsible-header" tabindex="0" role="button" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' ') { event.preventDefault(); toggleCollapsible('text-post-processing'); }" onclick="toggleCollapsible('text-post-processing')">
                         <h2 data-i18n="section.textPostProcessing">文本后处理</h2>
                         <span class="collapse-icon collapsed" id="text-post-processing-icon">▶</span>
                     </div>
@@ -684,7 +684,7 @@
 
                 <!-- 快捷切换按钮（折叠） -->
                 <section class="card" id="quick-lang-settings-section">
-                    <div class="collapsible-header" onclick="toggleCollapsible('quick-lang-settings')">
+                    <div class="collapsible-header" tabindex="0" role="button" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' ') { event.preventDefault(); toggleCollapsible('quick-lang-settings'); }" onclick="toggleCollapsible('quick-lang-settings')">
                         <h2 data-i18n="section.quickLangButtons">小面板设置</h2>
                         <span class="collapse-icon collapsed" id="quick-lang-settings-icon">▶</span>
                     </div>
@@ -777,7 +777,7 @@
 
                 <!-- 高级设置（折叠） -->
                 <section class="card">
-                    <div class="collapsible-header" onclick="toggleCollapsible('advanced-settings')">
+                    <div class="collapsible-header" tabindex="0" role="button" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' ') { event.preventDefault(); toggleCollapsible('advanced-settings'); }" onclick="toggleCollapsible('advanced-settings')">
                         <h2 data-i18n="section.advancedSettings">高级设置</h2>
                         <span class="collapse-icon collapsed" id="advanced-settings-icon">▶</span>
                     </div>
