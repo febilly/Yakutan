@@ -3681,6 +3681,7 @@ function toggleCollapsible(id) {
     content.classList.add('collapsed');
     updateCollapsibleIcon(icon, true);
     syncCollapsibleContainerState(content);
+    updateCollapsibleTabbing(content);
     content.style.maxHeight = '0px';
 }
 
