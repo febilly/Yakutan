@@ -140,6 +140,7 @@ class OpenRouterAPI(BaseTranslationAPI):
         "tl": "TAGALOG (Philippines)",
         "it": "ITALIAN",
         "tr": "TURKISH",
+        "he": "HEBREW",
         "fil": "FILIPINO/TAGALOG",
     }
 

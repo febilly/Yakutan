@@ -256,7 +256,7 @@ ENABLE_JA_FURIGANA = False
 # 是否为中文添加拼音标注（带声调）
 ENABLE_ZH_PINYIN = False
 
-# 是否对阿拉伯文字做显示重排，便于在 VRChat 等不支持阿拉伯文正确渲染的环境显示
+# 是否对阿拉伯文/希伯来文做 OSC 显示重排，便于在不支持 RTL 正确渲染的游戏环境显示
 ENABLE_ARABIC_RESHAPER = True
 
 # 是否去除文本句尾句号（仅移除末尾单个 。 / . / ．）

@@ -6,7 +6,12 @@ import asyncio
 from unittest.mock import patch
 
 from osc_manager import OSCManager
-from text_processor import ARABIC_OSC_LINE_MAX_CHARS, ARABIC_PDI, ARABIC_RLI
+from text_processor import (
+    ARABIC_OSC_LINE_MAX_CHARS,
+    ARABIC_PDI,
+    ARABIC_RLI,
+    RTL_OSC_MAX_LINE_BREAKS,
+)
 
 
 class _FakeIpcClient:
@@ -61,6 +66,24 @@ def test_arabic_osc_processing_wraps_each_line_and_keeps_total_limit():
     result = manager._prepare_outgoing_text_for_osc(text)
 
     assert len(result) <= 144
+    assert result.count("\n") <= RTL_OSC_MAX_LINE_BREAKS
+    for line in result.split("\n"):
+        assert line.startswith(ARABIC_RLI)
+        assert line.endswith(ARABIC_PDI)
+        assert len(line[1:-1]) <= ARABIC_OSC_LINE_MAX_CHARS
+        assert ARABIC_RLI not in line[1:-1]
+        assert ARABIC_PDI not in line[1:-1]
+
+
+def test_hebrew_osc_processing_wraps_each_line_and_limits_line_breaks():
+    manager = OSCManager(truncate_messages=True)
+    text = " ".join(["\u05e9\u05dc\u05d5\u05dd"] * 60)
+
+    with patch("text_processor._bidi_get_display", lambda value: value):
+        result = manager._prepare_outgoing_text_for_osc(text)
+
+    assert len(result) <= 144
+    assert result.count("\n") <= RTL_OSC_MAX_LINE_BREAKS
     for line in result.split("\n"):
         assert line.startswith(ARABIC_RLI)
         assert line.endswith(ARABIC_PDI)

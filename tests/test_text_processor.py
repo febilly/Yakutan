@@ -8,6 +8,7 @@ from text_processor import (
     ARABIC_OSC_LINE_MAX_CHARS,
     ARABIC_PDI,
     ARABIC_RLI,
+    RTL_OSC_MAX_LINE_BREAKS,
     apply_arabic_reshaper_if_needed,
     build_dual_output_display,
     build_streaming_output_line,
@@ -37,7 +38,14 @@ class _IdentityArabicReshaper:
         return text
 
 
+class _FailingArabicReshaper:
+    @staticmethod
+    def reshape(text):
+        raise AssertionError("Hebrew text must not go through arabic_reshaper")
+
+
 ARABIC_HELLO = "\u0645\u0631\u062d\u0628\u0627"
+HEBREW_HELLO = "\u05e9\u05dc\u05d5\u05dd"
 
 
 class TestNormalizeOptionalLanguageCode:
@@ -307,6 +315,7 @@ class TestArabicReshaper:
         lines = result.split("\n")
 
         assert len(lines) > 1
+        assert result.count("\n") <= RTL_OSC_MAX_LINE_BREAKS
         for line in lines:
             assert line.startswith(ARABIC_RLI)
             assert line.endswith(ARABIC_PDI)
@@ -359,6 +368,33 @@ class TestArabicReshaper:
         mock_config.ENABLE_ARABIC_RESHAPER = True
         result = apply_arabic_reshaper_if_needed("hello", "en")
         assert result == "hello"
+
+    @patch("text_processor.config")
+    @patch("text_processor._arabic_reshaper", _FailingArabicReshaper)
+    @patch("text_processor._bidi_get_display", lambda text: f"display:{text}")
+    def test_applies_bidi_to_hebrew_without_arabic_reshaper(self, mock_config):
+        mock_config.ENABLE_ARABIC_RESHAPER = True
+        text = f"Hello {HEBREW_HELLO} 123"
+
+        result = apply_arabic_reshaper_if_needed(text, "he")
+
+        assert result == f"{ARABIC_RLI}display:{text}{ARABIC_PDI}"
+
+    @patch("text_processor.config")
+    @patch("text_processor._bidi_get_display", lambda text: text)
+    def test_rtl_wrapping_limits_manual_line_breaks_for_hebrew(self, mock_config):
+        mock_config.ENABLE_ARABIC_RESHAPER = True
+        text = " ".join([HEBREW_HELLO] * 60)
+
+        result = apply_arabic_reshaper_if_needed(text, "he", max_chars=None)
+        lines = result.split("\n")
+
+        assert result.count("\n") <= RTL_OSC_MAX_LINE_BREAKS
+        assert len(lines) == RTL_OSC_MAX_LINE_BREAKS + 1
+        for line in lines:
+            assert line.startswith(ARABIC_RLI)
+            assert line.endswith(ARABIC_PDI)
+            assert len(line[1:-1]) <= ARABIC_OSC_LINE_MAX_CHARS
 
 
 class TestGetDisplayTranslationText:

@@ -23,10 +23,10 @@ from shared.vrchat_text_limits import (
     trim_text_prefix_to_limit,
 )
 from text_processor import (
-    ARABIC_PDI,
-    ARABIC_RLI,
+    RTL_PDI,
+    RTL_RLI,
     apply_arabic_reshaper_if_needed,
-    is_arabic_rtl_isolate_wrapped,
+    is_rtl_isolate_wrapped,
 )
 
 __all__ = ["OSCManager", "osc_manager"]
@@ -438,11 +438,11 @@ class OSCManager:
         self._last_mute_value = None
 
     @staticmethod
-    def _contains_only_wrapped_arabic_lines(text: str) -> bool:
+    def _contains_only_wrapped_rtl_lines(text: str) -> bool:
         lines = [line for line in (text or "").split("\n") if line]
-        return bool(lines) and all(is_arabic_rtl_isolate_wrapped(line) for line in lines)
+        return bool(lines) and all(is_rtl_isolate_wrapped(line) for line in lines)
 
-    def _truncate_wrapped_arabic_lines(self, text: str, max_length: int) -> str:
+    def _truncate_wrapped_rtl_lines(self, text: str, max_length: int) -> str:
         lines = [line for line in (text or "").split("\n") if line]
         if not lines or max_length <= 0:
             return ""
@@ -457,15 +457,15 @@ class OSCManager:
         if len(combined) <= max_length:
             return combined
 
-        line_overhead = len(ARABIC_RLI) + len(ARABIC_PDI)
+        line_overhead = len(RTL_RLI) + len(RTL_PDI)
         if max_length <= line_overhead:
             return ""
 
-        inner_text = lines[-1][len(ARABIC_RLI):-len(ARABIC_PDI)]
+        inner_text = lines[-1][len(RTL_RLI):-len(RTL_PDI)]
         inner_text = self._truncate_text(inner_text, max_length=max_length - line_overhead)
         if not inner_text:
             return ""
-        return f"{ARABIC_RLI}{inner_text}{ARABIC_PDI}"
+        return f"{RTL_RLI}{inner_text}{RTL_PDI}"
     
     def _truncate_text(self, text: str, max_length: Optional[int] = None) -> str:
         """
@@ -490,8 +490,8 @@ class OSCManager:
         if len(text) <= max_length:
             return text
 
-        if self._contains_only_wrapped_arabic_lines(text):
-            return self._truncate_wrapped_arabic_lines(text, max_length)
+        if self._contains_only_wrapped_rtl_lines(text):
+            return self._truncate_wrapped_rtl_lines(text, max_length)
         
         return trim_text_prefix_to_limit(text, max_length)
 

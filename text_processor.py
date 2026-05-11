@@ -20,9 +20,16 @@ TEXT_FANCY_STYLE_OPTIONS = (
     ('magic', 'magic'),
 )
 TEXT_FANCY_STYLE_VALUES = frozenset(value for value, _ in TEXT_FANCY_STYLE_OPTIONS)
-ARABIC_RLI = "\u2067"
-ARABIC_PDI = "\u2069"
-ARABIC_OSC_LINE_MAX_CHARS = 30
+RTL_RLI = "\u2067"
+RTL_PDI = "\u2069"
+RTL_OSC_LINE_MAX_CHARS = 30
+RTL_OSC_MAX_LINE_BREAKS = 3
+RTL_OSC_MAX_LINES = RTL_OSC_MAX_LINE_BREAKS + 1
+
+# Backward-compatible names for the existing Arabic OSC path/tests.
+ARABIC_RLI = RTL_RLI
+ARABIC_PDI = RTL_PDI
+ARABIC_OSC_LINE_MAX_CHARS = RTL_OSC_LINE_MAX_CHARS
 
 try:
     import fancify_text as _fancify_text
@@ -201,14 +208,34 @@ def _contains_arabic_reshapable_text(text: str) -> bool:
     )
 
 
+def _contains_hebrew_text(text: str) -> bool:
+    return any(
+        '\u0590' <= ch <= '\u05ff'
+        or '\ufb1d' <= ch <= '\ufb4f'
+        for ch in text
+    )
+
+
+def _contains_rtl_reorderable_text(text: str) -> bool:
+    return _contains_arabic_reshapable_text(text) or _contains_hebrew_text(text)
+
+
+def is_rtl_isolate_wrapped(text: str) -> bool:
+    return bool(text) and text.startswith(RTL_RLI) and text.endswith(RTL_PDI)
+
+
 def is_arabic_rtl_isolate_wrapped(text: str) -> bool:
-    return bool(text) and text.startswith(ARABIC_RLI) and text.endswith(ARABIC_PDI)
+    return is_rtl_isolate_wrapped(text)
+
+
+def wrap_rtl_isolate(text: str) -> str:
+    if not text or is_rtl_isolate_wrapped(text):
+        return text
+    return f"{RTL_RLI}{text}{RTL_PDI}"
 
 
 def wrap_arabic_rtl_isolate(text: str) -> str:
-    if not text or is_arabic_rtl_isolate_wrapped(text):
-        return text
-    return f"{ARABIC_RLI}{text}{ARABIC_PDI}"
+    return wrap_rtl_isolate(text)
 
 
 def _wrap_text_at_word_boundaries(text: str, max_chars: int) -> list[str]:
@@ -264,47 +291,65 @@ def _limit_line_at_word_boundary(text: str, max_chars: int) -> str:
     return current
 
 
+def _line_needs_rtl_processing(line: str) -> bool:
+    return _contains_rtl_reorderable_text(line)
+
+
 def _line_needs_arabic_processing(line: str) -> bool:
-    return _contains_arabic_reshapable_text(line)
+    return _line_needs_rtl_processing(line)
+
+
+def _process_rtl_line(line: str) -> str:
+    if not _line_needs_rtl_processing(line):
+        return line
+
+    display_source = line
+    if _contains_arabic_reshapable_text(line):
+        if _arabic_reshaper is None:
+            _warn_text_post_processing_degraded_once(
+                'arabic_reshaper_missing',
+                '阿拉伯文显示重排降级：arabic-reshaper 不可用，仅添加方向隔离控制符。',
+            )
+            return wrap_rtl_isolate(line)
+        try:
+            display_source = str(_arabic_reshaper.reshape(line))
+        except Exception as exc:
+            _warn_text_post_processing_degraded_once(
+                'arabic_reshaper_failed',
+                f'阿拉伯文显示重排降级：处理失败（{exc!r}），仅添加方向隔离控制符。',
+            )
+            return wrap_rtl_isolate(line)
+
+    if _bidi_get_display is None:
+        _warn_text_post_processing_degraded_once(
+            'python_bidi_missing',
+            'RTL 显示重排降级：python-bidi 不可用，混排英文/数字可能显示异常。',
+        )
+        return wrap_rtl_isolate(display_source)
+
+    try:
+        # Run bidi after manual line wrapping so mixed LTR/RTL text is fixed
+        # without letting renderer auto-wrap split punctuation across lines.
+        return wrap_rtl_isolate(str(_bidi_get_display(display_source)))
+    except Exception as exc:
+        _warn_text_post_processing_degraded_once(
+            'rtl_bidi_failed',
+            f'RTL 显示重排降级：bidi 处理失败（{exc!r}），仅添加方向隔离控制符。',
+        )
+        return wrap_rtl_isolate(display_source)
 
 
 def _process_arabic_line(line: str) -> str:
-    if not _line_needs_arabic_processing(line):
-        return line
-
-    if _arabic_reshaper is None:
-        _warn_text_post_processing_degraded_once(
-            'arabic_reshaper_missing',
-            '阿拉伯文显示重排降级：arabic-reshaper 不可用，仅添加方向隔离控制符。',
-        )
-        return wrap_arabic_rtl_isolate(line)
-
-    try:
-        reshaped = str(_arabic_reshaper.reshape(line))
-        if _bidi_get_display is None:
-            _warn_text_post_processing_degraded_once(
-                'python_bidi_missing',
-                '阿拉伯文显示重排降级：python-bidi 不可用，混排英文/数字可能显示异常。',
-            )
-            return wrap_arabic_rtl_isolate(reshaped)
-        # Run bidi after manual line wrapping so mixed LTR/RTL text is fixed
-        # without letting renderer auto-wrap split punctuation across lines.
-        return wrap_arabic_rtl_isolate(str(_bidi_get_display(reshaped)))
-    except Exception as exc:
-        _warn_text_post_processing_degraded_once(
-            'arabic_reshaper_failed',
-            f'阿拉伯文显示重排降级：处理失败（{exc!r}），仅添加方向隔离控制符。',
-        )
-        return wrap_arabic_rtl_isolate(line)
+    return _process_rtl_line(line)
 
 
-def _arabic_processed_line_for_budget(line: str, inner_budget: int) -> str:
+def _rtl_processed_line_for_budget(line: str, inner_budget: int) -> str:
     logical_line = _limit_line_at_word_boundary(line, inner_budget)
     while logical_line:
-        processed_line = _process_arabic_line(logical_line)
+        processed_line = _process_rtl_line(logical_line)
         line_overhead = (
-            len(ARABIC_RLI) + len(ARABIC_PDI)
-            if is_arabic_rtl_isolate_wrapped(processed_line)
+            len(RTL_RLI) + len(RTL_PDI)
+            if is_rtl_isolate_wrapped(processed_line)
             else 0
         )
         if len(processed_line) <= inner_budget + line_overhead:
@@ -313,11 +358,17 @@ def _arabic_processed_line_for_budget(line: str, inner_budget: int) -> str:
     return ""
 
 
-def _build_arabic_reshaped_lines(
+def _arabic_processed_line_for_budget(line: str, inner_budget: int) -> str:
+    return _rtl_processed_line_for_budget(line, inner_budget)
+
+
+def _build_rtl_reordered_lines(
     text: str,
     max_chars: Optional[int] = None,
 ) -> str:
-    logical_lines = _wrap_text_at_word_boundaries(text, ARABIC_OSC_LINE_MAX_CHARS)
+    logical_lines = _wrap_text_at_word_boundaries(text, RTL_OSC_LINE_MAX_CHARS)
+    if RTL_OSC_MAX_LINES > 0:
+        logical_lines = logical_lines[:RTL_OSC_MAX_LINES]
     if not logical_lines:
         return ""
 
@@ -325,7 +376,7 @@ def _build_arabic_reshaped_lines(
     current_length = 0
 
     for logical_line in logical_lines:
-        processed_line = _process_arabic_line(logical_line)
+        processed_line = _process_rtl_line(logical_line)
         separator_length = 1 if processed_lines else 0
 
         if max_chars is None:
@@ -339,18 +390,25 @@ def _build_arabic_reshaped_lines(
 
         remaining = max_chars - current_length - separator_length
         line_overhead = (
-            len(ARABIC_RLI) + len(ARABIC_PDI)
-            if _line_needs_arabic_processing(logical_line)
+            len(RTL_RLI) + len(RTL_PDI)
+            if _line_needs_rtl_processing(logical_line)
             else 0
         )
-        inner_budget = min(ARABIC_OSC_LINE_MAX_CHARS, remaining - line_overhead)
+        inner_budget = min(RTL_OSC_LINE_MAX_CHARS, remaining - line_overhead)
         if inner_budget > 0:
-            shortened_line = _arabic_processed_line_for_budget(logical_line, inner_budget)
+            shortened_line = _rtl_processed_line_for_budget(logical_line, inner_budget)
             if shortened_line:
                 processed_lines.append(shortened_line)
         break
 
     return "\n".join(processed_lines)
+
+
+def _build_arabic_reshaped_lines(
+    text: str,
+    max_chars: Optional[int] = None,
+) -> str:
+    return _build_rtl_reordered_lines(text, max_chars=max_chars)
 
 
 def apply_arabic_reshaper_if_needed(
@@ -360,11 +418,11 @@ def apply_arabic_reshaper_if_needed(
 ) -> str:
     if not text or not getattr(config, 'ENABLE_ARABIC_RESHAPER', True):
         return text
-    if is_arabic_rtl_isolate_wrapped(text):
+    if is_rtl_isolate_wrapped(text):
         return text
-    if not _contains_arabic_reshapable_text(text):
+    if not _contains_rtl_reorderable_text(text):
         return text
-    return _build_arabic_reshaped_lines(text, max_chars=max_chars)
+    return _build_rtl_reordered_lines(text, max_chars=max_chars)
 
 
 def remove_trailing_sentence_period_if_needed(text: str) -> str:
