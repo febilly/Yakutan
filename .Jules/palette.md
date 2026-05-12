@@ -1,0 +1,3 @@
+## 2024-05-12 - Added API Key Visibility Toggles
+**Learning:** Adding the "Show key" eye-icon to password fields is a major UX win, allowing users to verify pasted keys without leaving them permanently exposed. The existing `.secret-input-group` and `.secret-visibility-toggle` CSS classes and JavaScript logic in `setupSecretVisibilityToggles()` made this easy to apply consistently to newly discovered or overlooked password fields (`dashscope-api-key`, `deepl-api-key`, `doubao-api-key`, `soniox-api-key`).
+**Action:** When adding or encountering new `type="password"` fields that users need to copy-paste into, always wrap them in the `secret-input-group` layout with the visibility toggle button to maintain consistent and pleasant UX.
