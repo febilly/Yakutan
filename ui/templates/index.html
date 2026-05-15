@@ -414,8 +414,20 @@
                                     hidden></span>
                             </label>
                             <div style="display: flex; align-items: center; gap: 16px;">
-                                <input type="password" id="dashscope-api-key" class="form-control" placeholder="sk-..."
-                                    style="flex: 1;">
+                                <div class="secret-input-group" style="flex: 1;">
+                                    <input type="password" id="dashscope-api-key" class="form-control" placeholder="sk-...">
+                                    <button
+                                        type="button"
+                                        id="dashscope-api-key-visibility-toggle"
+                                        class="secret-visibility-toggle"
+                                        data-target-input="dashscope-api-key"
+                                        aria-label="Show key"
+                                        aria-pressed="false"
+                                        title="Show key"
+                                    >
+                                        <span class="secret-visibility-icon">👁️</span>
+                                    </button>
+                                </div>
                                 <div style="display:flex; align-items:center; gap:8px; white-space:nowrap;">
                                     <span data-i18n="label.international">国际版</span>
                                     <label class="switch" style="margin:0;">
@@ -438,7 +450,20 @@
 
                         <div class="api-key-group">
                             <label for="deepl-api-key" data-i18n="label.deeplKey">DeepL API Key (可选，用于翻译)</label>
-                            <input type="password" id="deepl-api-key" class="form-control" placeholder="...">
+                            <div class="secret-input-group">
+                                <input type="password" id="deepl-api-key" class="form-control" placeholder="...">
+                                <button
+                                    type="button"
+                                    id="deepl-api-key-visibility-toggle"
+                                    class="secret-visibility-toggle"
+                                    data-target-input="deepl-api-key"
+                                    aria-label="Show key"
+                                    aria-pressed="false"
+                                    title="Show key"
+                                >
+                                    <span class="secret-visibility-icon">👁️</span>
+                                </button>
+                            </div>
                             <small class="form-text">
                                 <a href="https://www.deepl.com/en/pro-api" target="_blank"
                                     data-i18n="link.getApiKey">获取API Key →</a>
@@ -447,7 +472,20 @@
 
                         <div class="api-key-group">
                             <label for="doubao-api-key" data-i18n="label.doubaoKey">豆包录音文件 API Key（可选）</label>
-                            <input type="password" id="doubao-api-key" class="form-control" placeholder="API Key">
+                            <div class="secret-input-group">
+                                <input type="password" id="doubao-api-key" class="form-control" placeholder="API Key">
+                                <button
+                                    type="button"
+                                    id="doubao-api-key-visibility-toggle"
+                                    class="secret-visibility-toggle"
+                                    data-target-input="doubao-api-key"
+                                    aria-label="Show key"
+                                    aria-pressed="false"
+                                    title="Show key"
+                                >
+                                    <span class="secret-visibility-icon">👁️</span>
+                                </button>
+                            </div>
                             <small class="form-text">
                                 <span data-i18n="hint.doubaoKey">用于豆包录音文件识别后端。</span>
                             </small>
@@ -461,7 +499,20 @@
 
                         <div class="api-key-group">
                             <label for="soniox-api-key" data-i18n="label.sonioxKey">Soniox API Key（可选）</label>
-                            <input type="password" id="soniox-api-key" class="form-control" placeholder="...">
+                            <div class="secret-input-group">
+                                <input type="password" id="soniox-api-key" class="form-control" placeholder="...">
+                                <button
+                                    type="button"
+                                    id="soniox-api-key-visibility-toggle"
+                                    class="secret-visibility-toggle"
+                                    data-target-input="soniox-api-key"
+                                    aria-label="Show key"
+                                    aria-pressed="false"
+                                    title="Show key"
+                                >
+                                    <span class="secret-visibility-icon">👁️</span>
+                                </button>
+                            </div>
                             <small class="form-text">
                                 <span data-i18n="hint.sonioxKey">支持60+语言的语音识别。</span>
                                 <a href="https://console.soniox.com/" target="_blank" data-i18n="link.getApiKey">获取API
