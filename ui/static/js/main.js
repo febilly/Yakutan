@@ -624,13 +624,6 @@ const LLM_TEMPLATE_CONFIGS = {
         parallelFastestMode: 'off',
         providerLabelKey: 'btn.llmTemplateOpenRouter',
     },
-    longcat: {
-        baseUrl: 'https://api.longcat.chat/openai/v1',
-        model: 'LongCat-Flash-Lite',
-        extraBody: '',
-        parallelFastestMode: 'all',
-        providerLabelKey: 'btn.llmTemplateLongCat',
-    },
     mercury2: {
         baseUrl: 'https://api.inceptionlabs.ai/v1',
         model: 'mercury-2',
@@ -672,10 +665,6 @@ function resolveLLMParallelFastestModeFromStoredTranslation(trans) {
     }
     if (typeof trans.enable_llm_parallel_fastest === 'boolean') {
         return trans.enable_llm_parallel_fastest ? 'final_only' : 'off';
-    }
-    const url = (trans.llm_base_url || '').toLowerCase();
-    if (url.includes('longcat.chat')) {
-        return 'all';
     }
     return 'off';
 }
@@ -789,6 +778,33 @@ function hasAnyLLMConnectionFieldValue() {
 }
 
 function ensureSelectedLLMTemplate(configTranslation = null) {
+    // Check if the template saved in backend config or localStorage is non-existent/invalid.
+    // If it was non-empty and is now invalid, we default to deepseek-v4-flash.
+    let invalidTemplateDetected = false;
+    let originalTemplateName = '';
+
+    if (configTranslation && configTranslation.llm_template) {
+        originalTemplateName = configTranslation.llm_template;
+        if (!isValidLLMTemplateName(originalTemplateName)) {
+            invalidTemplateDetected = true;
+        }
+    } else {
+        const storedTemplate = localStorage.getItem(LLM_SELECTED_TEMPLATE_STORAGE_KEY);
+        if (storedTemplate) {
+            originalTemplateName = storedTemplate;
+            if (!isValidLLMTemplateName(originalTemplateName)) {
+                invalidTemplateDetected = true;
+            }
+        }
+    }
+
+    if (invalidTemplateDetected) {
+        console.warn(`Detected non-existent/removed LLM template '${originalTemplateName}'. Defaulting to deepseek-v4-flash.`);
+        // Default to deepseek-v4-flash and apply its configurations
+        applyLLMTemplate('deepseek-v4-flash');
+        return 'deepseek-v4-flash';
+    }
+
     const configTemplate = normalizeLLMTemplateName(configTranslation?.llm_template);
     if (configTemplate) {
         return setSelectedLLMTemplateName(configTemplate);
@@ -1070,8 +1086,6 @@ function resolveLLMTemplateKeySource(templateName) {
         url = 'https://openrouter.ai/settings/keys';
     } else if (templateName === 'deepseek-v4-flash') {
         url = 'https://platform.deepseek.com/api_keys';
-    } else if (templateName === 'longcat') {
-        url = 'https://longcat.chat/platform/api_keys';
     } else if (templateName === 'mercury2') {
         url = 'https://platform.inceptionlabs.ai/dashboard/api-keys';
     }
