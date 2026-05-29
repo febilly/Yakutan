@@ -122,6 +122,26 @@ class TestDeepLAPI:
             assert "context" in kwargs
             assert "Hi" in kwargs["context"]
 
+    def test_untranslated_context_pairs_used_in_deepl(self):
+        mock_client = MagicMock()
+        with patch("streaming_translation.api.deepl.deepl") as mock_deepl:
+            mock_deepl.DeepLClient.return_value = mock_client
+            mock_deepl.AuthorizationException = type("AuthExc", (Exception,), {})
+            mock_deepl.QuotaExceededException = type("QuotaExc", (Exception,), {})
+            mock_deepl.DeepLException = type("DeepLExc", (Exception,), {})
+            from streaming_translation.api.deepl import DeepLAPI
+            api = DeepLAPI(api_key="test-key", proxy_url=None)
+            mock_client.reset_mock()
+            mock_client.translate_text.return_value.text = "Hola"
+            api.translate(
+                "Hello",
+                context_pairs=[{"source": "OnlySource", "target": ""}],
+                target_language="es"
+            )
+            _, kwargs = mock_client.translate_text.call_args
+            assert "context" in kwargs
+            assert "OnlySource" in kwargs["context"]
+
     def test_vrcx_context_kept_with_context_pairs(self):
         mock_client = MagicMock()
         with patch("streaming_translation.api.deepl.deepl") as mock_deepl:
@@ -284,6 +304,28 @@ class TestQwenMTAPI:
         opts = kwargs["extra_body"]["translation_options"]
         assert "World: Test World" in opts["domains"]
 
+    @patch("streaming_translation.api.qwen_mt.OpenAI")
+    def test_untranslated_context_pairs_passed_to_tm_list(self, mock_openai):
+        mock_openai.return_value = MagicMock()
+        from streaming_translation.api.qwen_mt import QwenMTAPI
+        api = QwenMTAPI(api_key="test-key", proxy_url=None)
+        api.client = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = "Hola"
+        api.client.chat.completions.create.return_value = MagicMock(choices=[mock_choice])
+        api.translate(
+            "Hello",
+            context_pairs=[{"source": "Hi", "target": "Hola"}, {"source": "OnlySource", "target": ""}],
+            target_language="es",
+        )
+        _, kwargs = api.client.chat.completions.create.call_args
+        opts = kwargs["extra_body"]["translation_options"]
+        assert "tm_list" in opts
+        assert len(opts["tm_list"]) == 2
+        assert opts["tm_list"][0]["source"] == "Hi"
+        assert opts["tm_list"][1]["source"] == "OnlySource"
+        assert opts["tm_list"][1]["target"] == ""
+
 
 # ── OpenRouterAPI ─────────────────────────────────────────────────────
 
@@ -407,12 +449,15 @@ class TestOpenRouterAPI:
         assert block3 is not None
         assert "World: Test World" in block3
         assert "Hi" in block3
-        assert "Current" not in block3
+        assert "Current" in block3  # Now allowed as context without translation target
         assert "local context for disambiguating" not in block3
         assert "Additional context notes:\nBase" in block3
-        assert OpenRouterAPI._build_context_block(
+        
+        block4 = OpenRouterAPI._build_context_block(
             None, [{"source": "Current", "target": ""}]
-        ) is None
+        )
+        assert block4 is not None
+        assert "Current" in block4
         # Neither
         assert OpenRouterAPI._build_context_block(None, None) is None
         assert OpenRouterAPI._build_context_block("", None) is None

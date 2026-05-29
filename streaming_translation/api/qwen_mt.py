@@ -102,7 +102,6 @@ class QwenMTAPI(BaseTranslationAPI):
                     {"source": p["source"], "target": p["target"]}
                     for p in context_pairs
                     if str(p.get("source") or "").strip()
-                    and str(p.get("target") or "").strip()
                 ]
                 if tm_list:
                     translation_options["tm_list"] = tm_list

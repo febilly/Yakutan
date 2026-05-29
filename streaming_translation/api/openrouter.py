@@ -325,7 +325,7 @@ class OpenRouterAPI(BaseTranslationAPI):
         for pair in context_pairs:
             source = str(pair.get("source") or "").strip()
             target = str(pair.get("target") or "").strip()
-            if source and target:
+            if source:
                 completed.append({"source": source, "target": target})
         return completed
 
