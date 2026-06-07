@@ -77,6 +77,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self._latest_applied_async_result_seq = 0
         self._session_generation = 0
         self._translate_ordering_lock = threading.Lock()
+        self._last_osc_typing_ongoing = False
         self.partial_translation_update_count = 0
         self._prefer_deepl_on_next_final = False
         self._partial_debounce_handle: Optional[asyncio.TimerHandle] = None
@@ -644,11 +645,13 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self._reset_partial_translation_state()
         self._final_output_version = 0
         self._final_translate_request_seq = 0
+        self._last_osc_typing_ongoing = False
         with self._translate_ordering_lock:
             self._session_generation += 1
 
     def on_session_stopped(self) -> None:
         self._cancel_partial_debounce()
+        self._last_osc_typing_ongoing = False
         with self._translate_ordering_lock:
             self._session_generation += 1
         logger.info('Speech recognizer session closed.')
@@ -1113,13 +1116,15 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
     def on_result(self, event: RecognitionEvent) -> None:
         s = self.state
         text = str(event.text or "").strip()
+        is_ongoing = not event.is_final
+        should_set_typing_started = is_ongoing and not self._last_osc_typing_ongoing
+        self._last_osc_typing_ongoing = is_ongoing
         if not text:
             return
         session_generation = self._get_session_generation()
 
         is_translated = False
         display_text = None
-        is_ongoing = not event.is_final
 
         # 可能在翻译分支中赋值的变量
         display_translated_text = None
@@ -1463,9 +1468,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         osc_manager.send_text(osc_text, ongoing=is_ongoing),
                         self.loop,
                     )
-            elif is_ongoing:
+            elif should_set_typing_started:
                 asyncio.run_coroutine_threadsafe(
-                    osc_manager.set_typing(is_ongoing),
+                    osc_manager.set_typing(True),
                     self.loop,
                 )
         else:

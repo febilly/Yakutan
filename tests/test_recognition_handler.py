@@ -210,6 +210,7 @@ class TestVRChatRecognitionCallbackInit:
         assert callback.translating_partial is False
         assert callback._finalized_seq == 0
         assert callback._final_output_version == 0
+        assert callback._last_osc_typing_ongoing is False
 
     def test_mute_finalization(self):
         state = MagicMock()
@@ -280,16 +281,20 @@ class TestSessionLifecycle:
         cb = VRChatRecognitionCallback(MagicMock())
         old_gen = cb._get_session_generation()
         cb.mark_mute_finalization_requested()
+        cb._last_osc_typing_ongoing = True
         cb.last_partial_translation = "old text"
         cb.on_session_started()
         assert cb._get_session_generation() > old_gen
         assert cb.last_partial_translation is None
+        assert cb._last_osc_typing_ongoing is False
 
     def test_on_session_stopped(self):
         cb = VRChatRecognitionCallback(MagicMock())
         old_gen = cb._get_session_generation()
+        cb._last_osc_typing_ongoing = True
         cb.on_session_stopped()
         assert cb._get_session_generation() > old_gen
+        assert cb._last_osc_typing_ongoing is False
 
     def test_on_error_logs(self):
         cb = VRChatRecognitionCallback(MagicMock())
@@ -457,6 +462,44 @@ class TestASRNotBlockedByTranslation:
         )
 
         state.executor.shutdown(wait=True)
+
+    @patch("recognition_handler.asyncio.run_coroutine_threadsafe")
+    @patch("recognition_handler.osc_manager")
+    @patch("recognition_handler.config")
+    def test_typing_status_sent_only_on_ongoing_rising_edge(
+        self, mock_config, mock_osc_manager, mock_run_coroutine_threadsafe,
+    ):
+        mock_config.ENABLE_TRANSLATION = False
+        mock_config.SHOW_PARTIAL_RESULTS = False
+        mock_config.ENABLE_REVERSE_TRANSLATION = False
+
+        typing_coro = object()
+        send_coro = object()
+        mock_osc_manager.set_typing.return_value = typing_coro
+        mock_osc_manager.send_text.return_value = send_coro
+
+        state = _make_mock_state()
+        state.update_subtitles = MagicMock()
+        callback = VRChatRecognitionCallback(state)
+        callback.loop = MagicMock()
+
+        callback.on_result(RecognitionEvent(text="partial one", is_final=False, raw={}))
+        callback.on_result(RecognitionEvent(text="partial two", is_final=False, raw={}))
+        callback.on_result(RecognitionEvent(text="final", is_final=True, raw={}))
+        callback.on_result(RecognitionEvent(text="partial three", is_final=False, raw={}))
+
+        assert [call.args for call in mock_osc_manager.set_typing.call_args_list] == [
+            (True,),
+            (True,),
+        ]
+        assert mock_run_coroutine_threadsafe.call_args_list[0].args == (
+            typing_coro,
+            callback.loop,
+        )
+        assert mock_run_coroutine_threadsafe.call_args_list[-1].args == (
+            typing_coro,
+            callback.loop,
+        )
 
 
 class TestExecutorDispatchPath:
