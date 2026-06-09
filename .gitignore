@@ -36,3 +36,6 @@ local_asr/vendor/qwen_asr_gguf/inference_old/
 
 local_asr_models/
 /.sisyphus
+
+#CLAUDE
+CLAUDE.md

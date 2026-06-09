@@ -803,6 +803,17 @@
                         <div class="subsection">
                             <h3 data-i18n="subsection.micControl">麦克风控制</h3>
                             <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.localVadGating">本地 VAD 发送门控（省流）</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="local-vad-gating" onchange="onSettingChange()"
+                                            data-restart-required="true">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" data-i18n="hint.localVadGating">VAD 检测到静音时暂停向 ASR 发送音频，降低 API 费用。启用后无视麦克风控制。</small>
+                            </div>
+                            <div class="form-group">
                                 <label for="mute-delay" data-i18n="label.muteDelay">静音延迟（秒）</label>
                                 <input type="number" id="mute-delay" class="form-control" min="0" max="5" step="0.1"
                                     value="0.2" onchange="onSettingChange()">

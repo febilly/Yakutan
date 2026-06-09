@@ -364,6 +364,7 @@ def get_config_dict():
             'enable_mic_control': config.ENABLE_MIC_CONTROL,
             'mute_delay_seconds': config.MUTE_DELAY_SECONDS,
             'mic_device_index': getattr(config, 'MIC_DEVICE_INDEX', None),
+            'enable_vad_gating': getattr(config, 'ENABLE_LOCAL_VAD_GATING', False),
         },
         # 语言检测器配置
         'language_detector': {
@@ -502,6 +503,8 @@ def update_config(config_data):
                 config.ENABLE_MIC_CONTROL = mic['enable_mic_control']
             if 'mute_delay_seconds' in mic:
                 config.MUTE_DELAY_SECONDS = float(mic['mute_delay_seconds'])
+            if 'enable_vad_gating' in mic:
+                config.ENABLE_LOCAL_VAD_GATING = bool(mic['enable_vad_gating'])
             if 'mic_device_index' in mic:
                 value = mic['mic_device_index']
                 if value is None or value == '':

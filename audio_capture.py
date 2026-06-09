@@ -323,6 +323,18 @@ async def audio_capture_task(state, recognizer):
 
     sender_task = asyncio.create_task(_sender_worker())
 
+    # VAD 侧路 chunk 大小（Silero 16kHz 固定）
+    _vad_chunk_samples = 512
+    _vad_chunk_count = 0
+    _vad_last_diag_at = 0.0
+    _vad_diag_interval = 2.0  # 每 2s 输出一次 VAD 诊断（含置信度，验证数据通路）
+
+    # 一次性报告 VAD 状态
+    if state.vad_enabled and state.vad_processor is not None:
+        print(f'[VAD] capture loop 已激活，等待语音...')
+    else:
+        print(f'[VAD] capture loop — VAD 未启用 (enabled={state.vad_enabled}, proc={state.vad_processor is not None})')
+
     try:
         while not state.stop_event.is_set():
             # 始终读取音频数据,避免缓冲区积压
@@ -332,6 +344,48 @@ async def audio_capture_task(state, recognizer):
             if not data:
                 await asyncio.sleep(0.001)
                 continue
+
+            # ── VAD 侧路分析（不阻塞主通道） ──
+            if state.vad_enabled and state.vad_processor is not None:
+                try:
+                    samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+                    pending = state._vad_pending_samples
+                    if pending is not None and len(pending) > 0:
+                        samples = np.concatenate([pending, samples])
+                    offset = 0
+                    while offset + _vad_chunk_samples <= len(samples):
+                        chunk = samples[offset:offset + _vad_chunk_samples]
+                        state.vad_processor.process_chunk(chunk)
+                        offset += _vad_chunk_samples
+                        _vad_chunk_count += 1
+                        # 检测 VAD 内部状态变化
+                        is_speaking = state.vad_processor._is_speaking
+                        if is_speaking != state._vad_was_speaking:
+                            state._vad_was_speaking = is_speaking
+                            conf = state.vad_processor.last_confidence
+                            if is_speaking:
+                                print(f'[VAD] ▶ SPEECH 开始 (chunk=#{_vad_chunk_count}, 置信度={conf:.3f})')
+                            else:
+                                print(f'[VAD] ■ SILENCE (chunk=#{_vad_chunk_count}, 置信度={conf:.3f})')
+                        # 定期诊断：即使没有状态变化也输出置信度，验证数据通路
+                        now = time.monotonic()
+                        if now - _vad_last_diag_at > _vad_diag_interval:
+                            _vad_last_diag_at = now
+                            conf = state.vad_processor.last_confidence
+                            label = 'SPEECH' if is_speaking else 'SILENCE'
+                            print(f'[VAD] diag: chunks={_vad_chunk_count}, state={label}, conf={conf:.3f}')
+                    # 保留不足一个 chunk 的剩余帧
+                    state._vad_pending_samples = np.array(
+                        samples[offset:], dtype=np.float32, copy=True
+                    )
+                except Exception:
+                    # VAD 错误不应中断音频流
+                    import traceback
+                    now = time.monotonic()
+                    if now - _vad_last_diag_at > _vad_diag_interval:
+                        _vad_last_diag_at = now
+                        print('[VAD] ⚠ 处理异常（静默）')
+                        traceback.print_exc()
 
             # 只有在识别激活时才发送音频数据,否则丢弃
             if state.recognition_active:

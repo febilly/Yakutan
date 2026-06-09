@@ -56,6 +56,12 @@ hiddenimports = [
     'bidi.algorithm',
     'panel_app',
     'webview',
+    # 本地 VAD 发送门控（Silero ONNX）
+    'local_asr',
+    'local_asr.vad_processor',
+    'local_asr.model_manager',
+    'onnxruntime',
+    'onnxruntime.capi',
 ]
 
 # pywebview 在 Windows 下会动态加载平台后端，PyInstaller 需显式收集。
