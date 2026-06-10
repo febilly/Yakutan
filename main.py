@@ -329,14 +329,14 @@ async def main(
             state.vad_processor = VADProcessor(
                 sample_rate=config.SAMPLE_RATE,
                 threshold=float(getattr(config, 'LOCAL_VAD_THRESHOLD', 0.50)),
-                min_speech_duration=float(getattr(config, 'LOCAL_VAD_MIN_SPEECH_DURATION', 0.3)),
+                min_speech_duration=float(getattr(config, 'LOCAL_VAD_GATING_MIN_SPEECH_DURATION', 0.15)),
                 chunk_duration=512.0 / config.SAMPLE_RATE,
                 pre_speech_duration=float(getattr(config, 'LOCAL_VAD_PRE_SPEECH_DURATION', 0.2)),
             )
             state.vad_processor.update_settings({
                 'vad_mode': getattr(config, 'LOCAL_VAD_MODE', 'silero'),
                 'vad_threshold': float(getattr(config, 'LOCAL_VAD_THRESHOLD', 0.50)),
-                'min_speech_duration': float(getattr(config, 'LOCAL_VAD_MIN_SPEECH_DURATION', 0.3)),
+                'min_speech_duration': float(getattr(config, 'LOCAL_VAD_GATING_MIN_SPEECH_DURATION', 0.15)),
                 'silence_duration': float(getattr(config, 'LOCAL_VAD_SILENCE_DURATION', 0.8)),
                 'pre_speech_duration': float(getattr(config, 'LOCAL_VAD_PRE_SPEECH_DURATION', 0.2)),
             })
@@ -344,9 +344,9 @@ async def main(
             import numpy as np
             state._vad_pending_samples = np.array([], dtype=np.float32)
             state._vad_was_speaking = False
-            print('[VAD] ✓ 本地 VAD 发送门控已启用（仅日志模式）')
+            print('[VAD] ✓ 本地 VAD 发送门控已启用')
             print(f'[VAD]   threshold={state.vad_processor.threshold:.2f} '
-                  f'min_speech={getattr(config, "LOCAL_VAD_MIN_SPEECH_DURATION", 0.3):.1f}s '
+                  f'min_speech={getattr(config, "LOCAL_VAD_GATING_MIN_SPEECH_DURATION", 0.15):.1f}s '
                   f'silence={getattr(config, "LOCAL_VAD_SILENCE_DURATION", 0.8):.1f}s '
                   f'mode={state.vad_processor.mode}')
         except Exception as e:

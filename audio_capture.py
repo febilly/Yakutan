@@ -388,17 +388,29 @@ async def audio_capture_task(state, recognizer):
                         traceback.print_exc()
 
             # 只有在识别激活时才发送音频数据,否则丢弃
+            # VAD 门控：静音时不发送音频到 ASR（省流），说话时正常发送
             if state.recognition_active:
-                item = (getattr(state, 'audio_send_generation', 0), data)
-                try:
-                    send_queue.put_nowait(item)
-                except asyncio.QueueFull:
-                    _drop_oldest_queue_item(send_queue)
-                    send_queue.put_nowait(item)
-                    now = time.monotonic()
-                    if now - last_queue_warning_at > 5.0:
-                        print('[Audio] ASR发送队列已满，丢弃最旧音频帧以保持实时采集')
-                        last_queue_warning_at = now
+                _should_send = True
+                if state.vad_enabled and state.vad_processor is not None:
+                    _should_send = state.vad_processor._is_speaking
+                if _should_send:
+                    item = (getattr(state, 'audio_send_generation', 0), data)
+                    try:
+                        send_queue.put_nowait(item)
+                    except asyncio.QueueFull:
+                        _drop_oldest_queue_item(send_queue)
+                        send_queue.put_nowait(item)
+                        now = time.monotonic()
+                        if now - last_queue_warning_at > 5.0:
+                            print('[Audio] ASR发送队列已满，丢弃最旧音频帧以保持实时采集')
+                            last_queue_warning_at = now
+                else:
+                    # 调试：VAD 门控丢弃音频时统计
+                    _vad_drop_count = getattr(state, '_vad_drop_count', 0) + 1
+                    state._vad_drop_count = _vad_drop_count
+                    if _vad_drop_count == 1 or _vad_drop_count % 100 == 0:
+                        is_sp = state.vad_processor._is_speaking if state.vad_processor else 'N/A'
+                        print(f'[VAD-gate] 丢弃音频帧 (累计={_vad_drop_count}, is_speaking={is_sp})')
             elif not send_queue.empty():
                 while not send_queue.empty():
                     _drop_oldest_queue_item(send_queue)

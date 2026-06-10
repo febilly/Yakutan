@@ -317,6 +317,10 @@ TERMINOLOGY_ENABLED = True
 # 可通过前端「本地语音识别」面板中的开关控制，无需再设环境变量。
 ENABLE_LOCAL_VAD_GATING = _get_env_bool('ENABLE_LOCAL_VAD_GATING', False)
 
+# VAD 门控专用：最短语音持续时间（秒），用于触发 SPEECH 状态
+# 比通用 LOCAL_VAD_MIN_SPEECH_DURATION 更短，确保快速对话（如打招呼）不被截断
+LOCAL_VAD_GATING_MIN_SPEECH_DURATION = 0.15
+
 # ============================================================================
 # 麦克风控制配置
 # ============================================================================
