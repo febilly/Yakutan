@@ -9,65 +9,93 @@
 </head>
 
 <body>
-    <div class="container">
-        <header>
-            <h1 data-i18n="header.title">🎤 Yakutan 控制面板</h1>
-            <div class="header-right">
+    <div class="app">
+        <!-- 顶栏：品牌 + 状态 + 主操作 -->
+        <header class="topbar">
+            <div class="topbar-left">
+                <h1 class="brand" data-i18n="header.title">🎤 Yakutan 控制面板</h1>
+                <div class="status-group">
+                    <div class="status-indicator">
+                        <div class="status-dot" id="status-dot"></div>
+                        <span id="status-text" data-i18n="status.notRunning">服务未运行</span>
+                    </div>
+                    <div class="status-indicator" id="ipc-status-indicator" style="display: none;">
+                        <div class="status-dot" id="ipc-status-dot" style="background-color: #4caf50;"></div>
+                        <span id="ipc-status-text">已连接</span>
+                    </div>
+                </div>
+            </div>
+            <div class="topbar-actions">
+                <button id="start-btn" class="btn btn-success btn-cta" onclick="startService()"
+                    data-i18n="btn.loading" disabled>加载中</button>
+                <button id="stop-btn" class="btn btn-danger" onclick="stopService()" disabled
+                    data-i18n="btn.stopService">停止服务</button>
+                <button id="panel-btn" class="btn btn-primary" onclick="openMiniPanel()"
+                    data-i18n="btn.openPanel">小面板</button>
+                <div id="vrcx-bridge-controls" class="vrcx-bridge-controls" style="display: none;">
+                    <button type="button" id="copy-vrcx-bridge-btn" class="btn btn-subtle"
+                        onclick="copyVrcxBridgeScript()" data-i18n="btn.copyVrcxBridgeScript">复制 VRCX 上下文脚本</button>
+                    <small id="vrcx-bridge-status" class="form-text"
+                        data-i18n="status.vrcxBridgeIdle">尚未接收 VRCX 上下文</small>
+                </div>
+                <div class="mode-toggle" role="group" aria-label="UI mode">
+                    <button type="button" id="mode-simple-btn" class="mode-btn" data-i18n="mode.simple">简易</button>
+                    <button type="button" id="mode-advanced-btn" class="mode-btn" data-i18n="mode.advanced">高级</button>
+                </div>
                 <div class="language-selector-wrapper">
                     <span class="header-language-hint">Language</span>
                     <select id="language-selector" class="language-selector"></select>
                 </div>
-                <div class="status-indicator">
-                    <span id="status-text" data-i18n="status.notRunning">服务未运行</span>
-                    <div class="status-dot" id="status-dot"></div>
-                </div>
-                <div class="status-indicator" id="ipc-status-indicator" style="margin-left: 15px; display: none;">
-                    <span id="ipc-status-text">已连接</span>
-                    <div class="status-dot" id="ipc-status-dot" style="background-color: #4caf50;"></div>
-                </div>
+            </div>
         </header>
 
+        <!-- 全局消息：任何标签页下都可见 -->
+        <div class="toast-area">
+            <div id="message" class="message"></div>
+        </div>
+
         <main>
-            <!-- 状态消息 - 跨两栏 -->
-            <!-- <div id="message" class="message" style="grid-column: 1 / -1;"></div> -->
-
-            <!-- 左栏 -->
-            <div class="column-left">
-                <!-- 服务控制区域 -->
+            <!-- ===================== 简易模式 ===================== -->
+            <!-- 简易模式激活时，tabs.js 会把高级视图中的相关控件移动到下方插槽中 -->
+            <section id="simple-view">
+                <div class="simple-columns">
                 <section class="card">
-                    <h2 data-i18n="section.serviceControl">服务控制</h2>
-                    <div class="control-buttons">
-                        <div class="control-buttons-left">
-                            <button id="start-btn" class="btn btn-success" onclick="startService()"
-                                data-i18n="btn.loading" disabled>加载中</button>
-                            <button id="stop-btn" class="btn btn-danger" onclick="stopService()" disabled
-                                data-i18n="btn.stopService">停止服务</button>
-                            <button id="panel-btn" class="btn btn-primary" onclick="openMiniPanel()"
-                                data-i18n="btn.openPanel"
-                                style="background-color: #5aa1d9; border-color: #5aa1d9; color: white;">小面板</button>
-                            <div id="vrcx-bridge-controls" class="vrcx-bridge-controls" style="display: none;">
-                                <button type="button" id="copy-vrcx-bridge-btn" class="btn btn-primary"
-                                    onclick="copyVrcxBridgeScript()" data-i18n="btn.copyVrcxBridgeScript">复制 VRCX 上下文脚本</button>
-                                <small id="vrcx-bridge-status" class="form-text"
-                                    data-i18n="status.vrcxBridgeIdle">尚未接收 VRCX 上下文</small>
-                            </div>
-                        </div>
-                        <div class="control-buttons-right">
-                            <button id="reset-btn" class="btn btn-warning" onclick="resetToDefaults()"
-                                data-i18n="btn.resetDefaults">恢复默认设置</button>
-                        </div>
+                    <h2 data-i18n="section.basicSettings">基本设置</h2>
+                    <div class="simple-grid" id="simple-slot-main"></div>
+                    <div id="simple-translation-block">
+                        <div class="language-settings-grid simple-lang-grid" id="simple-slot-langs"></div>
+                        <div class="simple-grid" id="simple-slot-trans-extra"></div>
                     </div>
-                    <small class="form-text" style="margin-top: 10px; display: block;"
-                        data-i18n="hint.autoSave">所有配置将自动保存在浏览器本地</small>
+                    <div class="simple-grid simple-mic-row" id="simple-slot-mic"></div>
+                    <div class="simple-grid" id="simple-slot-switches"></div>
                 </section>
+                <section class="card">
+                    <h2 data-i18n="section.apiKeys">API Keys 配置</h2>
+                    <div id="simple-slot-keys"></div>
+                </section>
+                </div>
+            </section>
 
-                <!-- 基本设置 -->
+            <!-- ===================== 高级模式：左右两栏 ===================== -->
+            <div id="advanced-view">
+            <div class="column-left">
+                <!-- 基本设置：每次使用的常用项 -->
                 <section class="card">
                     <h2 data-i18n="section.basicSettings">基本设置</h2>
 
-                    <!-- 一行两个开关：启用翻译和输出中间结果 -->
                     <div class="switch-row">
-                        <div class="form-group">
+                        <div class="form-group" id="fg-enable-translation">
+                            <div class="simple-translation-mode-label" data-i18n="label.modeSelect">模式选择</div>
+                            <div class="simple-translation-mode" role="group" aria-label="Translation mode">
+                                <button type="button" class="simple-translation-mode-btn"
+                                    data-simple-translation-mode="speech">
+                                    <span data-i18n="mode.speechOnly">仅语音识别</span>
+                                </button>
+                                <button type="button" class="simple-translation-mode-btn"
+                                    data-simple-translation-mode="translation">
+                                    <span data-i18n="mode.speechTranslation">识别+翻译</span>
+                                </button>
+                            </div>
                             <label class="switch-label">
                                 <span data-i18n="label.enableTranslation">启用翻译</span>
                                 <label class="switch">
@@ -92,7 +120,7 @@
 
                     <div id="translation-options">
                         <div class="language-settings-grid">
-                            <div class="form-group language-setting-item">
+                            <div class="form-group language-setting-item" id="fg-target-language">
                                 <label for="target-language" data-i18n="label.targetLanguage">目标语言</label>
                                 <div class="language-combo" data-input-id="target-language">
                                     <input type="text" id="target-language" class="form-control language-combo-input"
@@ -106,7 +134,7 @@
                                 <small class="form-text" data-i18n="hint.targetLanguage">点击右侧箭头选择语言，也可自行输入语言代码</small>
                             </div>
 
-                            <div class="form-group language-setting-item">
+                            <div class="form-group language-setting-item" id="fg-secondary-language">
                                 <label for="secondary-target-language"
                                     data-i18n="label.secondaryTargetLanguage">第二输出语言</label>
                                 <div class="language-combo" data-input-id="secondary-target-language">
@@ -143,7 +171,7 @@
                                     data-i18n="hint.fallbackLanguage">留空则禁用备用语言；当源语言与目标语言相同时会改用这里</small>
                             </div>
                         </div>
-                        
+
                         <div class="subsection smart-target-wrapper" id="smart-target-language-section" style="display: none; margin-top: 15px;">
                             <div class="collapsible-header smart-target-header" onclick="toggleCollapsible('smart-target-settings')">
                                 <h3>
@@ -218,7 +246,7 @@
                         </div>
                     </div>
 
-                    <div class="form-group">
+                    <div class="form-group" id="fg-mic-device">
                         <label for="mic-device" data-i18n="label.micDevice">麦克风</label>
                         <select id="mic-device" class="form-control" onchange="onSettingChange(this)"
                             data-restart-required="true">
@@ -302,25 +330,25 @@
                                         <button type="button" class="btn btn-subtle btn-small" data-llm-template="dashscope-qwen35-flash" aria-pressed="false"
                                             onclick="applyLLMTemplate('dashscope-qwen35-flash')"
                                             data-i18n="btn.llmTemplateDashscopeQwenFlash">阿里 Qwen3.5-Flash</button>
-                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="dashscope-qwen35-plus" aria-pressed="false"
+                                        <button type="button" class="btn btn-subtle btn-small" data-llm-template="dashscope-qwen35-plus" aria-pressed="false"
                                             onclick="applyLLMTemplate('dashscope-qwen35-plus')"
                                             data-i18n="btn.llmTemplateDashscopeQwenPlus">阿里 Qwen3.5-Plus</button>
-                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="deepseek-v4-flash" aria-pressed="false"
+                                        <button type="button" class="btn btn-subtle btn-small" data-llm-template="deepseek-v4-flash" aria-pressed="false"
                                             onclick="applyLLMTemplate('deepseek-v4-flash')"
                                             data-i18n="btn.llmTemplateDeepSeekV4Flash">DeepSeek v4 Flash（推荐）</button>
-                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="mercury2" aria-pressed="false"
+                                        <button type="button" class="btn btn-subtle btn-small" data-llm-template="mercury2" aria-pressed="false"
                                             onclick="applyLLMTemplate('mercury2')"
                                             data-i18n="btn.llmTemplateMercury2">Mercury 2（免费）</button>
                                         <button type="button" class="btn btn-subtle btn-small" data-llm-template="openrouter" aria-pressed="false"
                                             onclick="applyLLMTemplate('openrouter')"
                                             data-i18n="btn.llmTemplateOpenRouter">OpenRouter</button>
-                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="custom1" aria-pressed="false"
+                                        <button type="button" class="btn btn-subtle btn-small" data-llm-template="custom1" aria-pressed="false"
                                             onclick="applyLLMTemplate('custom1')"
                                             data-i18n="btn.llmTemplateCustom1">自定义 1</button>
-                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="custom2" aria-pressed="false"
+                                        <button type="button" class="btn btn-subtle btn-small" data-llm-template="custom2" aria-pressed="false"
                                             onclick="applyLLMTemplate('custom2')"
                                             data-i18n="btn.llmTemplateCustom2">自定义 2</button>
-                                            <button type="button" class="btn btn-subtle btn-small" data-llm-template="custom3" aria-pressed="false"
+                                        <button type="button" class="btn btn-subtle btn-small" data-llm-template="custom3" aria-pressed="false"
                                             onclick="applyLLMTemplate('custom3')"
                                             data-i18n="btn.llmTemplateCustom3">自定义 3</button>
                                     </div>
@@ -347,8 +375,8 @@
                                         onblur="onSettingChange()">
                                 </div>
 
-                                <div class="form-group">
-                                    <label for="llm-api-key" data-i18n="label.llmKey">LLM API Key</label>
+                                <div class="form-group" id="fg-llm-api-key">
+                                    <label for="llm-api-key" id="llm-api-key-label" data-i18n="label.llmKey">LLM API Key</label>
                                     <div class="secret-input-group">
                                         <input type="password" id="llm-api-key" class="form-control" placeholder="sk-...">
                                         <button
@@ -363,7 +391,12 @@
                                             <span class="secret-visibility-icon" aria-hidden="true">&#128065;</span>
                                         </button>
                                     </div>
-                                    <small class="form-text" data-i18n="hint.llmKey">仅在选择 LLM 翻译时使用。</small>
+                                    <small class="form-text llm-api-key-inline-hint">
+                                        <span id="llm-api-key-hint" data-i18n="hint.llmKey">仅在选择 LLM 翻译时使用。</span>
+                                        <a href="https://platform.deepseek.com/api_keys" target="_blank"
+                                            id="llm-api-key-deepseek-hint" hidden
+                                            rel="noopener noreferrer" data-i18n="link.getDeepseekKey">获取 DeepSeek API Key →</a>
+                                    </small>
                                 </div>
 
                                 <div class="form-group" id="openai-compat-extra-body-group">
@@ -387,35 +420,92 @@
                                 </div>
                             </div>
                         </div>
+
+                    </div>
+                </section>
+
+                <!-- 文本后处理 -->
+                <section class="card">
+                    <div class="collapsible-header" onclick="toggleCollapsible('text-post-processing')">
+                        <h2 data-i18n="section.textPostProcessing">文本后处理</h2>
+                        <span class="collapse-icon collapsed" id="text-post-processing-icon">▶</span>
+                    </div>
+                    <div class="collapsible-content collapsed" id="text-post-processing">
+                        <div class="text-post-grid">
+                            <div class="form-group" id="furigana-option">
+                                <label class="switch-label">
+                                    <span data-i18n="label.enableFurigana">日语添加假名</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="enable-furigana" onchange="onSettingChange()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                            </div>
+                            <div class="form-group" id="pinyin-option">
+                                <label class="switch-label">
+                                    <span data-i18n="label.enablePinyin">中文添加拼音</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="enable-pinyin" onchange="onSettingChange()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                            </div>
+                            <div class="form-group" id="fg-remove-period">
+                                <label class="switch-label">
+                                    <span data-i18n="label.removeTrailingPeriod">去除句尾句号</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="remove-trailing-period" onchange="onSettingChange()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" data-i18n="hint.removeTrailingPeriod">移除文本末尾的 。 和 .</small>
+                            </div>
+                            <div class="form-group" id="fg-show-original">
+                                <label class="switch-label">
+                                    <span data-i18n="label.showOriginalAndLangTag">显示原文及语言标识</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="show-original-and-lang-tag"
+                                            onchange="onSettingChange(this)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" data-i18n="hint.showOriginalAndLangTag">关闭后只显示译文</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="text-fancy-style" data-i18n="label.textFancyStyle">文本风格</label>
+                                <select id="text-fancy-style" class="form-control" onchange="onSettingChange()">
+                                    <option value="none" data-i18n="option.textFancyStyle.none">无效果</option>
+                                    <option value="smallCaps" data-i18n="option.textFancyStyle.smallCaps">smallCaps - sᴍᴀʟʟCᴀᴘs</option>
+                                    <option value="curly" data-i18n="option.textFancyStyle.curly">curly - ƈųཞɭყ</option>
+                                    <option value="magic" data-i18n="option.textFancyStyle.magic">magic - ɱαɠιƈ</option>
+                                </select>
+                                <small class="form-text" data-i18n="hint.textFancyStyle">使用 fancify-text 为文本增加 Unicode 风格</small>
+                            </div>
+                        </div>
                     </div>
                 </section>
             </div>
 
-            <!-- 右栏 -->
             <div class="column-right">
-                <div id="message" class="message"></div>
-
-                <!-- API Keys配置 -->
+                <!-- API Keys：集中填写 -->
                 <section class="card">
                     <div class="collapsible-header" onclick="toggleCollapsible('api-keys')">
                         <h2 data-i18n="section.apiKeys">API Keys 配置</h2>
                         <span class="collapse-icon" id="api-keys-icon">▼</span>
                     </div>
                     <div class="collapsible-content" id="api-keys">
-                        <div class="api-key-group">
+                        <div class="api-key-group" id="dashscope-key-group">
                             <label for="dashscope-api-key">
                                 <span data-i18n="label.dashscopeKey">阿里云 DashScope API Key</span>
                                 <span id="dashscope-key-required-badge"
                                     class="dashscope-key-required-badge"
-                                    style="color: #e74c3c; font-weight: bold;"
                                     hidden></span>
                             </label>
-                            <div style="display: flex; align-items: center; gap: 16px;">
-                                <input type="password" id="dashscope-api-key" class="form-control" placeholder="sk-..."
-                                    style="flex: 1;">
-                                <div style="display:flex; align-items:center; gap:8px; white-space:nowrap;">
+                            <div class="key-row">
+                                <input type="password" id="dashscope-api-key" class="form-control" placeholder="sk-...">
+                                <div class="key-row-side">
                                     <span data-i18n="label.international">国际版</span>
-                                    <label class="switch" style="margin:0;">
+                                    <label class="switch">
                                         <input type="checkbox" id="use-international-endpoint"
                                             onchange="handleInternationalEndpointChange(event)"
                                             data-restart-required="true">
@@ -424,10 +514,10 @@
                                 </div>
                             </div>
                             <small class="form-text">
-                                <span data-i18n="hint.dashscopeKey">Qwen 和 FunASR 语音识别均需要此 Key。</span>
+                                <span id="dashscope-key-hint" data-i18n="hint.dashscopeKey">Qwen 和 FunASR 语音识别均需要此 Key。</span>
                                 <a href="https://bailian.console.aliyun.com/?tab=api#/api" target="_blank"
                                     data-i18n="link.getChinaKey">获取中国大陆版API Key</a>
-                                &nbsp;&nbsp;&nbsp;&nbsp;
+                                &nbsp;&nbsp;
                                 <a href="https://modelstudio.console.alibabacloud.com/?tab=api#/api" target="_blank"
                                     data-i18n="link.getIntlKey">获取国际版API Key</a>
                             </small>
@@ -447,13 +537,9 @@
                             <input type="password" id="doubao-api-key" class="form-control" placeholder="API Key">
                             <small class="form-text">
                                 <span data-i18n="hint.doubaoKey">用于豆包录音文件识别后端。</span>
-                            </small>
-                            <small class="form-text">
                                 <a href="https://console.volcengine.com/speech/new/setting/apikeys" target="_blank"
-                                    data-i18n="link.getApiKey">获取API Key
-                                    →</a>
+                                    data-i18n="link.getApiKey">获取API Key →</a>
                             </small>
-
                         </div>
 
                         <div class="api-key-group">
@@ -507,7 +593,7 @@
                         </div>
 
                         <div class="switch-row">
-                            <div class="form-group">
+                            <div class="form-group" id="fg-mic-control">
                                 <label class="switch-label">
                                     <span data-i18n="label.pauseOnMute">游戏静音时暂停转录</span>
                                     <label class="switch">
@@ -535,6 +621,7 @@
                     </div>
                 </section>
 
+                <!-- 本地音频识别 -->
                 <section class="card" id="local-asr-card" style="display: none;">
                     <div class="collapsible-header" onclick="toggleCollapsible('local-asr-settings')">
                         <h2 data-i18n="section.localAsrSettings">本地音频识别</h2>
@@ -618,68 +705,7 @@
                     </div>
                 </section>
 
-                <!-- 文本后处理（折叠） -->
-                <section class="card">
-                    <div class="collapsible-header" onclick="toggleCollapsible('text-post-processing')">
-                        <h2 data-i18n="section.textPostProcessing">文本后处理</h2>
-                        <span class="collapse-icon collapsed" id="text-post-processing-icon">▶</span>
-                    </div>
-                    <div class="collapsible-content collapsed" id="text-post-processing">
-                        <div class="text-post-grid">
-                            <div class="form-group" id="furigana-option">
-                                <label class="switch-label">
-                                    <span data-i18n="label.enableFurigana">日语添加假名</span>
-                                    <label class="switch">
-                                        <input type="checkbox" id="enable-furigana" onchange="onSettingChange()">
-                                        <span class="slider"></span>
-                                    </label>
-                                </label>
-                            </div>
-                            <div class="form-group" id="pinyin-option">
-                                <label class="switch-label">
-                                    <span data-i18n="label.enablePinyin">中文添加拼音</span>
-                                    <label class="switch">
-                                        <input type="checkbox" id="enable-pinyin" onchange="onSettingChange()">
-                                        <span class="slider"></span>
-                                    </label>
-                                </label>
-                            </div>
-                            <div class="form-group">
-                                <label class="switch-label">
-                                    <span data-i18n="label.removeTrailingPeriod">去除句尾句号</span>
-                                    <label class="switch">
-                                        <input type="checkbox" id="remove-trailing-period" onchange="onSettingChange()">
-                                        <span class="slider"></span>
-                                    </label>
-                                </label>
-                                <small class="form-text" data-i18n="hint.removeTrailingPeriod">移除文本末尾的 。 和 .</small>
-                            </div>
-                            <div class="form-group">
-                                <label class="switch-label">
-                                    <span data-i18n="label.showOriginalAndLangTag">显示原文及语言标识</span>
-                                    <label class="switch">
-                                        <input type="checkbox" id="show-original-and-lang-tag"
-                                            onchange="onSettingChange(this)">
-                                        <span class="slider"></span>
-                                    </label>
-                                </label>
-                                <small class="form-text" data-i18n="hint.showOriginalAndLangTag">关闭后只显示译文</small>
-                            </div>
-                            <div class="form-group">
-                                <label for="text-fancy-style" data-i18n="label.textFancyStyle">文本风格</label>
-                                <select id="text-fancy-style" class="form-control" onchange="onSettingChange()">
-                                    <option value="none" data-i18n="option.textFancyStyle.none">无效果</option>
-                                    <option value="smallCaps" data-i18n="option.textFancyStyle.smallCaps">smallCaps - sᴍᴀʟʟCᴀᴘs</option>
-                                    <option value="curly" data-i18n="option.textFancyStyle.curly">curly - ƈųཞɭყ</option>
-                                    <option value="magic" data-i18n="option.textFancyStyle.magic">magic - ɱαɠιƈ</option>
-                                </select>
-                                <small class="form-text" data-i18n="hint.textFancyStyle">使用 fancify-text 为文本增加 Unicode 风格</small>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- 快捷切换按钮（折叠） -->
+                <!-- 小面板设置 -->
                 <section class="card" id="quick-lang-settings-section">
                     <div class="collapsible-header" onclick="toggleCollapsible('quick-lang-settings')">
                         <h2 data-i18n="section.quickLangButtons">小面板设置</h2>
@@ -704,8 +730,7 @@
                                         <span class="slider"></span>
                                     </label>
                                 </label>
-                                <small class="form-text" style="margin-bottom: 12px; display: block;"
-                                    data-i18n="hint.quickLangButtons">设置小面板底部的4个快捷语言切换按钮</small>
+                                <small class="form-text" data-i18n="hint.quickLangButtons">设置小面板底部的4个快捷语言切换按钮</small>
                             </div>
                             <div class="form-group">
                                 <label class="switch-label">
@@ -715,8 +740,7 @@
                                         <span class="slider"></span>
                                     </label>
                                 </label>
-                                <small class="form-text" style="margin-bottom: 12px; display: block;"
-                                    data-i18n="hint.reverseTranslation">将译文翻译回原文所用的语言，并在小面板中显示。总是使用 Google Dictionary API，请注意网络连通性</small>
+                                <small class="form-text" data-i18n="hint.reverseTranslation">将译文翻译回原文所用的语言，并在小面板中显示。总是使用 Google Dictionary API，请注意网络连通性</small>
                             </div>
                         </div>
                         <div class="language-settings-grid">
@@ -796,8 +820,9 @@
                                         <span class="slider"></span>
                                     </label>
                                 </label>
-                                <small class="form-text" data-i18n="hint.showVrcxBridgeButton">开启后可复制脚本到 VRCX 控制台，让当前世界和玩家名辅助翻译</small>
+                                <small class="form-text" data-i18n="hint.showVrcxBridgeButton">开启后可复制脚本到 VRCX 控制台，让当前世界和玩家名辅助翻译。开启后「复制脚本」按钮显示在页面顶栏。</small>
                             </div>
+                            <small class="form-text" data-i18n="hint.autoSave">所有配置将自动保存在浏览器本地</small>
                         </div>
 
                         <div class="subsection">
@@ -810,7 +835,6 @@
                             </div>
                         </div>
 
-                        <!-- VAD设置 -->
                         <div class="subsection">
                             <h3 data-i18n="subsection.vad">VAD（语音活动检测）设置 - 仅Qwen后端</h3>
 
@@ -842,7 +866,6 @@
                             </div>
                         </div>
 
-                        <!-- OSC / 端口 -->
                         <div class="subsection">
                             <h3 data-i18n="subsection.oscNetwork">OSC</h3>
                             <div class="form-group">
@@ -905,7 +928,6 @@
                             </div>
                         </div>
 
-                        <!-- 语言检测器设置 -->
                         <div class="subsection">
                             <h3 data-i18n="subsection.langDetector">语言检测器设置</h3>
 
@@ -918,8 +940,17 @@
                                 </select>
                             </div>
                         </div>
+
+                        <div class="subsection">
+                            <h3 data-i18n="section.maintenance">重置</h3>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <button id="reset-btn" class="btn btn-warning" onclick="resetToDefaults()"
+                                    data-i18n="btn.resetDefaults">恢复默认设置</button>
+                            </div>
+                        </div>
                     </div>
                 </section>
+            </div>
             </div>
         </main>
 
@@ -931,6 +962,7 @@
 
     <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tabs.js') }}"></script>
 </body>
 
 </html>

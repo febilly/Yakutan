@@ -1173,16 +1173,43 @@ function updateOpenRouterStreamingUi() {
     if (v === 'openrouter_streaming_deepl_hybrid') {
         streamingModeGroup.style.display = 'none';
         streamingMode.disabled = false;
+        updateLLMStreamingPromoState();
         return;
     }
     if (v === 'openrouter') {
         streamingModeGroup.style.display = 'block';
         streamingMode.disabled = false;
+        updateLLMStreamingPromoState();
         return;
     }
     streamingModeGroup.style.display = 'none';
     streamingMode.checked = false;
     streamingMode.disabled = false;
+    updateLLMStreamingPromoState();
+}
+
+function isUsingLLMStreamingTranslation() {
+    const apiType = document.getElementById('translation-api-type')?.value ?? '';
+    const streamingMode = document.getElementById('openrouter-streaming-mode');
+    return apiType === 'openrouter_streaming_deepl_hybrid'
+        || (apiType === 'openrouter' && !!streamingMode?.checked);
+}
+
+function updateLLMStreamingPromoState() {
+    const switchBtn = document.getElementById('switch-to-llm-streaming-btn');
+    if (!switchBtn) return;
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const active = isUsingLLMStreamingTranslation();
+    switchBtn.disabled = active;
+    switchBtn.classList.toggle('feature-hint-status', active);
+    switchBtn.setAttribute('aria-disabled', active ? 'true' : 'false');
+    if (active) {
+        switchBtn.setAttribute('data-i18n', 'feature.alreadyUsingLlmStreaming');
+        switchBtn.textContent = t('feature.alreadyUsingLlmStreaming');
+    } else {
+        switchBtn.setAttribute('data-i18n', 'feature.switchToLlmStreaming');
+        switchBtn.textContent = t('feature.switchToLlmStreaming');
+    }
 }
 
 function updateLLMSettingsVisibility(apiType = null, expandPanel = false) {
@@ -1232,7 +1259,8 @@ function updateDashscopeKeyFieldState() {
     if (!input) return;
     const need = currentConfigRequiresDashscopeKey();
     if (badge) {
-        if (need) {
+        const isAdvancedMode = !document.body.classList.contains('mode-simple');
+        if (need && !isAdvancedMode) {
             badge.hidden = false;
             badge.setAttribute('data-i18n', 'label.required');
             badge.textContent = window.i18n ? window.i18n.t('label.required') : '*必需';
@@ -2886,6 +2914,7 @@ function handleTranslationApiChange(event) {
         && !isLLMConnectionFieldsComplete();
     updateLLMSettingsVisibility(newApi, expandLlmPanel);
     updateSensitiveWordsHint(newApi);
+    updateLLMStreamingPromoState();
     applyAsrBackendLocks();
 
     // 清除警告消息
@@ -2907,6 +2936,7 @@ document.addEventListener('DOMContentLoaded', function () {
         updateOpenRouterStreamingUi();
         updateLLMSettingsVisibility(apiSelect.value);
         updateSensitiveWordsHint(apiSelect.value);
+        updateLLMStreamingPromoState();
         syncLLMTemplateKeySourceHintFromInputs();
     }, 100);
 });
@@ -2917,6 +2947,7 @@ function onSettingChange(changedElement = null) {
     applyAsrBackendLocks();
     applyAutoLanguageDetectorIfNeeded();
     updateDashscopeKeyFieldState();
+    updateLLMStreamingPromoState();
 
     // 清除之前的定时器
     if (autoSaveTimer) {
