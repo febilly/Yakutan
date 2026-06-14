@@ -205,8 +205,13 @@ class VADProcessor:
                 self._speech_samples / self.sample_rate,
                 self.min_speech_samples / self.sample_rate,
             )
-            self._is_speaking = False
-            self._silence_counter = 0
+        self._is_speaking = False
+        self._silence_counter = 0
+
+    @property
+    def is_speaking(self) -> bool:
+        """当前是否正在说话（供外部 gating 逻辑读取）。"""
+        return self._is_speaking
             return None
 
         return None

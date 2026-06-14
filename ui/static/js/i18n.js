@@ -192,6 +192,8 @@ const translations = {
         'hint.enableHotWords': '提高特定词汇的识别准确度',
         'label.muteDelay': '静音延迟（秒）',
         'hint.muteDelay': '静音后延迟停止识别的时间，防止漏掉最后一个字',
+        'label.localVadGating': '本地 VAD 发送门控（省流）',
+        'hint.localVadGating': '客户端 VAD 检测到静音时暂停向 ASR 发送音频，降低 API 费用。开启后自动启用服务端 VAD。',
 
         // 高级设置
         'section.textPostProcessing': '文本后处理',
@@ -532,6 +534,8 @@ const translations = {
         'hint.enableHotWords': 'Improves recognition accuracy for specific words',
         'label.muteDelay': 'Mute Delay (seconds)',
         'hint.muteDelay': 'Delay before stopping recognition after mute, prevents missing last word',
+        'label.localVadGating': 'Local VAD Gating (Save Bandwidth)',
+        'hint.localVadGating': 'Pauses audio sending to ASR during silence to reduce API costs. Auto-enables server-side VAD.',
 
         // Advanced settings
         'section.textPostProcessing': 'Text Post-Processing',
@@ -865,6 +869,8 @@ const translations = {
         'hint.enableHotWords': '特定語彙の認識精度を向上させます',
         'label.muteDelay': 'ミュート遅延（秒）',
         'hint.muteDelay': 'ミュート後に認識停止まで待機し、最後の語句の欠落を防ぎます',
+        'label.localVadGating': 'ローカル VAD ゲーティング（通信量節約）',
+        'hint.localVadGating': '無音時の ASR 音声送信を停止し API 料金を削減。サーバー側 VAD を自動有効化。',
 
         'section.textPostProcessing': 'テキスト後処理',
         'section.advancedSettings': '詳細設定',
@@ -1193,6 +1199,8 @@ const translations = {
         'hint.enableHotWords': '특정 단어의 인식 정확도를 높입니다',
         'label.muteDelay': '음소거 지연(초)',
         'hint.muteDelay': '음소거 후 인식 중지까지 지연하여 마지막 단어 누락을 방지합니다',
+        'label.localVadGating': '로컬 VAD 게이팅 (대역폭 절약)',
+        'hint.localVadGating': '무음 시 ASR 오디오 전송을 중지하여 API 비용 절감. 서버 측 VAD 자동 활성화.',
 
         'section.textPostProcessing': '텍스트 후처리',
         'section.advancedSettings': '고급 설정',

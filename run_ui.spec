@@ -56,10 +56,6 @@ hiddenimports = [
     'bidi.algorithm',
     'panel_app',
     'webview',
-    # 本地 VAD 发送门控（Silero ONNX）
-    'local_asr',
-    'local_asr.vad_processor',
-    'local_asr.model_manager',
     'onnxruntime',
     'onnxruntime.capi',
 ]
@@ -68,6 +64,8 @@ hiddenimports = [
 hiddenimports += collect_submodules('webview.platforms')
 # streaming_translation 翻译库
 hiddenimports += collect_submodules('streaming_translation')
+# 本地 VAD 发送门控（Silero ONNX）& model_manager
+hiddenimports += collect_submodules('local_asr')
 
 a = Analysis(
     ['run_ui.py'],  # Web UI入口文件

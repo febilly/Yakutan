@@ -312,9 +312,9 @@ TERMINOLOGY_ENABLED = True
 
 # 是否启用本地 VAD 发送门控 — 当本地 Silero VAD 检测到静音时不向 ASR 后端发送音频，
 # 仅 VAD 判定为"正在说话"时发送。不触发 recognizer.pause/resume，Session 始终在线。
-# 目的：省流、降低静音时的 ASR 费用。启用后无视 ENABLE_MIC_CONTROL 的手动 mute 逻辑。
+# 目的：省流、降低静音时的 ASR 费用。Qwen 后端下会自动启用服务端 VAD 配合断句。
 # 注意：依赖 onnxruntime（CPU）和 Silero ONNX 模型。首次运行需确保模型已下载。
-# 可通过前端「本地语音识别」面板中的开关控制，无需再设环境变量。
+# 可通过前端「麦克风控制」面板中的开关控制，无需再设环境变量。
 ENABLE_LOCAL_VAD_GATING = _get_env_bool('ENABLE_LOCAL_VAD_GATING', False)
 
 # VAD 门控专用：最短语音持续时间（秒），用于触发 SPEECH 状态

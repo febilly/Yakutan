@@ -85,6 +85,7 @@ class AppState:
         self.vad_enabled: bool = False
         self._vad_pending_samples = None  # np.ndarray | None, 累积未处理的音频帧
         self._vad_was_speaking: bool = False  # 上一次检测的状态（用于记录状态变化）
+        self._vad_drop_count: int = 0  # 门控丢弃音频帧计数器
 
     def update_subtitles(
         self,
