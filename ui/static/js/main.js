@@ -63,6 +63,7 @@ function touchMainPanelUserEditedAt() {
 // ===================== 同步基础设施结束 =====================
 
 const PANEL_FLOATING_MODE_STORAGE_KEY = 'panel_floating_mode';
+const PANEL_FLOATING_MODE_DEFAULT = true;
 const LLM_SELECTED_TEMPLATE_STORAGE_KEY = 'llm_selected_template';
 const LLM_TEMPLATE_KEY_STORAGE_PREFIX = 'llm_template_key_';
 const LLM_TEMPLATE_BASEURL_STORAGE_PREFIX = 'llm_template_baseurl_';
@@ -1349,7 +1350,8 @@ function loadPanelFloatingModeSetting() {
     const toggle = document.getElementById('panel-floating-mode');
     if (!toggle) return;
 
-    toggle.checked = localStorage.getItem(PANEL_FLOATING_MODE_STORAGE_KEY) === 'true';
+    const storedValue = localStorage.getItem(PANEL_FLOATING_MODE_STORAGE_KEY);
+    toggle.checked = storedValue === null ? PANEL_FLOATING_MODE_DEFAULT : storedValue === 'true';
 }
 
 function savePanelFloatingModeSetting() {
@@ -1366,7 +1368,7 @@ function onPanelFloatingModeChange() {
 function resetPanelFloatingModeSetting() {
     const toggle = document.getElementById('panel-floating-mode');
     if (toggle) {
-        toggle.checked = false;
+        toggle.checked = PANEL_FLOATING_MODE_DEFAULT;
     }
 
     localStorage.removeItem(PANEL_FLOATING_MODE_STORAGE_KEY);
