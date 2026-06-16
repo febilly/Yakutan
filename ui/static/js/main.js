@@ -2237,7 +2237,7 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('enable-translation').checked = config.translation.enable_translation ?? true;
                 document.getElementById('target-language').value = config.translation.target_language || 'ja';
                 document.getElementById('secondary-target-language').value = config.translation.secondary_target_language || '';
-                document.getElementById('fallback-language').value = config.translation.fallback_language || 'en';
+                document.getElementById('fallback-language').value = config.translation.fallback_language || '';
                 // 处理 LLM 流式模式的特殊情况
                 const apiType = config.translation.api_type || 'qwen_mt';
                 if (apiType === 'openrouter_streaming') {
