@@ -989,73 +989,32 @@ function persistCurrentLLMTemplateState() {
     persistCurrentLLMTemplateParallelMode();
 }
 
-function snapshotLLMTemplateStorage() {
-    const snapshot = {};
-    snapshot[LLM_SELECTED_TEMPLATE_STORAGE_KEY] = getSelectedLLMTemplateName();
-
-    Object.keys(LLM_TEMPLATE_CONFIGS).forEach((templateName) => {
-        snapshot[getLLMTemplateKeyStorageKey(templateName)] = getStoredLLMTemplateKey(templateName);
-
-        const baseUrlStorageKey = getLLMTemplateBaseUrlStorageKey(templateName);
-        snapshot[baseUrlStorageKey] = getStoredLLMTemplateBaseUrl(templateName);
-
-        const modelStorageKey = getLLMTemplateModelStorageKey(templateName);
-        snapshot[modelStorageKey] = getStoredLLMTemplateModel(templateName);
-
-        const extraKey = getLLMTemplateExtraBodyStorageKey(templateName);
-        if (extraKey) {
-            const rawExtra = localStorage.getItem(extraKey);
-            if (rawExtra !== null) {
-                snapshot[extraKey] = rawExtra;
-            }
-        }
-
-        const parallelStorageKey = getLLMTemplateParallelStorageKey(templateName);
-        if (parallelStorageKey) {
-            const rawParallelMode = localStorage.getItem(parallelStorageKey);
-            if (rawParallelMode !== null) {
-                snapshot[parallelStorageKey] = rawParallelMode;
-            }
-        }
-    });
-
-    return snapshot;
-}
-
-function restoreLLMTemplateStorage(snapshot) {
-    if (!snapshot) return;
-
-    Object.entries(snapshot).forEach(([storageKey, value]) => {
-        if (storageKey === LLM_SELECTED_TEMPLATE_STORAGE_KEY) {
-            if (normalizeLLMTemplateName(value)) {
-                localStorage.setItem(storageKey, value);
-                activeLLMTemplate = value;
-            } else {
-                localStorage.removeItem(storageKey);
-                activeLLMTemplate = null;
-            }
-            updateLLMTemplateButtonStates();
-            updateLLMTemplateFieldLocks();
+// 重置时按模板类型保留用户数据，其余参数回退到 LLM_TEMPLATE_CONFIGS 中的默认值：
+//   - custom1~3：完整保留（不清除任何参数）
+//   - openrouter：保留 API Key 和模型名，清除其余参数
+//   - 其他预设：仅保留 API Key，清除其余参数
+// 注：各模板的 API Key 存储在独立的键名下，此处不会被清除，因此始终保留。
+function resetStoredLLMTemplateParametersToDefaults() {
+    Object.entries(LLM_TEMPLATE_CONFIGS).forEach(([templateName, templateConfig]) => {
+        if (templateConfig.isCustom) {
             return;
         }
-        if (
-            storageKey.startsWith(LLM_TEMPLATE_EXTRABODY_STORAGE_PREFIX)
-            || storageKey.startsWith(LLM_TEMPLATE_PARALLEL_STORAGE_PREFIX)
-        ) {
-            if (value === '') {
-                localStorage.setItem(storageKey, '');
-            } else if (value) {
-                localStorage.setItem(storageKey, String(value));
-            } else {
+
+        const storageKeys = [
+            getLLMTemplateBaseUrlStorageKey(templateName),
+            getLLMTemplateExtraBodyStorageKey(templateName),
+            getLLMTemplateParallelStorageKey(templateName),
+        ];
+        // openrouter 额外保留模型名；其余预设连模型一起清除
+        if (templateName !== 'openrouter') {
+            storageKeys.push(getLLMTemplateModelStorageKey(templateName));
+        }
+
+        storageKeys.forEach((storageKey) => {
+            if (storageKey) {
                 localStorage.removeItem(storageKey);
             }
-            return;
-        }
-        if (value) {
-            localStorage.setItem(storageKey, value);
-        } else {
-            localStorage.removeItem(storageKey);
-        }
+        });
     });
 }
 
@@ -1434,8 +1393,8 @@ function shouldSkipOscUdpPortCheck() {
         || document.getElementById('bypass-osc-udp-port-check')?.checked === true;
 }
 
-function applyLLMTemplate(templateName) {
-    const previousTemplateName = getCurrentLLMTemplateName();
+// 把指定模板的已存/默认参数填入表单（不会持久化当前表单，供重置后刷新界面使用）
+function populateLLMTemplateForm(templateName) {
     const baseUrlInput = document.getElementById('llm-base-url');
     const modelInput = document.getElementById('llm-model');
     const keyInput = document.getElementById('llm-api-key');
@@ -1446,11 +1405,7 @@ function applyLLMTemplate(templateName) {
     const templateConfig = LLM_TEMPLATE_CONFIGS[templateName];
 
     if (!baseUrlInput || !modelInput || !keyInput || !extraBodyInput || !parallelFastestSelect || !templateConfig) {
-        return;
-    }
-
-    if (previousTemplateName) {
-        persistCurrentLLMTemplateState();
+        return false;
     }
 
     setSelectedLLMTemplateName(templateName);
@@ -1510,6 +1465,21 @@ function applyLLMTemplate(templateName) {
     }
 
     updateLLMTemplateKeySourceHint(templateName);
+    return true;
+}
+
+function applyLLMTemplate(templateName) {
+    const previousTemplateName = getCurrentLLMTemplateName();
+    const baseUrlInput = document.getElementById('llm-base-url');
+
+    if (previousTemplateName) {
+        persistCurrentLLMTemplateState();
+    }
+
+    if (!populateLLMTemplateForm(templateName)) {
+        return;
+    }
+
     onSettingChange(baseUrlInput);
 }
 
@@ -3555,10 +3525,10 @@ async function resetToDefaults() {
     }
 
     try {
+        // 先把当前表单写回所属模板存储，避免丢失用户刚刚的改动
         persistCurrentLLMTemplateState();
-        const llmTemplateStorageSnapshot = snapshotLLMTemplateStorage();
 
-        // 使用前端默认配置
+        // 使用前端默认配置（含将选中模板恢复为默认模板）
         loadDefaultConfig();
         resetPanelFloatingModeSetting();
         resetQuickLanguageSettings();
@@ -3568,9 +3538,13 @@ async function resetToDefaults() {
         // 根据翻译开关显示/隐藏翻译选项
         toggleTranslationOptions();
 
-        // 先保存到本地浏览器
+        // 按模板类型重置参数（custom 全保留 / openrouter 保留 key+模型 / 其余仅保留 key），
+        // 再用当前选中的（默认）模板刷新表单，使界面与存储一致
+        resetStoredLLMTemplateParametersToDefaults();
+        populateLLMTemplateForm(getSelectedLLMTemplateName());
+
+        // 保存到本地浏览器
         saveConfigToLocalStorage();
-        restoreLLMTemplateStorage(llmTemplateStorageSnapshot);
 
         // 再保存到服务器
         await saveConfig();
