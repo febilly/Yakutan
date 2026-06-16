@@ -217,6 +217,8 @@ const translations = {
         'hint.enableHotWords': '提高特定词汇的识别准确度',
         'label.muteDelay': '静音延迟（秒）',
         'hint.muteDelay': '静音后延迟停止识别的时间，防止漏掉最后一个字',
+        'label.doubleMuteClear': '快速开关麦克风清空消息框',
+        'hint.doubleMuteClear': '开启后，0.8 秒内连续两次静音（快速开关麦克风）会向 VRChat 发送空消息以清空聊天框',
 
         // 高级设置
         'section.textPostProcessing': '文本后处理',
@@ -582,6 +584,8 @@ const translations = {
         'hint.enableHotWords': 'Improves recognition accuracy for specific words',
         'label.muteDelay': 'Mute Delay (seconds)',
         'hint.muteDelay': 'Delay before stopping recognition after mute, prevents missing last word',
+        'label.doubleMuteClear': 'Quick mic toggle clears chatbox',
+        'hint.doubleMuteClear': 'When enabled, muting twice within 0.8s (a quick mic toggle) sends an empty message to clear the VRChat chatbox',
 
         // Advanced settings
         'section.textPostProcessing': 'Text Post-Processing',
@@ -940,6 +944,8 @@ const translations = {
         'hint.enableHotWords': '特定語彙の認識精度を向上させます',
         'label.muteDelay': 'ミュート遅延（秒）',
         'hint.muteDelay': 'ミュート後に認識停止まで待機し、最後の語句の欠落を防ぎます',
+        'label.doubleMuteClear': 'マイク素早く切り替えでメッセージ消去',
+        'hint.doubleMuteClear': '有効にすると、0.8秒以内に2回ミュート（マイクの素早い切り替え）するとVRChatに空メッセージを送信してチャットボックスを消去します',
 
         'section.textPostProcessing': 'テキスト後処理',
         'section.advancedSettings': '詳細設定',
@@ -1293,6 +1299,8 @@ const translations = {
         'hint.enableHotWords': '특정 단어의 인식 정확도를 높입니다',
         'label.muteDelay': '음소거 지연(초)',
         'hint.muteDelay': '음소거 후 인식 중지까지 지연하여 마지막 단어 누락을 방지합니다',
+        'label.doubleMuteClear': '마이크 빠른 전환으로 메시지 지우기',
+        'hint.doubleMuteClear': '활성화하면 0.8초 이내에 두 번 음소거(마이크 빠른 전환)하면 VRChat에 빈 메시지를 보내 채팅창을 지웁니다',
 
         'section.textPostProcessing': '텍스트 후처리',
         'section.advancedSettings': '고급 설정',

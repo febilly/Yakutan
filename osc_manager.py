@@ -611,6 +611,29 @@ class OSCManager:
         with self._state_lock:
             self._message_history.clear()
 
+    async def clear_chatbox(self):
+        """清空 VRChat 聊天框：清理内部历史与待发消息，并发送空字符串。"""
+        # 清理内部状态，避免随后又把旧内容拼接发送出去
+        self.clear_history()
+        with self._state_lock:
+            if self._pending_timer is not None:
+                self._pending_timer.cancel()
+                self._pending_timer = None
+            self._pending_message = None
+            self._last_send_time = time.time()
+
+        # IPC 委托模式：通过 IPC 发送空字符串
+        if (self._ipc_client is not None
+                and self._ipc_client.is_connected()
+                and self._ipc_client.is_delegate_osc_enabled()):
+            await self._ipc_client.send_message("", False)
+            self._emit("[OSC] Chatbox cleared (via IPC)")
+            return
+
+        # 直接通过 UDP 发送空字符串清空聊天框
+        self._send_message_immediately("", False)
+        self._emit("[OSC] Chatbox cleared")
+
     def add_message_and_send(self, text: str, ongoing: bool = False, speaker: Optional[str] = None):
         """记录消息并按历史拼接发送，自动清理过期消息"""
         safe_text = (text or "").strip()

@@ -51,6 +51,7 @@ class AppState:
         self.recognition_instance = None      # SpeechRecognizer | None
         self.recognition_callback = None      # VRChatRecognitionCallback | None
         self.mute_delay_task = None           # asyncio.Task | None
+        self.last_mute_engaged_time: Optional[float] = None  # 上次收到静音消息的时刻（用于快速双击清空）
         self.current_asr_backend: str = config.PREFERRED_ASR_BACKEND
         self.vocabulary_id: Optional[str] = None
 

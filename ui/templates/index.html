@@ -833,6 +833,16 @@
                                     value="0.2" onchange="onSettingChange()">
                                 <small class="form-text" data-i18n="hint.muteDelay">静音后延迟停止识别的时间，防止漏掉最后一个字</small>
                             </div>
+                            <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.doubleMuteClear">快速开关麦克风清空消息框</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="enable-double-mute-clear" onchange="onSettingChange()" checked>
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" data-i18n="hint.doubleMuteClear">开启后，0.8 秒内连续两次静音（快速开关麦克风）会向 VRChat 发送空消息以清空聊天框</small>
+                            </div>
                         </div>
 
                         <div class="subsection">

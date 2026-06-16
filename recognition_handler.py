@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import threading
+import time
 from typing import Optional
 
 import config
@@ -81,6 +82,36 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self.partial_translation_update_count = 0
         self._prefer_deepl_on_next_final = False
         self._partial_debounce_handle: Optional[asyncio.TimerHandle] = None
+        self._discard_results = False
+        self._discard_deadline = 0.0
+
+    def discard_pending_outputs(self) -> None:
+        """撤回作废：丢弃所有在途及随后迟到的识别/翻译结果，不再发送到 OSC。
+
+        - 递增 session_generation：让已派发的异步翻译任务在返回事件循环时被丢弃。
+        - 设置丢弃标志与截止时间：让随后迟到的识别结果（on_result）在窗口内被直接忽略。
+        - 重置流式翻译状态并清空字幕显示。
+
+        识别重新开始/恢复（resume_outputs / on_session_started）会立即解除丢弃。
+        """
+        self._cancel_partial_debounce()
+        with self._translate_ordering_lock:
+            self._session_generation += 1
+        self._reset_partial_translation_state()
+        self._last_osc_typing_ongoing = False
+        window = max(
+            0.0, float(getattr(config, 'DOUBLE_MUTE_CLEAR_DISCARD_WINDOW_SECONDS', 2.0)),
+        )
+        self._discard_results = True
+        self._discard_deadline = time.monotonic() + window
+        try:
+            self.state.update_subtitles("", "", False, "")
+        except Exception:
+            pass
+
+    def resume_outputs(self) -> None:
+        """识别重新开始/恢复时解除丢弃标志。"""
+        self._discard_results = False
 
     def mark_mute_finalization_requested(self) -> None:
         self._prefer_deepl_on_next_final = True
@@ -643,6 +674,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         logger.info('Speech recognizer session opened.')
         self._cancel_partial_debounce()
         self._reset_partial_translation_state()
+        self._discard_results = False
         self._final_output_version = 0
         self._final_translate_request_seq = 0
         self._last_osc_typing_ongoing = False
@@ -1114,6 +1146,11 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             logger.exception("Final translation task failed")
 
     def on_result(self, event: RecognitionEvent) -> None:
+        # 撤回作废：触发清空后，丢弃在途及迟到返回的识别/翻译结果，不再发送
+        if self._discard_results:
+            if time.monotonic() < self._discard_deadline:
+                return
+            self._discard_results = False
         s = self.state
         text = str(event.text or "").strip()
         is_ongoing = not event.is_final
