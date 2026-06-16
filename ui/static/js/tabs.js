@@ -119,6 +119,16 @@
         }
     }
 
+    function setTextValue(id, value) {
+        const el = byId(id);
+        if (!el || el.value === value) return;
+        el.value = value;
+        if (typeof window.syncLanguageComboClearVisibility === 'function' && el.closest) {
+            window.syncLanguageComboClearVisibility(el.closest('.language-combo'));
+        }
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
     /** 简易模式推荐默认值（幂等：只改动与目标不同的项） */
     function applySimpleDefaults() {
         // 语音识别：Qwen
@@ -137,6 +147,8 @@
         // 不使用自动目标语言推断
         setChecked('smart-target-primary-enabled', false);
         setChecked('smart-target-secondary-enabled', false);
+        // 简易模式禁用备用语言（留空即禁用）
+        setTextValue('fallback-language', '');
         syncSimpleTranslationUi();
     }
 
