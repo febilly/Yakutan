@@ -22,6 +22,7 @@ from text_processor import (
     get_display_translation_text,
     build_streaming_output_line,
     build_dual_output_display,
+    build_tagged_translation_display,
 )
 from streaming_translation import (
     config_from_module,
@@ -605,20 +606,12 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         config, 'SHOW_ORIGINAL_AND_LANG_TAG', True,
                     )
                     if show_tag:
-                        tag_src = language_code_for_osc_tag(source_lang)
-                        tag_tgt = language_code_for_osc_tag(actual_target)
-                        display_text = (
-                            f"[{tag_src}→{tag_tgt}] "
-                            f"{display_translated_text} ({display_source_text})"
+                        display_text = build_tagged_translation_display(
+                            language_code_for_osc_tag(source_lang),
+                            language_code_for_osc_tag(actual_target),
+                            display_translated_text,
+                            display_source_text,
                         )
-                        osc_text_max_length = config.get_effective_osc_text_max_length()
-                        if (
-                            osc_text_max_length is not None
-                            and len(display_text) > osc_text_max_length
-                        ):
-                            display_text = (
-                                f"[{tag_src}→{tag_tgt}] {display_translated_text}"
-                            )
                     else:
                         display_text = str(display_translated_text)
                     subtitles_translated = str(display_translated_text)
@@ -843,18 +836,12 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     config, 'SHOW_ORIGINAL_AND_LANG_TAG', True,
                 )
                 if show_tag:
-                    source_lang = language_code_for_osc_tag(detected_lang)
-                    target_lang = language_code_for_osc_tag(actual_target)
-                    display_text = (
-                        f"[{source_lang}→{target_lang}] "
-                        f"{translation_display} ({current_original_display})"
+                    display_text = build_tagged_translation_display(
+                        language_code_for_osc_tag(detected_lang),
+                        language_code_for_osc_tag(actual_target),
+                        translation_display,
+                        current_original_display,
                     )
-                    osc_text_max_length = config.get_effective_osc_text_max_length()
-                    if (
-                        osc_text_max_length is not None
-                        and len(display_text) > osc_text_max_length
-                    ):
-                        display_text = f"[{source_lang}→{target_lang}] {translation_display}"
                 else:
                     display_text = translation_display
 
@@ -1064,18 +1051,12 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         config, 'SHOW_ORIGINAL_AND_LANG_TAG', True,
                     )
                     if show_tag:
-                        tag_src = language_code_for_osc_tag(source_lang)
-                        tag_tgt = language_code_for_osc_tag(actual_target)
-                        display_text = (
-                            f"[{tag_src}→{tag_tgt}] "
-                            f"{display_translated_text} ({display_source_text})"
+                        display_text = build_tagged_translation_display(
+                            language_code_for_osc_tag(source_lang),
+                            language_code_for_osc_tag(actual_target),
+                            display_translated_text,
+                            display_source_text,
                         )
-                        osc_text_max_length = config.get_effective_osc_text_max_length()
-                        if (
-                            osc_text_max_length is not None
-                            and len(display_text) > osc_text_max_length
-                        ):
-                            display_text = f"[{tag_src}→{tag_tgt}] {display_translated_text}"
                     else:
                         display_text = str(display_translated_text)
                     subtitles_translated = str(display_translated_text)
@@ -1441,20 +1422,12 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                             config, 'SHOW_ORIGINAL_AND_LANG_TAG', True,
                         )
                         if show_tag:
-                            tag_src = language_code_for_osc_tag(source_lang)
-                            tag_tgt = language_code_for_osc_tag(actual_target)
-                            display_text = (
-                                f"[{tag_src}→{tag_tgt}] "
-                                f"{display_translated_text} ({display_source_text})"
+                            display_text = build_tagged_translation_display(
+                                language_code_for_osc_tag(source_lang),
+                                language_code_for_osc_tag(actual_target),
+                                display_translated_text,
+                                display_source_text,
                             )
-                            osc_text_max_length = config.get_effective_osc_text_max_length()
-                            if (
-                                osc_text_max_length is not None
-                                and len(display_text) > osc_text_max_length
-                            ):
-                                display_text = (
-                                    f"[{tag_src}→{tag_tgt}] {display_translated_text}"
-                                )
                         else:
                             display_text = str(display_translated_text)
 
