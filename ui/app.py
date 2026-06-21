@@ -365,6 +365,7 @@ def get_config_dict():
             'mute_delay_seconds': config.MUTE_DELAY_SECONDS,
             'mic_device_index': getattr(config, 'MIC_DEVICE_INDEX', None),
             'enable_double_mute_clear': getattr(config, 'ENABLE_DOUBLE_MUTE_CLEAR', True),
+            'enable_vad_gating': getattr(config, 'ENABLE_LOCAL_VAD_GATING', False),
         },
         # 语言检测器配置
         'language_detector': {
@@ -505,6 +506,8 @@ def update_config(config_data):
                 config.MUTE_DELAY_SECONDS = float(mic['mute_delay_seconds'])
             if 'enable_double_mute_clear' in mic:
                 config.ENABLE_DOUBLE_MUTE_CLEAR = bool(mic['enable_double_mute_clear'])
+            if 'enable_vad_gating' in mic:
+                config.ENABLE_LOCAL_VAD_GATING = bool(mic['enable_vad_gating'])
             if 'mic_device_index' in mic:
                 value = mic['mic_device_index']
                 if value is None or value == '':

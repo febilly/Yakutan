@@ -211,6 +211,11 @@ class VADProcessor:
 
         return None
 
+    @property
+    def is_speaking(self) -> bool:
+        """当前是否正在说话（供外部 gating 逻辑读取）。"""
+        return self._is_speaking
+
     def _flush_segment(self) -> np.ndarray | None:
         if not self._speech_buffer:
             return None

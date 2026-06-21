@@ -32,6 +32,9 @@ fast-langdetect>=0.2.0
 # WebSocket 客户端（用于部分 ASR/流式组件）
 websockets>=12.0
 
+# 本地 VAD 门控（Silero ONNX，仅 CPU）
+onnxruntime>=1.19.0
+
 # Web UI 框架
 flask>=3.0.0
 flask-cors>=4.0.0

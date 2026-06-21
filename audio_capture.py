@@ -3,6 +3,7 @@
 """
 import asyncio
 import logging
+import os
 import time
 from typing import Optional
 
@@ -323,6 +324,18 @@ async def audio_capture_task(state, recognizer):
 
     sender_task = asyncio.create_task(_sender_worker())
 
+    # VAD 侧路 chunk 大小（Silero 16kHz 固定）
+    _vad_chunk_samples = 512
+    _vad_chunk_count = 0
+    _vad_last_diag_at = 0.0
+    _vad_verbose = os.environ.get('ENABLE_LOCAL_VAD_GATING_VERBOSE', '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+    # 一次性报告 VAD 状态
+    if state.vad_enabled and state.vad_processor is not None:
+        print(f'[VAD] capture loop 已激活，等待语音...')
+    else:
+        print(f'[VAD] capture loop — VAD 未启用 (enabled={state.vad_enabled}, proc={state.vad_processor is not None})')
+
     try:
         while not state.stop_event.is_set():
             # 始终读取音频数据,避免缓冲区积压
@@ -333,18 +346,72 @@ async def audio_capture_task(state, recognizer):
                 await asyncio.sleep(0.001)
                 continue
 
-            # 只有在识别激活时才发送音频数据,否则丢弃
-            if state.recognition_active:
-                item = (getattr(state, 'audio_send_generation', 0), data)
+            # ── VAD 侧路分析（不阻塞主通道） ──
+            if state.vad_enabled and state.vad_processor is not None:
                 try:
-                    send_queue.put_nowait(item)
-                except asyncio.QueueFull:
-                    _drop_oldest_queue_item(send_queue)
-                    send_queue.put_nowait(item)
-                    now = time.monotonic()
-                    if now - last_queue_warning_at > 5.0:
-                        print('[Audio] ASR发送队列已满，丢弃最旧音频帧以保持实时采集')
-                        last_queue_warning_at = now
+                    samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+                    pending = state._vad_pending_samples
+                    if pending is not None and len(pending) > 0:
+                        samples = np.concatenate([pending, samples])
+                    offset = 0
+                    while offset + _vad_chunk_samples <= len(samples):
+                        chunk = samples[offset:offset + _vad_chunk_samples]
+                        state.vad_processor.process_chunk(chunk)
+                        offset += _vad_chunk_samples
+                        _vad_chunk_count += 1
+                        # 检测 VAD 内部状态变化
+                        is_speaking = state.vad_processor.is_speaking
+                        if is_speaking != state._vad_was_speaking:
+                            state._vad_was_speaking = is_speaking
+                            conf = state.vad_processor.last_confidence
+                            if is_speaking:
+                                print(f'[VAD] ▶ SPEECH 开始 (chunk=#{_vad_chunk_count}, 置信度={conf:.3f})')
+                            else:
+                                print(f'[VAD] ■ SILENCE (chunk=#{_vad_chunk_count}, 置信度={conf:.3f})')
+                        # 定期诊断（仅在 verbose 模式下显示）
+                        if _vad_verbose:
+                            now = time.monotonic()
+                            if now - _vad_last_diag_at > _vad_diag_interval:
+                                _vad_last_diag_at = now
+                                conf = state.vad_processor.last_confidence
+                                label = 'SPEECH' if is_speaking else 'SILENCE'
+                                print(f'[VAD] diag: chunks={_vad_chunk_count}, state={label}, conf={conf:.3f}')
+                    # 保留不足一个 chunk 的剩余帧
+                    state._vad_pending_samples = np.array(
+                        samples[offset:], dtype=np.float32, copy=True
+                    )
+                except Exception:
+                    # VAD 错误不应中断音频流
+                    import traceback
+                    if _vad_verbose:
+                        now = time.monotonic()
+                        if now - _vad_last_diag_at > _vad_diag_interval:
+                            _vad_last_diag_at = now
+                            print('[VAD] ⚠ 处理异常（静默）')
+                            traceback.print_exc()
+
+            # 只有在识别激活时才发送音频数据,否则丢弃
+            # VAD 门控：静音时不发送音频到 ASR（省流），说话时正常发送
+            if state.recognition_active:
+                _should_send = True
+                if state.vad_enabled and state.vad_processor is not None:
+                    _should_send = state.vad_processor.is_speaking
+                if _should_send:
+                    item = (getattr(state, 'audio_send_generation', 0), data)
+                    try:
+                        send_queue.put_nowait(item)
+                    except asyncio.QueueFull:
+                        _drop_oldest_queue_item(send_queue)
+                        send_queue.put_nowait(item)
+                        now = time.monotonic()
+                        if now - last_queue_warning_at > 5.0:
+                            print('[Audio] ASR发送队列已满，丢弃最旧音频帧以保持实时采集')
+                            last_queue_warning_at = now
+                elif _vad_verbose:
+                    state._vad_drop_count += 1
+                    if state._vad_drop_count == 1 or state._vad_drop_count % 100 == 0:
+                        is_sp = state.vad_processor.is_speaking if state.vad_processor else 'N/A'
+                        print(f'[VAD-gate] 丢弃音频帧 (累计={state._vad_drop_count}, is_speaking={is_sp})')
             elif not send_queue.empty():
                 while not send_queue.empty():
                     _drop_oldest_queue_item(send_queue)

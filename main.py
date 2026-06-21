@@ -334,6 +334,54 @@ async def main(
     # 初始化语言检测器
     state.language_detector = _create_language_detector()
 
+    # ---- 本地 VAD 发送门控（实验性, 先于翻译器初始化, 不依赖翻译器） ----
+    _vad_enabled = config.ENABLE_LOCAL_VAD_GATING
+
+    if _vad_enabled:
+        try:
+            from local_asr.model_manager import is_silero_cached, download_silero
+            from local_asr.vad_processor import VADProcessor
+
+            if not is_silero_cached():
+                print('[VAD] Silero ONNX 模型未下载，正在自动下载...')
+                download_silero()
+
+            print('[VAD] Silero ONNX 模型就绪，正在初始化...')
+            state.vad_processor = VADProcessor(
+                sample_rate=config.SAMPLE_RATE,
+                threshold=config.LOCAL_VAD_THRESHOLD,
+                min_speech_duration=config.LOCAL_VAD_GATING_MIN_SPEECH_DURATION,
+                chunk_duration=512.0 / config.SAMPLE_RATE,
+                pre_speech_duration=config.LOCAL_VAD_PRE_SPEECH_DURATION,
+            )
+            state.vad_processor.update_settings({
+                'vad_mode': config.LOCAL_VAD_MODE,
+                'vad_threshold': config.LOCAL_VAD_THRESHOLD,
+                'min_speech_duration': config.LOCAL_VAD_GATING_MIN_SPEECH_DURATION,
+                'silence_duration': config.LOCAL_VAD_SILENCE_DURATION,
+                'pre_speech_duration': config.LOCAL_VAD_PRE_SPEECH_DURATION,
+            })
+            state.vad_enabled = True
+            import numpy as np
+            state._vad_pending_samples = np.array([], dtype=np.float32)
+            state._vad_was_speaking = False
+            # 门控依赖服务端 VAD 自动断句，Qwen 后端下自动开启
+            if backend == 'qwen' and not config.ENABLE_VAD:
+                config.ENABLE_VAD = True
+                print('[VAD]   [自动] 已开启 Qwen 服务端 VAD（门控需要服务端断句）')
+            print('[VAD] ✓ 本地 VAD 发送门控已启用')
+            print(f'[VAD]   threshold={state.vad_processor.threshold:.2f} '
+                  f'min_speech={config.LOCAL_VAD_GATING_MIN_SPEECH_DURATION:.1f}s '
+                  f'silence={config.LOCAL_VAD_SILENCE_DURATION:.1f}s '
+                  f'mode={state.vad_processor.mode}')
+        except Exception as e:
+            import traceback
+            print(f'[VAD] ✗ 初始化失败，VAD 门控未启用: {e}')
+            traceback.print_exc()
+            state.vad_enabled = False
+    else:
+        print('[VAD] — VAD 门控未启用（ENABLE_LOCAL_VAD_GATING=False）')
+
     # 初始化翻译器
     cfg = config_from_module(config)
     reinitialize_translator(state, cfg)

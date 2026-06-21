@@ -2304,6 +2304,9 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control ?? true;
                 document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds || 0.2;
                 document.getElementById('enable-double-mute-clear').checked = config.mic_control.enable_double_mute_clear ?? true;
+                if (document.getElementById('local-vad-gating')) {
+                    document.getElementById('local-vad-gating').checked = config.mic_control.enable_vad_gating ?? false;
+                }
 
                 const micSelect = document.getElementById('mic-device');
                 if (micSelect) {
@@ -2600,6 +2603,9 @@ function applyServerConfigPayload(config) {
     document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control;
     document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds;
     document.getElementById('enable-double-mute-clear').checked = config.mic_control.enable_double_mute_clear ?? true;
+    if (document.getElementById('local-vad-gating')) {
+        document.getElementById('local-vad-gating').checked = config.mic_control.enable_vad_gating ?? false;
+    }
     const micSelect = document.getElementById('mic-device');
     if (micSelect && config.mic_control) {
         const idx = config.mic_control.mic_device_index;
@@ -2792,6 +2798,7 @@ function saveConfigToLocalStorage() {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
                 mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value),
                 enable_double_mute_clear: document.getElementById('enable-double-mute-clear').checked,
+                enable_vad_gating: document.getElementById('local-vad-gating')?.checked ?? false,
                 mic_device_index: (() => {
                     const v = document.getElementById('mic-device') ? document.getElementById('mic-device').value : '';
                     return v === '' ? null : parseInt(v);
@@ -3015,6 +3022,7 @@ async function saveConfig(autoSave = false) {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
                 mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value),
                 enable_double_mute_clear: document.getElementById('enable-double-mute-clear').checked,
+                enable_vad_gating: document.getElementById('local-vad-gating')?.checked ?? false,
                 mic_device_index: (() => {
                     const v = document.getElementById('mic-device') ? document.getElementById('mic-device').value : '';
                     return v === '' ? null : parseInt(v);
