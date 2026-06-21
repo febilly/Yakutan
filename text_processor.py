@@ -537,6 +537,59 @@ def build_dual_output_display(
     return DUAL_OUTPUT_SEPARATOR.join([clipped_primary, clipped_secondary])
 
 
+# 形如 [en→zh] 译文 (原文) 的带标签译文行的装饰符号
+TAGGED_TRANSLATION_SOURCE_PREFIX = " ("
+TAGGED_TRANSLATION_SOURCE_SUFFIX = ")"
+
+
+def build_tagged_translation_display(
+    source_tag: str,
+    target_tag: str,
+    translated_text: str,
+    source_text: Optional[str] = None,
+    max_chars: Optional[int] = None,
+) -> str:
+    """拼接形如 ``[src→tgt] 译文 (原文)`` 的单行 OSC 文本。
+
+    语言标签前缀 ``[src→tgt] ``、括住原文的 `` (`` / ``)`` 等装饰符号的长度都会
+    计入字符预算。超长时按「丢弃最前面的旧文本」的统一规则裁剪，且：
+
+    * 优先整段丢弃括号中的原文（不会残留半个括号）；
+    * 若译文本身仍然超长，则保留语言标签前缀，仅对译文按统一规则丢弃前半部分。
+
+    这样最终长度保证不超过 ``max_chars``，且不会把语言标签或括号裁成残缺的装饰。
+    """
+    if max_chars is None:
+        max_chars = config.get_effective_osc_text_max_length()
+
+    prefix = f"[{source_tag}→{target_tag}] "
+    translated = translated_text if translated_text is not None else ""
+    source = source_text or ""
+    suffix = (
+        f"{TAGGED_TRANSLATION_SOURCE_PREFIX}{source}{TAGGED_TRANSLATION_SOURCE_SUFFIX}"
+        if source
+        else ""
+    )
+
+    full = f"{prefix}{translated}{suffix}"
+    if max_chars is None or len(full) <= max_chars:
+        return full
+
+    # 第一步：丢弃括号中的原文（连同 " (" / ")" 装饰一起去掉，不残留半个括号）。
+    without_source = f"{prefix}{translated}"
+    if len(without_source) <= max_chars:
+        return without_source
+
+    # 第二步：译文仍然超长——保留语言标签前缀，对译文按统一规则丢弃前半部分。
+    body_budget = max_chars - len(prefix)
+    if body_budget <= 0:
+        # 极端情况（连标签前缀都放不下）：对整体按统一规则丢弃前半部分兜底。
+        return trim_text_prefix_to_limit(without_source, max_chars)
+
+    trimmed = trim_text_prefix_to_limit(translated, body_budget)
+    return f"{prefix}{trimmed}"
+
+
 def build_streaming_output_line(text: str) -> str:
     formatted_text = apply_basic_text_post_processing(text)
     if formatted_text.endswith("……"):

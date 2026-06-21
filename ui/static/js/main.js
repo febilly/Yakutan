@@ -63,6 +63,7 @@ function touchMainPanelUserEditedAt() {
 // ===================== 同步基础设施结束 =====================
 
 const PANEL_FLOATING_MODE_STORAGE_KEY = 'panel_floating_mode';
+const PANEL_FLOATING_MODE_DEFAULT = true;
 const LLM_SELECTED_TEMPLATE_STORAGE_KEY = 'llm_selected_template';
 const LLM_TEMPLATE_KEY_STORAGE_PREFIX = 'llm_template_key_';
 const LLM_TEMPLATE_BASEURL_STORAGE_PREFIX = 'llm_template_baseurl_';
@@ -988,73 +989,32 @@ function persistCurrentLLMTemplateState() {
     persistCurrentLLMTemplateParallelMode();
 }
 
-function snapshotLLMTemplateStorage() {
-    const snapshot = {};
-    snapshot[LLM_SELECTED_TEMPLATE_STORAGE_KEY] = getSelectedLLMTemplateName();
-
-    Object.keys(LLM_TEMPLATE_CONFIGS).forEach((templateName) => {
-        snapshot[getLLMTemplateKeyStorageKey(templateName)] = getStoredLLMTemplateKey(templateName);
-
-        const baseUrlStorageKey = getLLMTemplateBaseUrlStorageKey(templateName);
-        snapshot[baseUrlStorageKey] = getStoredLLMTemplateBaseUrl(templateName);
-
-        const modelStorageKey = getLLMTemplateModelStorageKey(templateName);
-        snapshot[modelStorageKey] = getStoredLLMTemplateModel(templateName);
-
-        const extraKey = getLLMTemplateExtraBodyStorageKey(templateName);
-        if (extraKey) {
-            const rawExtra = localStorage.getItem(extraKey);
-            if (rawExtra !== null) {
-                snapshot[extraKey] = rawExtra;
-            }
-        }
-
-        const parallelStorageKey = getLLMTemplateParallelStorageKey(templateName);
-        if (parallelStorageKey) {
-            const rawParallelMode = localStorage.getItem(parallelStorageKey);
-            if (rawParallelMode !== null) {
-                snapshot[parallelStorageKey] = rawParallelMode;
-            }
-        }
-    });
-
-    return snapshot;
-}
-
-function restoreLLMTemplateStorage(snapshot) {
-    if (!snapshot) return;
-
-    Object.entries(snapshot).forEach(([storageKey, value]) => {
-        if (storageKey === LLM_SELECTED_TEMPLATE_STORAGE_KEY) {
-            if (normalizeLLMTemplateName(value)) {
-                localStorage.setItem(storageKey, value);
-                activeLLMTemplate = value;
-            } else {
-                localStorage.removeItem(storageKey);
-                activeLLMTemplate = null;
-            }
-            updateLLMTemplateButtonStates();
-            updateLLMTemplateFieldLocks();
+// 重置时按模板类型保留用户数据，其余参数回退到 LLM_TEMPLATE_CONFIGS 中的默认值：
+//   - custom1~3：完整保留（不清除任何参数）
+//   - openrouter：保留 API Key 和模型名，清除其余参数
+//   - 其他预设：仅保留 API Key，清除其余参数
+// 注：各模板的 API Key 存储在独立的键名下，此处不会被清除，因此始终保留。
+function resetStoredLLMTemplateParametersToDefaults() {
+    Object.entries(LLM_TEMPLATE_CONFIGS).forEach(([templateName, templateConfig]) => {
+        if (templateConfig.isCustom) {
             return;
         }
-        if (
-            storageKey.startsWith(LLM_TEMPLATE_EXTRABODY_STORAGE_PREFIX)
-            || storageKey.startsWith(LLM_TEMPLATE_PARALLEL_STORAGE_PREFIX)
-        ) {
-            if (value === '') {
-                localStorage.setItem(storageKey, '');
-            } else if (value) {
-                localStorage.setItem(storageKey, String(value));
-            } else {
+
+        const storageKeys = [
+            getLLMTemplateBaseUrlStorageKey(templateName),
+            getLLMTemplateExtraBodyStorageKey(templateName),
+            getLLMTemplateParallelStorageKey(templateName),
+        ];
+        // openrouter 额外保留模型名；其余预设连模型一起清除
+        if (templateName !== 'openrouter') {
+            storageKeys.push(getLLMTemplateModelStorageKey(templateName));
+        }
+
+        storageKeys.forEach((storageKey) => {
+            if (storageKey) {
                 localStorage.removeItem(storageKey);
             }
-            return;
-        }
-        if (value) {
-            localStorage.setItem(storageKey, value);
-        } else {
-            localStorage.removeItem(storageKey);
-        }
+        });
     });
 }
 
@@ -1173,16 +1133,43 @@ function updateOpenRouterStreamingUi() {
     if (v === 'openrouter_streaming_deepl_hybrid') {
         streamingModeGroup.style.display = 'none';
         streamingMode.disabled = false;
+        updateLLMStreamingPromoState();
         return;
     }
     if (v === 'openrouter') {
         streamingModeGroup.style.display = 'block';
         streamingMode.disabled = false;
+        updateLLMStreamingPromoState();
         return;
     }
     streamingModeGroup.style.display = 'none';
     streamingMode.checked = false;
     streamingMode.disabled = false;
+    updateLLMStreamingPromoState();
+}
+
+function isUsingLLMStreamingTranslation() {
+    const apiType = document.getElementById('translation-api-type')?.value ?? '';
+    const streamingMode = document.getElementById('openrouter-streaming-mode');
+    return apiType === 'openrouter_streaming_deepl_hybrid'
+        || (apiType === 'openrouter' && !!streamingMode?.checked);
+}
+
+function updateLLMStreamingPromoState() {
+    const switchBtn = document.getElementById('switch-to-llm-streaming-btn');
+    if (!switchBtn) return;
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const active = isUsingLLMStreamingTranslation();
+    switchBtn.disabled = active;
+    switchBtn.classList.toggle('feature-hint-status', active);
+    switchBtn.setAttribute('aria-disabled', active ? 'true' : 'false');
+    if (active) {
+        switchBtn.setAttribute('data-i18n', 'feature.alreadyUsingLlmStreaming');
+        switchBtn.textContent = t('feature.alreadyUsingLlmStreaming');
+    } else {
+        switchBtn.setAttribute('data-i18n', 'feature.switchToLlmStreaming');
+        switchBtn.textContent = t('feature.switchToLlmStreaming');
+    }
 }
 
 function updateLLMSettingsVisibility(apiType = null, expandPanel = false) {
@@ -1232,7 +1219,8 @@ function updateDashscopeKeyFieldState() {
     if (!input) return;
     const need = currentConfigRequiresDashscopeKey();
     if (badge) {
-        if (need) {
+        const isAdvancedMode = !document.body.classList.contains('mode-simple');
+        if (need && !isAdvancedMode) {
             badge.hidden = false;
             badge.setAttribute('data-i18n', 'label.required');
             badge.textContent = window.i18n ? window.i18n.t('label.required') : '*必需';
@@ -1321,7 +1309,8 @@ function loadPanelFloatingModeSetting() {
     const toggle = document.getElementById('panel-floating-mode');
     if (!toggle) return;
 
-    toggle.checked = localStorage.getItem(PANEL_FLOATING_MODE_STORAGE_KEY) === 'true';
+    const storedValue = localStorage.getItem(PANEL_FLOATING_MODE_STORAGE_KEY);
+    toggle.checked = storedValue === null ? PANEL_FLOATING_MODE_DEFAULT : storedValue === 'true';
 }
 
 function savePanelFloatingModeSetting() {
@@ -1338,7 +1327,7 @@ function onPanelFloatingModeChange() {
 function resetPanelFloatingModeSetting() {
     const toggle = document.getElementById('panel-floating-mode');
     if (toggle) {
-        toggle.checked = false;
+        toggle.checked = PANEL_FLOATING_MODE_DEFAULT;
     }
 
     localStorage.removeItem(PANEL_FLOATING_MODE_STORAGE_KEY);
@@ -1404,8 +1393,8 @@ function shouldSkipOscUdpPortCheck() {
         || document.getElementById('bypass-osc-udp-port-check')?.checked === true;
 }
 
-function applyLLMTemplate(templateName) {
-    const previousTemplateName = getCurrentLLMTemplateName();
+// 把指定模板的已存/默认参数填入表单（不会持久化当前表单，供重置后刷新界面使用）
+function populateLLMTemplateForm(templateName) {
     const baseUrlInput = document.getElementById('llm-base-url');
     const modelInput = document.getElementById('llm-model');
     const keyInput = document.getElementById('llm-api-key');
@@ -1416,11 +1405,7 @@ function applyLLMTemplate(templateName) {
     const templateConfig = LLM_TEMPLATE_CONFIGS[templateName];
 
     if (!baseUrlInput || !modelInput || !keyInput || !extraBodyInput || !parallelFastestSelect || !templateConfig) {
-        return;
-    }
-
-    if (previousTemplateName) {
-        persistCurrentLLMTemplateState();
+        return false;
     }
 
     setSelectedLLMTemplateName(templateName);
@@ -1480,6 +1465,21 @@ function applyLLMTemplate(templateName) {
     }
 
     updateLLMTemplateKeySourceHint(templateName);
+    return true;
+}
+
+function applyLLMTemplate(templateName) {
+    const previousTemplateName = getCurrentLLMTemplateName();
+    const baseUrlInput = document.getElementById('llm-base-url');
+
+    if (previousTemplateName) {
+        persistCurrentLLMTemplateState();
+    }
+
+    if (!populateLLMTemplateForm(templateName)) {
+        return;
+    }
+
     onSettingChange(baseUrlInput);
 }
 
@@ -2237,7 +2237,7 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('enable-translation').checked = config.translation.enable_translation ?? true;
                 document.getElementById('target-language').value = config.translation.target_language || 'ja';
                 document.getElementById('secondary-target-language').value = config.translation.secondary_target_language || '';
-                document.getElementById('fallback-language').value = config.translation.fallback_language || 'en';
+                document.getElementById('fallback-language').value = config.translation.fallback_language || '';
                 // 处理 LLM 流式模式的特殊情况
                 const apiType = config.translation.api_type || 'qwen_mt';
                 if (apiType === 'openrouter_streaming') {
@@ -2303,6 +2303,7 @@ function loadConfigFromLocalStorage() {
             if (config.mic_control) {
                 document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control ?? true;
                 document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds || 0.2;
+                document.getElementById('enable-double-mute-clear').checked = config.mic_control.enable_double_mute_clear ?? true;
 
                 const micSelect = document.getElementById('mic-device');
                 if (micSelect) {
@@ -2464,6 +2465,7 @@ function loadDefaultConfig() {
     // 麦克风控制
     document.getElementById('enable-mic-control').checked = true;
     document.getElementById('mute-delay').value = 0.2;
+    document.getElementById('enable-double-mute-clear').checked = true;
 
     // 麦克风设备
     const micSelect = document.getElementById('mic-device');
@@ -2597,6 +2599,7 @@ function applyServerConfigPayload(config) {
 
     document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control;
     document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds;
+    document.getElementById('enable-double-mute-clear').checked = config.mic_control.enable_double_mute_clear ?? true;
     const micSelect = document.getElementById('mic-device');
     if (micSelect && config.mic_control) {
         const idx = config.mic_control.mic_device_index;
@@ -2788,6 +2791,7 @@ function saveConfigToLocalStorage() {
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
                 mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value),
+                enable_double_mute_clear: document.getElementById('enable-double-mute-clear').checked,
                 mic_device_index: (() => {
                     const v = document.getElementById('mic-device') ? document.getElementById('mic-device').value : '';
                     return v === '' ? null : parseInt(v);
@@ -2886,6 +2890,7 @@ function handleTranslationApiChange(event) {
         && !isLLMConnectionFieldsComplete();
     updateLLMSettingsVisibility(newApi, expandLlmPanel);
     updateSensitiveWordsHint(newApi);
+    updateLLMStreamingPromoState();
     applyAsrBackendLocks();
 
     // 清除警告消息
@@ -2907,6 +2912,7 @@ document.addEventListener('DOMContentLoaded', function () {
         updateOpenRouterStreamingUi();
         updateLLMSettingsVisibility(apiSelect.value);
         updateSensitiveWordsHint(apiSelect.value);
+        updateLLMStreamingPromoState();
         syncLLMTemplateKeySourceHintFromInputs();
     }, 100);
 });
@@ -2917,6 +2923,7 @@ function onSettingChange(changedElement = null) {
     applyAsrBackendLocks();
     applyAutoLanguageDetectorIfNeeded();
     updateDashscopeKeyFieldState();
+    updateLLMStreamingPromoState();
 
     // 清除之前的定时器
     if (autoSaveTimer) {
@@ -3007,6 +3014,7 @@ async function saveConfig(autoSave = false) {
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
                 mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value),
+                enable_double_mute_clear: document.getElementById('enable-double-mute-clear').checked,
                 mic_device_index: (() => {
                     const v = document.getElementById('mic-device') ? document.getElementById('mic-device').value : '';
                     return v === '' ? null : parseInt(v);
@@ -3522,10 +3530,10 @@ async function resetToDefaults() {
     }
 
     try {
+        // 先把当前表单写回所属模板存储，避免丢失用户刚刚的改动
         persistCurrentLLMTemplateState();
-        const llmTemplateStorageSnapshot = snapshotLLMTemplateStorage();
 
-        // 使用前端默认配置
+        // 使用前端默认配置（含将选中模板恢复为默认模板）
         loadDefaultConfig();
         resetPanelFloatingModeSetting();
         resetQuickLanguageSettings();
@@ -3535,9 +3543,13 @@ async function resetToDefaults() {
         // 根据翻译开关显示/隐藏翻译选项
         toggleTranslationOptions();
 
-        // 先保存到本地浏览器
+        // 按模板类型重置参数（custom 全保留 / openrouter 保留 key+模型 / 其余仅保留 key），
+        // 再用当前选中的（默认）模板刷新表单，使界面与存储一致
+        resetStoredLLMTemplateParametersToDefaults();
+        populateLLMTemplateForm(getSelectedLLMTemplateName());
+
+        // 保存到本地浏览器
         saveConfigToLocalStorage();
-        restoreLLMTemplateStorage(llmTemplateStorageSnapshot);
 
         // 再保存到服务器
         await saveConfig();

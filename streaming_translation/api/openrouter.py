@@ -278,6 +278,7 @@ class OpenRouterAPI(BaseTranslationAPI):
             f"- Formality guide: {style_guide}\n"
             f"- Sentence style guide: {sentence_guide}\n"
             "- For idioms/slang: translate the meaning naturally.\n"
+            "- If the source is a single word or short phrase, keep the translation a word or phrase too; do not expand it into a full sentence.\n"
             "- Output the translation only. No labels, notes, or commentary."
         )
 

@@ -9,6 +9,7 @@ Yakutan 主入口 - 仅负责服务编排和生命周期管理
 - recognition_handler.py : 语音识别回调（VRChatRecognitionCallback）
 """
 import os
+import time
 import logging
 import signal
 import asyncio
@@ -181,9 +182,29 @@ async def start_recognition_async(state):
     state.bump_audio_send_generation()
     state.recognition_active = True
 
+    # 识别重新开始/恢复，解除"撤回作废"的结果丢弃状态
+    if state.recognition_callback is not None:
+        state.recognition_callback.resume_outputs()
+
 
 async def handle_mute_change(state, is_muted):
     """处理静音状态变化的回调函数"""
+    # 快速开关麦克风以清空消息框：短时间内连续两次收到静音消息则清空聊天框。
+    # 该逻辑独立于麦克风控制开关，因此放在最前面处理。
+    if is_muted and getattr(config, 'ENABLE_DOUBLE_MUTE_CLEAR', True):
+        now = time.monotonic()
+        window = getattr(config, 'DOUBLE_MUTE_CLEAR_WINDOW_SECONDS', 0.8)
+        last = state.last_mute_engaged_time
+        if last is not None and (now - last) <= window:
+            print('[OSC] 检测到快速开关麦克风，清空聊天框并撤回之前的内容')
+            await osc_manager.clear_chatbox()
+            # 撤回作废：丢弃之前已发出的识别/翻译请求迟到返回的结果
+            if state.recognition_callback is not None:
+                state.recognition_callback.discard_pending_outputs()
+            state.last_mute_engaged_time = None  # 重置，避免连续误触发
+        else:
+            state.last_mute_engaged_time = now
+
     if not is_effective_mic_control_enabled(state.current_asr_backend):
         return
 

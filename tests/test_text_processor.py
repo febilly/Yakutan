@@ -12,6 +12,7 @@ from text_processor import (
     apply_arabic_reshaper_if_needed,
     build_dual_output_display,
     build_streaming_output_line,
+    build_tagged_translation_display,
     get_display_translation_text,
     get_display_text,
     has_secondary_translation_target,
@@ -250,6 +251,75 @@ class TestBuildDualOutputDisplay:
         mock_config.get_effective_osc_text_max_length.return_value = 10
         result = build_dual_output_display("hello there", "world", "en", "en")
         assert len(result) <= 10
+
+    @patch("text_processor.config")
+    def test_dual_output_keeps_separator_in_budget_and_drops_front(self, mock_config):
+        # 两条都是 CJK（权重 1:1），上限 9 含换行；超长时各自丢弃前半部分。
+        mock_config.OSC_TEXT_MAX_LENGTH = ""
+        mock_config.OSC_TEXT_MAX_BYTES = ""
+        mock_config.get_effective_osc_text_max_length.return_value = 9
+        result = build_dual_output_display("甲乙丙丁戊", "己庚辛壬癸", "zh", "zh")
+        assert result == "乙丙丁戊\n庚辛壬癸"
+        assert len(result) <= 9
+        assert result.count("\n") == 1
+
+    @patch("text_processor.config")
+    def test_dual_output_alphabetic_gets_double_budget(self, mock_config):
+        # 非 CJK（权重 2）应比 CJK（权重 1）分到更多字符额度。
+        mock_config.OSC_TEXT_MAX_LENGTH = ""
+        mock_config.OSC_TEXT_MAX_BYTES = ""
+        mock_config.get_effective_osc_text_max_length.return_value = 10
+        result = build_dual_output_display(
+            "甲乙丙丁戊己庚辛", "abcdefgh", "zh", "en",
+        )
+        primary_part, secondary_part = result.split("\n")
+        assert len(result) <= 10
+        assert len(secondary_part) > len(primary_part)
+
+
+class TestBuildTaggedTranslationDisplay:
+    @patch("text_processor.config")
+    def test_fits_keeps_full_decoration(self, mock_config):
+        mock_config.get_effective_osc_text_max_length.return_value = 144
+        result = build_tagged_translation_display("en", "zh", "你好", "hello")
+        assert result == "[en→zh] 你好 (hello)"
+
+    @patch("text_processor.config")
+    def test_no_max_returns_full(self, mock_config):
+        mock_config.get_effective_osc_text_max_length.return_value = None
+        result = build_tagged_translation_display("en", "zh", "你好", "hello")
+        assert result == "[en→zh] 你好 (hello)"
+
+    @patch("text_processor.config")
+    def test_overflow_drops_source_with_its_brackets(self, mock_config):
+        # 整体超长时整段丢弃括号原文，不残留半个括号。
+        mock_config.get_effective_osc_text_max_length.return_value = 20
+        result = build_tagged_translation_display(
+            "en", "zh", "翻译结果文本内容", "a very long original sentence",
+        )
+        assert result == "[en→zh] 翻译结果文本内容"
+        assert "(" not in result and ")" not in result
+        assert len(result) <= 20
+
+    @patch("text_processor.config")
+    def test_translated_overflow_keeps_prefix_and_drops_front(self, mock_config):
+        # 译文本身超长：保留语言标签前缀，仅对译文按统一规则丢弃前半部分。
+        mock_config.get_effective_osc_text_max_length.return_value = 18
+        result = build_tagged_translation_display(
+            "en", "zh", "前半段要丢掉，后半段保留", None,
+        )
+        assert result.startswith("[en→zh] ")
+        assert len(result) <= 18
+        assert result == "[en→zh] 后半段保留"
+
+    @patch("text_processor.config")
+    def test_explicit_max_chars_argument_wins(self, mock_config):
+        mock_config.get_effective_osc_text_max_length.return_value = 144
+        result = build_tagged_translation_display(
+            "en", "zh", "translated", "source", max_chars=15,
+        )
+        assert len(result) <= 15
+        assert result.startswith("[en→zh] ")
 
 
 class TestGetDisplayText:

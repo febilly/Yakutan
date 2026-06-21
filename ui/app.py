@@ -364,6 +364,7 @@ def get_config_dict():
             'enable_mic_control': config.ENABLE_MIC_CONTROL,
             'mute_delay_seconds': config.MUTE_DELAY_SECONDS,
             'mic_device_index': getattr(config, 'MIC_DEVICE_INDEX', None),
+            'enable_double_mute_clear': getattr(config, 'ENABLE_DOUBLE_MUTE_CLEAR', True),
         },
         # 语言检测器配置
         'language_detector': {
@@ -502,6 +503,8 @@ def update_config(config_data):
                 config.ENABLE_MIC_CONTROL = mic['enable_mic_control']
             if 'mute_delay_seconds' in mic:
                 config.MUTE_DELAY_SECONDS = float(mic['mute_delay_seconds'])
+            if 'enable_double_mute_clear' in mic:
+                config.ENABLE_DOUBLE_MUTE_CLEAR = bool(mic['enable_double_mute_clear'])
             if 'mic_device_index' in mic:
                 value = mic['mic_device_index']
                 if value is None or value == '':
@@ -1341,6 +1344,7 @@ def get_defaults():
         'mic_control': {
             'enable_mic_control': True,
             'mute_delay_seconds': 0.2,
+            'enable_double_mute_clear': True,
         },
         'language_detector': {
             'type': 'cjke',
