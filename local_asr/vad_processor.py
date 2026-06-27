@@ -242,6 +242,16 @@ class VADProcessor:
         self._is_speaking = False
         self._silence_counter = 0
 
+    def reset(self) -> None:
+        self._reset()
+        self.last_confidence = 0.0
+        if self._silero is not None:
+            try:
+                self._silero.reset_states()
+            except Exception:
+                pass
+        self._pre_buffer.clear()
+
     def peek_buffer(self) -> tuple[np.ndarray, float] | None:
         if not self._speech_buffer or not self._is_speaking:
             return None

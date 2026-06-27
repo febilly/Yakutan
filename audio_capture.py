@@ -328,7 +328,12 @@ async def audio_capture_task(state, recognizer):
     _vad_chunk_samples = 512
     _vad_chunk_count = 0
     _vad_last_diag_at = 0.0
-    _vad_verbose = os.environ.get('ENABLE_LOCAL_VAD_GATING_VERBOSE', '').strip().lower() in ('1', 'true', 'yes', 'on')
+    _vad_verbose_raw = (
+        os.environ.get('ENABLE_VAD_GATING_VERBOSE')
+        or os.environ.get('ENABLE_LOCAL_VAD_GATING_VERBOSE')
+        or ''
+    )
+    _vad_verbose = _vad_verbose_raw.strip().lower() in ('1', 'true', 'yes', 'on')
 
     # 一次性报告 VAD 状态
     if state.vad_enabled and state.vad_processor is not None:
@@ -346,8 +351,8 @@ async def audio_capture_task(state, recognizer):
                 await asyncio.sleep(0.001)
                 continue
 
-            # ── VAD 侧路分析（不阻塞主通道） ──
-            if state.vad_enabled and state.vad_processor is not None:
+            # ── VAD 侧路分析（不阻塞主通道，且仅在识别激活时进行） ──
+            if state.recognition_active and state.vad_enabled and state.vad_processor is not None:
                 try:
                     samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
                     pending = state._vad_pending_samples

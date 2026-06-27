@@ -98,8 +98,13 @@ _VALID_LOCAL_ASR_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
 if LOCAL_ASR_ENGINE not in _VALID_LOCAL_ASR_ENGINES:
     LOCAL_ASR_ENGINE = 'sensevoice'
 
-# 本地 VAD 配置（默认值沿用 LiveTranslate VADProcessor.__init__）
-LOCAL_VAD_MODE = 'silero'  # 可选: 'silero', 'energy', 'disabled'
+# ============================================================================
+# 统一 VAD 配置（同时控制在线 API 与本地 ASR）
+# ============================================================================
+# 一个总开关 + 一组参数，既用于在线 API 后端的发送门控（静音时不向 ASR
+# 发送音频以省流），也用于本地 ASR 的分段断句。
+VAD_ENABLED = _get_env_bool('VAD_ENABLED', True)
+LOCAL_VAD_MODE = 'silero'  # 可选: 'silero', 'energy'；在线门控固定使用 Silero
 LOCAL_VAD_THRESHOLD = 0.50
 LOCAL_VAD_MIN_SPEECH_DURATION = 1.0
 # 单段口语送入 VAD 的最长时长（秒）；超过后对本段仅送入静音块直至 VAD 静音或闭麦结束本段（不按时长强制切句）
@@ -307,21 +312,6 @@ TRANSLATION_CONTEXT_AWARE = True
 TERMINOLOGY_ENABLED = True
 
 # ============================================================================
-# 本地 VAD 发送门控（实验性）
-# ============================================================================
-
-# 是否启用本地 VAD 发送门控 — 当本地 Silero VAD 检测到静音时不向 ASR 后端发送音频，
-# 仅 VAD 判定为"正在说话"时发送。不触发 recognizer.pause/resume，Session 始终在线。
-# 目的：省流、降低静音时的 ASR 费用。Qwen 后端下会自动启用服务端 VAD 配合断句。
-# 注意：依赖 onnxruntime（CPU）和 Silero ONNX 模型。首次运行需确保模型已下载。
-# 可通过前端「麦克风控制」面板中的开关控制，无需再设环境变量。
-ENABLE_LOCAL_VAD_GATING = _get_env_bool('ENABLE_LOCAL_VAD_GATING', False)
-
-# VAD 门控专用：最短语音持续时间（秒），用于触发 SPEECH 状态
-# 比通用 LOCAL_VAD_MIN_SPEECH_DURATION 更短，确保快速对话（如打招呼）不被截断
-LOCAL_VAD_GATING_MIN_SPEECH_DURATION = 0.15
-
-# ============================================================================
 # 麦克风控制配置
 # ============================================================================
 
@@ -356,7 +346,7 @@ HOT_WORDS_DIR = 'hot_words'
 HOT_WORDS_PRIVATE_DIR = 'hot_words_private'
 
 # ============================================================================
-# VAD 配置（仅 Qwen 后端）
+# 服务端 VAD 配置（仅 Qwen 后端）
 # ============================================================================
 
 # 是否启用服务器端VAD（语音活动检测）

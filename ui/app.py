@@ -168,14 +168,20 @@ def _get_feature_flags() -> dict:
 def _local_asr_config_dict() -> dict:
     return {
         'engine': getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice'),
-        'vad_mode': getattr(config, 'LOCAL_VAD_MODE', 'silero'),
-        'vad_threshold': getattr(config, 'LOCAL_VAD_THRESHOLD', 0.50),
+        'incremental_asr': getattr(config, 'LOCAL_INCREMENTAL_ASR', True),
+        'interim_interval': getattr(config, 'LOCAL_INTERIM_INTERVAL', 2.0),
+    }
+
+
+def _vad_config_dict() -> dict:
+    return {
+        'enabled': bool(getattr(config, 'VAD_ENABLED', True)),
+        'mode': getattr(config, 'LOCAL_VAD_MODE', 'silero'),
+        'threshold': getattr(config, 'LOCAL_VAD_THRESHOLD', 0.50),
         'min_speech_duration': getattr(config, 'LOCAL_VAD_MIN_SPEECH_DURATION', 1.0),
         'max_speech_duration': getattr(config, 'LOCAL_VAD_MAX_SPEECH_DURATION', 30.0),
         'silence_duration': getattr(config, 'LOCAL_VAD_SILENCE_DURATION', 0.8),
         'pre_speech_duration': getattr(config, 'LOCAL_VAD_PRE_SPEECH_DURATION', 0.2),
-        'incremental_asr': getattr(config, 'LOCAL_INCREMENTAL_ASR', True),
-        'interim_interval': getattr(config, 'LOCAL_INTERIM_INTERVAL', 2.0),
     }
 
 
@@ -316,13 +322,11 @@ def get_config_dict():
         # 语音识别配置
         'asr': {
             'preferred_backend': _sanitize_preferred_backend(config.PREFERRED_ASR_BACKEND),
-            'enable_vad': config.ENABLE_VAD,
-            'vad_threshold': config.VAD_THRESHOLD,
-            'vad_silence_duration_ms': config.VAD_SILENCE_DURATION_MS,
             'keepalive_interval': config.KEEPALIVE_INTERVAL,
             'enable_hot_words': config.ENABLE_HOT_WORDS,
             'use_international_endpoint': config.USE_INTERNATIONAL_ENDPOINT,
         },
+        'vad': _vad_config_dict(),
         # 翻译配置
         'translation': {
             'enable_translation': config.ENABLE_TRANSLATION,
@@ -365,7 +369,6 @@ def get_config_dict():
             'mute_delay_seconds': config.MUTE_DELAY_SECONDS,
             'mic_device_index': getattr(config, 'MIC_DEVICE_INDEX', None),
             'enable_double_mute_clear': getattr(config, 'ENABLE_DOUBLE_MUTE_CLEAR', True),
-            'enable_vad_gating': getattr(config, 'ENABLE_LOCAL_VAD_GATING', False),
         },
         # 语言检测器配置
         'language_detector': {
@@ -424,7 +427,25 @@ def update_config(config_data):
                 config.ENABLE_HOT_WORDS = asr['enable_hot_words']
             if 'use_international_endpoint' in asr:
                 config.USE_INTERNATIONAL_ENDPOINT = bool(asr['use_international_endpoint'])
-        
+
+        if 'vad' in config_data and config_data['vad']:
+            vad = config_data['vad']
+            if 'enabled' in vad:
+                config.VAD_ENABLED = bool(vad['enabled'])
+            if 'mode' in vad:
+                mode = str(vad['mode'] or 'silero')
+                config.LOCAL_VAD_MODE = mode if mode in ('silero', 'energy') else 'silero'
+            if 'threshold' in vad:
+                config.LOCAL_VAD_THRESHOLD = float(vad['threshold'])
+            if 'min_speech_duration' in vad:
+                config.LOCAL_VAD_MIN_SPEECH_DURATION = float(vad['min_speech_duration'])
+            if 'max_speech_duration' in vad:
+                config.LOCAL_VAD_MAX_SPEECH_DURATION = float(vad['max_speech_duration'])
+            if 'silence_duration' in vad:
+                config.LOCAL_VAD_SILENCE_DURATION = float(vad['silence_duration'])
+            if 'pre_speech_duration' in vad:
+                config.LOCAL_VAD_PRE_SPEECH_DURATION = max(0.0, float(vad['pre_speech_duration']))
+
         # 更新翻译配置
         if 'translation' in config_data:
             trans = config_data['translation']
@@ -506,8 +527,6 @@ def update_config(config_data):
                 config.MUTE_DELAY_SECONDS = float(mic['mute_delay_seconds'])
             if 'enable_double_mute_clear' in mic:
                 config.ENABLE_DOUBLE_MUTE_CLEAR = bool(mic['enable_double_mute_clear'])
-            if 'enable_vad_gating' in mic:
-                config.ENABLE_LOCAL_VAD_GATING = bool(mic['enable_vad_gating'])
             if 'mic_device_index' in mic:
                 value = mic['mic_device_index']
                 if value is None or value == '':
@@ -579,17 +598,18 @@ def update_config(config_data):
                 if _eng not in LOCAL_ASR_ENGINES:
                     _eng = 'sensevoice'
                 config.LOCAL_ASR_ENGINE = _eng
-            if 'vad_mode' in local_asr:
-                config.LOCAL_VAD_MODE = str(local_asr['vad_mode'] or 'silero')
-            if 'vad_threshold' in local_asr:
+            if 'vad_mode' in local_asr and 'vad' not in config_data:
+                mode = str(local_asr['vad_mode'] or 'silero')
+                config.LOCAL_VAD_MODE = mode if mode in ('silero', 'energy') else 'silero'
+            if 'vad_threshold' in local_asr and 'vad' not in config_data:
                 config.LOCAL_VAD_THRESHOLD = float(local_asr['vad_threshold'])
-            if 'min_speech_duration' in local_asr:
+            if 'min_speech_duration' in local_asr and 'vad' not in config_data:
                 config.LOCAL_VAD_MIN_SPEECH_DURATION = float(local_asr['min_speech_duration'])
-            if 'max_speech_duration' in local_asr:
+            if 'max_speech_duration' in local_asr and 'vad' not in config_data:
                 config.LOCAL_VAD_MAX_SPEECH_DURATION = float(local_asr['max_speech_duration'])
-            if 'silence_duration' in local_asr:
+            if 'silence_duration' in local_asr and 'vad' not in config_data:
                 config.LOCAL_VAD_SILENCE_DURATION = float(local_asr['silence_duration'])
-            if 'pre_speech_duration' in local_asr:
+            if 'pre_speech_duration' in local_asr and 'vad' not in config_data:
                 config.LOCAL_VAD_PRE_SPEECH_DURATION = max(0.0, float(local_asr['pre_speech_duration']))
             if 'incremental_asr' in local_asr:
                 config.LOCAL_INCREMENTAL_ASR = bool(local_asr['incremental_asr'])
@@ -1321,12 +1341,18 @@ def get_defaults():
         'features': _get_feature_flags(),
         'asr': {
             'preferred_backend': 'qwen',  # 可选: 'qwen', 'qwen_international', 'dashscope'
-            'enable_vad': True,
-            'vad_threshold': 0.2,
-            'vad_silence_duration_ms': 800,
             'keepalive_interval': 30,
             'enable_hot_words': True,
             'use_international_endpoint': False,
+        },
+        'vad': {
+            'enabled': True,
+            'mode': 'silero',
+            'threshold': 0.50,
+            'min_speech_duration': 1.0,
+            'max_speech_duration': 30.0,
+            'silence_duration': 0.8,
+            'pre_speech_duration': 0.2,
         },
         'translation': {
             'enable_translation': True,
