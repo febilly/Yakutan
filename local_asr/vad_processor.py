@@ -242,6 +242,16 @@ class VADProcessor:
         self._is_speaking = False
         self._silence_counter = 0
 
+    def reset(self) -> None:
+        """重置 VAD 的所有历史状态与缓存（包括 ONNX 内部的 RNN 隐藏状态）。"""
+        self._reset()
+        if self._silero is not None:
+            try:
+                self._silero.reset_states()
+            except Exception:
+                pass
+        self._pre_buffer.clear()
+
     def peek_buffer(self) -> tuple[np.ndarray, float] | None:
         if not self._speech_buffer or not self._is_speaking:
             return None

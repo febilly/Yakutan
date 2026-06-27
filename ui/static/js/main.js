@@ -114,12 +114,6 @@ function isLocalAsrUiEnabled() {
 function getLocalAsrConfigFromForm() {
     return {
         engine: document.getElementById('local-asr-engine')?.value || 'sensevoice',
-        vad_mode: document.getElementById('local-vad-mode')?.value || 'silero',
-        vad_threshold: parseFloat(document.getElementById('local-vad-threshold')?.value || '0.5'),
-        min_speech_duration: parseFloat(document.getElementById('local-min-speech-duration')?.value || '1'),
-        max_speech_duration: parseFloat(document.getElementById('local-max-speech-duration')?.value || '30'),
-        silence_duration: parseFloat(document.getElementById('local-silence-duration')?.value || '0.8'),
-        pre_speech_duration: parseFloat(document.getElementById('local-pre-speech-duration')?.value || '0.2'),
         incremental_asr: document.getElementById('local-incremental-asr')?.checked ?? true,
         interim_interval: parseFloat(document.getElementById('local-interim-interval')?.value || '2'),
     };
@@ -130,24 +124,6 @@ function applyLocalAsrConfig(config) {
     if (document.getElementById('local-asr-engine')) {
         document.getElementById('local-asr-engine').value = config.engine || 'sensevoice';
     }
-    if (document.getElementById('local-vad-mode')) {
-        document.getElementById('local-vad-mode').value = config.vad_mode || 'silero';
-    }
-    if (document.getElementById('local-vad-threshold')) {
-        document.getElementById('local-vad-threshold').value = config.vad_threshold ?? 0.5;
-    }
-    if (document.getElementById('local-min-speech-duration')) {
-        document.getElementById('local-min-speech-duration').value = config.min_speech_duration ?? 1.0;
-    }
-    if (document.getElementById('local-max-speech-duration')) {
-        document.getElementById('local-max-speech-duration').value = config.max_speech_duration ?? 30.0;
-    }
-    if (document.getElementById('local-silence-duration')) {
-        document.getElementById('local-silence-duration').value = config.silence_duration ?? 0.8;
-    }
-    if (document.getElementById('local-pre-speech-duration')) {
-        document.getElementById('local-pre-speech-duration').value = config.pre_speech_duration ?? 0.2;
-    }
     if (document.getElementById('local-incremental-asr')) {
         document.getElementById('local-incremental-asr').checked = config.incremental_asr ?? true;
     }
@@ -155,6 +131,44 @@ function applyLocalAsrConfig(config) {
         document.getElementById('local-interim-interval').value = config.interim_interval ?? 2.0;
     }
     updateLocalAsrEngineHint();
+}
+
+// 统一 VAD 配置（始终存在，控制在线 API 门控与本地 ASR 分段）
+function getVadConfigFromForm() {
+    return {
+        enabled: document.getElementById('vad-enabled')?.checked ?? true,
+        mode: document.getElementById('vad-mode')?.value || 'silero',
+        threshold: parseFloat(document.getElementById('vad-threshold')?.value || '0.5'),
+        min_speech_duration: parseFloat(document.getElementById('vad-min-speech-duration')?.value || '1'),
+        max_speech_duration: parseFloat(document.getElementById('vad-max-speech-duration')?.value || '30'),
+        silence_duration: parseFloat(document.getElementById('vad-silence-duration')?.value || '0.8'),
+        pre_speech_duration: parseFloat(document.getElementById('vad-pre-speech-duration')?.value || '0.2'),
+    };
+}
+
+function applyVadConfig(config) {
+    if (!config) return;
+    if (document.getElementById('vad-enabled')) {
+        document.getElementById('vad-enabled').checked = config.enabled ?? true;
+    }
+    if (document.getElementById('vad-mode')) {
+        document.getElementById('vad-mode').value = config.mode || 'silero';
+    }
+    if (document.getElementById('vad-threshold')) {
+        document.getElementById('vad-threshold').value = config.threshold ?? 0.5;
+    }
+    if (document.getElementById('vad-min-speech-duration')) {
+        document.getElementById('vad-min-speech-duration').value = config.min_speech_duration ?? 1.0;
+    }
+    if (document.getElementById('vad-max-speech-duration')) {
+        document.getElementById('vad-max-speech-duration').value = config.max_speech_duration ?? 30.0;
+    }
+    if (document.getElementById('vad-silence-duration')) {
+        document.getElementById('vad-silence-duration').value = config.silence_duration ?? 0.8;
+    }
+    if (document.getElementById('vad-pre-speech-duration')) {
+        document.getElementById('vad-pre-speech-duration').value = config.pre_speech_duration ?? 0.2;
+    }
 }
 
 function ensureLocalAsrBackendOption() {
@@ -2303,9 +2317,6 @@ function loadConfigFromLocalStorage() {
             if (config.mic_control) {
                 document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control ?? true;
                 document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds || 0.2;
-                if (document.getElementById('local-vad-gating')) {
-                    document.getElementById('local-vad-gating').checked = config.mic_control.enable_vad_gating ?? false;
-                }
 
                 const micSelect = document.getElementById('mic-device');
                 if (micSelect) {
@@ -2317,9 +2328,6 @@ function loadConfigFromLocalStorage() {
             if (config.asr) {
                 document.getElementById('asr-backend').value = sanitizeAsrBackendValue(config.asr.preferred_backend || 'qwen');
                 document.getElementById('enable-hot-words').checked = config.asr.enable_hot_words ?? true;
-                document.getElementById('enable-vad').checked = config.asr.enable_vad ?? true;
-                document.getElementById('vad-threshold').value = config.asr.vad_threshold || 0.2;
-                document.getElementById('vad-silence-duration').value = config.asr.vad_silence_duration_ms || 800;
 
                 // 加载国际版设置
                 const useInternational = config.asr.use_international_endpoint ?? false;
@@ -2327,6 +2335,8 @@ function loadConfigFromLocalStorage() {
                 localStorage.setItem('use_international_endpoint', useInternational.toString());
                 updateAsrOptionsForInternational(useInternational);
             }
+
+            applyVadConfig(config.vad || {});
 
             if (isLocalAsrUiEnabled()) {
                 applyLocalAsrConfig(config.local_asr || {});
@@ -2475,20 +2485,22 @@ function loadDefaultConfig() {
     // ASR 配置
     document.getElementById('asr-backend').value = 'qwen';
     document.getElementById('enable-hot-words').checked = true;
-    document.getElementById('enable-vad').checked = true;
-    document.getElementById('vad-threshold').value = 0.2;
-    document.getElementById('vad-silence-duration').value = 800;
     document.getElementById('use-international-endpoint').checked = false;
+
+    // 统一 VAD 配置
+    applyVadConfig({
+        enabled: true,
+        mode: 'silero',
+        threshold: 0.50,
+        min_speech_duration: 1.0,
+        max_speech_duration: 30.0,
+        silence_duration: 0.8,
+        pre_speech_duration: 0.2,
+    });
 
     if (isLocalAsrUiEnabled()) {
         applyLocalAsrConfig({
             engine: 'sensevoice',
-            vad_mode: 'silero',
-            vad_threshold: 0.50,
-            min_speech_duration: 1.0,
-            max_speech_duration: 30.0,
-            silence_duration: 0.8,
-            pre_speech_duration: 0.2,
             incremental_asr: true,
             interim_interval: 2.0,
         });
@@ -2600,9 +2612,6 @@ function applyServerConfigPayload(config) {
 
     document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control;
     document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds;
-    if (document.getElementById('local-vad-gating')) {
-        document.getElementById('local-vad-gating').checked = config.mic_control.enable_vad_gating ?? false;
-    }
     const micSelect = document.getElementById('mic-device');
     if (micSelect && config.mic_control) {
         const idx = config.mic_control.mic_device_index;
@@ -2611,9 +2620,7 @@ function applyServerConfigPayload(config) {
 
     document.getElementById('asr-backend').value = sanitizeAsrBackendValue(config.asr.preferred_backend);
     document.getElementById('enable-hot-words').checked = config.asr.enable_hot_words;
-    document.getElementById('enable-vad').checked = config.asr.enable_vad;
-    document.getElementById('vad-threshold').value = config.asr.vad_threshold;
-    document.getElementById('vad-silence-duration').value = config.asr.vad_silence_duration_ms;
+    applyVadConfig(config.vad || {});
     const useInternational = config.asr.use_international_endpoint ?? false;
     document.getElementById('use-international-endpoint').checked = useInternational;
     localStorage.setItem('use_international_endpoint', useInternational.toString());
@@ -2794,7 +2801,6 @@ function saveConfigToLocalStorage() {
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
                 mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value),
-                enable_vad_gating: document.getElementById('local-vad-gating')?.checked ?? false,
                 mic_device_index: (() => {
                     const v = document.getElementById('mic-device') ? document.getElementById('mic-device').value : '';
                     return v === '' ? null : parseInt(v);
@@ -2803,11 +2809,9 @@ function saveConfigToLocalStorage() {
             asr: {
                 preferred_backend: sanitizeAsrBackendValue(document.getElementById('asr-backend').value),
                 enable_hot_words: document.getElementById('enable-hot-words').checked,
-                enable_vad: document.getElementById('enable-vad').checked,
-                vad_threshold: parseFloat(document.getElementById('vad-threshold').value),
-                vad_silence_duration_ms: parseInt(document.getElementById('vad-silence-duration').value),
                 use_international_endpoint: document.getElementById('use-international-endpoint').checked,
             },
+            vad: getVadConfigFromForm(),
             language_detector: {
                 type: document.getElementById('language-detector').value,
             },
@@ -3014,7 +3018,6 @@ async function saveConfig(autoSave = false) {
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
                 mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value),
-                enable_vad_gating: document.getElementById('local-vad-gating')?.checked ?? false,
                 mic_device_index: (() => {
                     const v = document.getElementById('mic-device') ? document.getElementById('mic-device').value : '';
                     return v === '' ? null : parseInt(v);
@@ -3023,11 +3026,9 @@ async function saveConfig(autoSave = false) {
             asr: {
                 preferred_backend: sanitizeAsrBackendValue(document.getElementById('asr-backend').value),
                 enable_hot_words: document.getElementById('enable-hot-words').checked,
-                enable_vad: document.getElementById('enable-vad').checked,
-                vad_threshold: parseFloat(document.getElementById('vad-threshold').value),
-                vad_silence_duration_ms: parseInt(document.getElementById('vad-silence-duration').value),
                 use_international_endpoint: document.getElementById('use-international-endpoint').checked,
             },
+            vad: getVadConfigFromForm(),
             language_detector: {
                 type: document.getElementById('language-detector').value,
             },

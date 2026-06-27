@@ -156,6 +156,16 @@ async def stop_recognition_async(state):
     except Exception:
         pass
 
+    # 闭麦时重置本地 VAD 状态与缓存，确保下一次开麦时有干净的历史
+    if state.vad_processor is not None:
+        try:
+            state.vad_processor.reset()
+        except Exception:
+            pass
+    state._vad_was_speaking = False
+    import numpy as np
+    state._vad_pending_samples = np.array([], dtype=np.float32)
+
     state.bump_audio_send_generation()
 
 
@@ -313,10 +323,13 @@ async def main(
     # 初始化语言检测器
     state.language_detector = _create_language_detector()
 
-    # ---- 本地 VAD 发送门控（实验性, 先于翻译器初始化, 不依赖翻译器） ----
-    _vad_enabled = config.ENABLE_LOCAL_VAD_GATING
+    # ---- 统一 VAD：在线 API 发送门控（本地 ASR 走识别器内部 VAD，此处不处理） ----
+    # 门控仅对在线后端生效：本地 ASR 需要连续音频（含静音）供其内部 VAD 分段，
+    # 因此本地后端不在采集侧做门控。
+    _online_backend = backend != 'local'
+    _vad_gating_enabled = config.VAD_ENABLED and _online_backend
 
-    if _vad_enabled:
+    if _vad_gating_enabled:
         try:
             from local_asr.model_manager import is_silero_cached, download_silero
             from local_asr.vad_processor import VADProcessor
@@ -329,14 +342,15 @@ async def main(
             state.vad_processor = VADProcessor(
                 sample_rate=config.SAMPLE_RATE,
                 threshold=config.LOCAL_VAD_THRESHOLD,
-                min_speech_duration=config.LOCAL_VAD_GATING_MIN_SPEECH_DURATION,
+                min_speech_duration=config.LOCAL_VAD_MIN_SPEECH_DURATION,
                 chunk_duration=512.0 / config.SAMPLE_RATE,
                 pre_speech_duration=config.LOCAL_VAD_PRE_SPEECH_DURATION,
             )
             state.vad_processor.update_settings({
-                'vad_mode': config.LOCAL_VAD_MODE,
+                # 在线门控固定使用 Silero（energy 模式主要面向本地 ASR）
+                'vad_mode': 'silero',
                 'vad_threshold': config.LOCAL_VAD_THRESHOLD,
-                'min_speech_duration': config.LOCAL_VAD_GATING_MIN_SPEECH_DURATION,
+                'min_speech_duration': config.LOCAL_VAD_MIN_SPEECH_DURATION,
                 'silence_duration': config.LOCAL_VAD_SILENCE_DURATION,
                 'pre_speech_duration': config.LOCAL_VAD_PRE_SPEECH_DURATION,
             })
@@ -344,13 +358,9 @@ async def main(
             import numpy as np
             state._vad_pending_samples = np.array([], dtype=np.float32)
             state._vad_was_speaking = False
-            # 门控依赖服务端 VAD 自动断句，Qwen 后端下自动开启
-            if backend == 'qwen' and not config.ENABLE_VAD:
-                config.ENABLE_VAD = True
-                print('[VAD]   [自动] 已开启 Qwen 服务端 VAD（门控需要服务端断句）')
-            print('[VAD] ✓ 本地 VAD 发送门控已启用')
+            print('[VAD] ✓ 在线 API VAD 发送门控已启用')
             print(f'[VAD]   threshold={state.vad_processor.threshold:.2f} '
-                  f'min_speech={config.LOCAL_VAD_GATING_MIN_SPEECH_DURATION:.1f}s '
+                  f'min_speech={config.LOCAL_VAD_MIN_SPEECH_DURATION:.1f}s '
                   f'silence={config.LOCAL_VAD_SILENCE_DURATION:.1f}s '
                   f'mode={state.vad_processor.mode}')
         except Exception as e:
@@ -358,8 +368,10 @@ async def main(
             print(f'[VAD] ✗ 初始化失败，VAD 门控未启用: {e}')
             traceback.print_exc()
             state.vad_enabled = False
+    elif not config.VAD_ENABLED:
+        print('[VAD] — VAD 未启用（VAD_ENABLED=False）')
     else:
-        print('[VAD] — VAD 门控未启用（ENABLE_LOCAL_VAD_GATING=False）')
+        print('[VAD] — 本地 ASR 后端：门控由识别器内部 VAD 负责，采集侧不做门控')
 
     # 初始化翻译器
     cfg = config_from_module(config)

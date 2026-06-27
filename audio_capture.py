@@ -346,8 +346,8 @@ async def audio_capture_task(state, recognizer):
                 await asyncio.sleep(0.001)
                 continue
 
-            # ── VAD 侧路分析（不阻塞主通道） ──
-            if state.vad_enabled and state.vad_processor is not None:
+            # ── VAD 侧路分析（不阻塞主通道，且仅在识别激活时进行） ──
+            if state.recognition_active and state.vad_enabled and state.vad_processor is not None:
                 try:
                     samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
                     pending = state._vad_pending_samples

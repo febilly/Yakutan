@@ -69,9 +69,15 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             chunk_duration=LOCAL_VAD_CHUNK_DURATION,
             pre_speech_duration=float(getattr(config, "LOCAL_VAD_PRE_SPEECH_DURATION", 0.2)),
         )
+        # 统一 VAD 总开关关闭时，本地识别也停用 VAD（退化为不分段）
+        vad_mode = (
+            getattr(config, "LOCAL_VAD_MODE", "silero")
+            if getattr(config, "VAD_ENABLED", True)
+            else "disabled"
+        )
         vad.update_settings(
             {
-                "vad_mode": getattr(config, "LOCAL_VAD_MODE", "silero"),
+                "vad_mode": vad_mode,
                 "vad_threshold": float(getattr(config, "LOCAL_VAD_THRESHOLD", 0.50)),
                 "min_speech_duration": float(getattr(config, "LOCAL_VAD_MIN_SPEECH_DURATION", 1.0)),
                 "silence_duration": float(getattr(config, "LOCAL_VAD_SILENCE_DURATION", 0.8)),

@@ -554,39 +554,8 @@
                                     识别语言与上方「语音识别」中的源语言一致；留空或 auto 为自动检测。
                                 </small>
                             </div>
-                            <div class="form-group">
-                                <label for="local-vad-mode" data-i18n="label.localVadMode">本地 VAD 模式</label>
-                                <select id="local-vad-mode" class="form-control" onchange="onLocalAsrSettingChange(this)"
-                                    data-restart-required="true">
-                                    <option value="silero" data-i18n="option.localVadSilero">Silero</option>
-                                    <option value="energy" data-i18n="option.localVadEnergy">能量检测</option>
-                                    <option value="disabled" data-i18n="option.localVadDisabled">禁用</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="local-vad-threshold" data-i18n="label.localVadThreshold">本地 VAD 阈值</label>
-                                <input type="number" id="local-vad-threshold" class="form-control" min="0" max="1" step="0.05"
-                                    onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
-                            </div>
-                            <div class="form-group">
-                                <label for="local-min-speech-duration" data-i18n="label.localMinSpeechDuration">最短语音时长（秒）</label>
-                                <input type="number" id="local-min-speech-duration" class="form-control" min="0.1" max="30"
-                                    step="0.1" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
-                            </div>
-                            <div class="form-group">
-                                <label for="local-max-speech-duration" data-i18n="label.localMaxSpeechDuration">单段最长语音采集（秒）</label>
-                                <input type="number" id="local-max-speech-duration" class="form-control" min="1" max="120"
-                                    step="0.5" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
-                            </div>
-                            <div class="form-group">
-                                <label for="local-silence-duration" data-i18n="label.localSilenceDuration">静音持续时间（秒）</label>
-                                <input type="number" id="local-silence-duration" class="form-control" min="0.1" max="5"
-                                    step="0.1" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
-                            </div>
-                            <div class="form-group">
-                                <label for="local-pre-speech-duration" data-i18n="label.localPreSpeechDuration">起声预缓冲（秒）</label>
-                                <input type="number" id="local-pre-speech-duration" class="form-control" min="0" max="2"
-                                    step="0.05" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <small class="form-text" data-i18n="hint.localVadMovedToAdvanced">VAD（语音活动检测）参数已移至「高级设置 → VAD」，对在线 API 与本地识别统一生效。</small>
                             </div>
                             <div class="form-group">
                                 <label class="switch-label">
@@ -810,47 +779,61 @@
                             </div>
                         </div>
 
-                        <!-- VAD设置 -->
+                        <!-- VAD设置（统一：在线 API 门控 + 本地 ASR 分段） -->
                         <div class="subsection">
-                            <h3 data-i18n="subsection.vad">VAD（语音活动检测）设置 - 仅Qwen后端</h3>
+                            <h3 data-i18n="subsection.vad">VAD（语音活动检测）</h3>
 
                             <div class="form-group">
                                 <label class="switch-label">
-                                    <span data-i18n="label.enableVad">启用VAD</span>
+                                    <span data-i18n="label.vadEnabled">启用 VAD</span>
                                     <label class="switch">
-                                        <input type="checkbox" id="enable-vad" onchange="onSettingChange()"
+                                        <input type="checkbox" id="vad-enabled" onchange="onSettingChange()"
                                             data-restart-required="true">
                                         <span class="slider"></span>
                                     </label>
                                 </label>
-                                <small class="form-text" data-i18n="hint.enableVad">自动检测语音结束并断句</small>
+                                <small class="form-text" data-i18n="hint.vadEnabled">总开关，同时控制在线 API 与本地识别。在线 API：静音时暂停发送音频以省流；本地识别：用于自动分段。</small>
                             </div>
 
                             <div class="form-group">
-                                <label class="switch-label">
-                                    <span data-i18n="label.localVadGating">本地 VAD 发送门控（省流）</span>
-                                    <label class="switch">
-                                        <input type="checkbox" id="local-vad-gating" onchange="onSettingChange()"
-                                            data-restart-required="true">
-                                        <span class="slider"></span>
-                                    </label>
-                                </label>
-                                <small class="form-text" data-i18n="hint.localVadGating">客户端 VAD 检测到静音时暂停向 ASR 发送音频，降低 API 费用。开启后自动启用服务端 VAD。</small>
+                                <label for="vad-mode" data-i18n="label.vadMode">VAD 模式（本地识别）</label>
+                                <select id="vad-mode" class="form-control" onchange="onSettingChange()"
+                                    data-restart-required="true">
+                                    <option value="silero" data-i18n="option.localVadSilero">Silero</option>
+                                    <option value="energy" data-i18n="option.localVadEnergy">能量检测</option>
+                                </select>
+                                <small class="form-text" data-i18n="hint.vadMode">本地识别使用的 VAD 算法；在线 API 门控固定使用 Silero。</small>
                             </div>
 
                             <div class="form-group">
-                                <label for="vad-threshold" data-i18n="label.vadThreshold">VAD阈值（0.0-1.0）</label>
+                                <label for="vad-threshold" data-i18n="label.vadThreshold">VAD 阈值（0.0-1.0）</label>
                                 <input type="number" id="vad-threshold" class="form-control" min="0" max="1" step="0.05"
-                                    value="0.2" onchange="onSettingChange()" data-restart-required="true">
-                                <small class="form-text" data-i18n="hint.vadThreshold">值越小越敏感，越容易触发断句</small>
+                                    onchange="onSettingChange()" data-restart-required="true">
+                                <small class="form-text" data-i18n="hint.vadThreshold">值越大越严格，越不容易把噪声判为语音</small>
                             </div>
 
                             <div class="form-group">
-                                <label for="vad-silence-duration"
-                                    data-i18n="label.vadSilenceDuration">VAD静音持续时间（毫秒）</label>
-                                <input type="number" id="vad-silence-duration" class="form-control" min="100" max="3000"
-                                    step="100" value="800" onchange="onSettingChange()" data-restart-required="true">
-                                <small class="form-text" data-i18n="hint.vadSilenceDuration">检测到此时长的静音后触发断句</small>
+                                <label for="vad-min-speech-duration" data-i18n="label.localMinSpeechDuration">最短语音时长（秒）</label>
+                                <input type="number" id="vad-min-speech-duration" class="form-control" min="0.1" max="30"
+                                    step="0.1" onchange="onSettingChange()" data-restart-required="true">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="vad-max-speech-duration" data-i18n="label.localMaxSpeechDuration">单段最长语音采集（秒）</label>
+                                <input type="number" id="vad-max-speech-duration" class="form-control" min="1" max="120"
+                                    step="0.5" onchange="onSettingChange()" data-restart-required="true">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="vad-silence-duration" data-i18n="label.localSilenceDuration">静音持续时间（秒）</label>
+                                <input type="number" id="vad-silence-duration" class="form-control" min="0.1" max="5"
+                                    step="0.1" onchange="onSettingChange()" data-restart-required="true">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="vad-pre-speech-duration" data-i18n="label.localPreSpeechDuration">起声预缓冲（秒）</label>
+                                <input type="number" id="vad-pre-speech-duration" class="form-control" min="0" max="2"
+                                    step="0.05" onchange="onSettingChange()" data-restart-required="true">
                             </div>
                         </div>
 
