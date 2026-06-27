@@ -149,6 +149,8 @@
         setChecked('smart-target-secondary-enabled', false);
         // 简易模式禁用备用语言（留空即禁用）
         setTextValue('fallback-language', '');
+        // 简易模式下，固定 LLM 请求的自定义 extra_body
+        setTextValue('openai-compat-extra-body-json', '{"thinking": {"type": "disabled"}}');
         syncSimpleTranslationUi();
     }
 

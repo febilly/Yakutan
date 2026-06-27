@@ -1471,7 +1471,10 @@ function populateLLMTemplateForm(templateName) {
         modelInput.value = getStoredLLMTemplateModel(templateName);
     }
     const storedExtra = getStoredLLMTemplateExtraBody(templateName);
-    if (storedExtra !== null) {
+    const isSimpleMode = document.body.classList.contains('mode-simple');
+    if (isSimpleMode) {
+        extraBodyInput.value = '{"thinking": {"type": "disabled"}}';
+    } else if (storedExtra !== null) {
         extraBodyInput.value = storedExtra;
     } else if (Object.prototype.hasOwnProperty.call(templateConfig, 'extraBody')) {
         extraBodyInput.value = templateConfig.extraBody;
@@ -2306,7 +2309,11 @@ function loadConfigFromLocalStorage() {
                     sanitizeLLMTranslationFormality(config.translation.llm_translation_formality);
                 document.getElementById('llm-translation-style').value =
                     sanitizeLLMTranslationStyle(config.translation.llm_translation_style);
-                document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
+                if (document.body.classList.contains('mode-simple')) {
+                    document.getElementById('openai-compat-extra-body-json').value = '{"thinking": {"type": "disabled"}}';
+                } else {
+                    document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
+                }
                 setLLMParallelFastestModeSelect(
                     resolveLLMParallelFastestModeFromStoredTranslation(config.translation)
                 );
@@ -2629,7 +2636,11 @@ function applyServerConfigPayload(config) {
         sanitizeLLMTranslationFormality(config.translation.llm_translation_formality);
     document.getElementById('llm-translation-style').value =
         sanitizeLLMTranslationStyle(config.translation.llm_translation_style);
-    document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
+    if (document.body.classList.contains('mode-simple')) {
+        document.getElementById('openai-compat-extra-body-json').value = '{"thinking": {"type": "disabled"}}';
+    } else {
+        document.getElementById('openai-compat-extra-body-json').value = config.translation.openai_compat_extra_body_json || '';
+    }
     setLLMParallelFastestModeSelect(
         resolveLLMParallelFastestModeFromStoredTranslation(config.translation),
     );
@@ -2803,6 +2814,13 @@ function saveConfigToLocalStorage() {
             // 保持 hybrid
         } else if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
             actualApiType = 'openrouter_streaming';
+        }
+
+        if (document.body.classList.contains('mode-simple')) {
+            const extraInput = document.getElementById('openai-compat-extra-body-json');
+            if (extraInput && extraInput.value !== '{"thinking": {"type": "disabled"}}') {
+                extraInput.value = '{"thinking": {"type": "disabled"}}';
+            }
         }
 
         const config = {
@@ -3024,6 +3042,13 @@ async function saveConfig(autoSave = false) {
             // 保持 hybrid
         } else if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
             actualApiType = 'openrouter_streaming';
+        }
+
+        if (document.body.classList.contains('mode-simple')) {
+            const extraInput = document.getElementById('openai-compat-extra-body-json');
+            if (extraInput && extraInput.value !== '{"thinking": {"type": "disabled"}}') {
+                extraInput.value = '{"thinking": {"type": "disabled"}}';
+            }
         }
 
         const config = {
