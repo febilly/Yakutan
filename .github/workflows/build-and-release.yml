@@ -43,19 +43,14 @@ jobs:
         }
         pip install pyinstaller
     
-    - name: Prefetch Silero and Qwen vendor glue (no SenseVoice / Qwen weights in app zip)
+    - name: Prefetch Silero VAD
+      run: |
+        python -c "from local_asr.model_manager import apply_cache_env, download_silero; apply_cache_env(); download_silero()"
+
+    - name: Prefetch Qwen vendor glue (no SenseVoice / Qwen weights in app zip)
       if: matrix.variant == 'local-asr'
       run: |
-        python -c "from local_asr.model_manager import apply_cache_env, download_silero, ensure_vendor_sources; apply_cache_env(); download_silero(); ensure_vendor_sources('qwen3-asr')"
-
-    - name: Exclude Silero from standard build
-      if: matrix.variant == 'standard'
-      shell: pwsh
-      run: |
-        $silero = Join-Path "." "local_asr/models/silero_vad"
-        if (Test-Path $silero) {
-          Remove-Item -Recurse -Force $silero
-        }
+        python -c "from local_asr.model_manager import apply_cache_env, ensure_vendor_sources; apply_cache_env(); ensure_vendor_sources('qwen3-asr')"
     
     - name: Build executable with PyInstaller
       run: |
@@ -93,8 +88,8 @@ jobs:
           **提交 SHA**: ${{ steps.commit_info.outputs.sha }}
           
           **构建产物**（与本 tag 并行 job 合计）:
-          - `Yakutan-*.exe`: 标准版单文件
-          - `Yakutan-LocalASR-*.exe`: 本地识别版单文件；内置本地识别运行胶水代码。**SenseVoice / Qwen3 离线资源**：**Pack Local ASR model bundles** 工作流单独发布
+          - `Yakutan-*.exe`: 标准版单文件；内置 Silero VAD ONNX 权重
+          - `Yakutan-LocalASR-*.exe`: 本地识别版单文件；内置本地识别运行胶水代码与 Silero VAD ONNX 权重。**SenseVoice / Qwen3 离线资源**：**Pack Local ASR model bundles** 工作流单独发布
           
           **离线语音识别资源**：可从 [https://github.com/febilly/Yakutan/releases/tag/yakutan-local-asr-models-20260416-061437-ba7820c](https://github.com/febilly/Yakutan/releases/tag/yakutan-local-asr-models-20260416-061437-ba7820c) 下载，也可以在 **WebUI** 中下载。
         files: ./dist/${{ steps.commit_info.outputs.exe_name }}
@@ -117,8 +112,8 @@ jobs:
           **提交 SHA**: ${{ steps.commit_info.outputs.sha }}
           
           **构建产物**（与本 tag 并行 job 合计）:
-          - `Yakutan-*.exe`: 标准版单文件
-          - `Yakutan-LocalASR-*.exe`: 本地识别版单文件；内置本地识别运行胶水代码。**SenseVoice / Qwen3 权重与 Qwen Vulkan 运行时**：运行 **Pack Local ASR model bundles** 工作流，将生成的 zip 内 **`local_asr_models`** 解压到与 **`Yakutan-LocalASR-*.exe` 同级**
+          - `Yakutan-*.exe`: 标准版单文件；内置 Silero VAD ONNX 权重
+          - `Yakutan-LocalASR-*.exe`: 本地识别版单文件；内置本地识别运行胶水代码与 Silero VAD ONNX 权重。**SenseVoice / Qwen3 权重与 Qwen Vulkan 运行时**：运行 **Pack Local ASR model bundles** 工作流，将生成的 zip 内 **`local_asr_models`** 解压到与 **`Yakutan-LocalASR-*.exe` 同级**
           
           **离线语音识别资源**：可从 [https://github.com/febilly/Yakutan/releases/tag/untagged-1a0522a8c7f4c560a615](https://github.com/febilly/Yakutan/releases/tag/untagged-1a0522a8c7f4c560a615) 下载，也可以在 **WebUI** 中下载。
         files: ./dist/${{ steps.commit_info.outputs.exe_name }}

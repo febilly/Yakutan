@@ -13,6 +13,7 @@ block_cipher = None
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import importlib.util
+from pathlib import Path
 
 # 需要包含的数据文件（资源文件）
 datas = [
@@ -26,6 +27,11 @@ datas = [
 _pykakasi_spec = importlib.util.find_spec('pykakasi')
 if _pykakasi_spec is not None and getattr(_pykakasi_spec, 'submodule_search_locations', None):
     datas += collect_data_files('pykakasi')
+
+# CI prefetch before PyInstaller: include Silero VAD ONNX in the standard single-file build.
+_silero_vad = Path('local_asr/models/silero_vad')
+if _silero_vad.is_dir():
+    datas += [(str(_silero_vad), 'local_asr/models/silero_vad')]
 
 # 需要包含的隐藏导入
 hiddenimports = [
