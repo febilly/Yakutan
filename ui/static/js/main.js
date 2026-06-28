@@ -1865,6 +1865,24 @@ document.addEventListener('DOMContentLoaded', async function () {
         window.i18n.initI18n();
     }
 
+    const messageCloseBtn = document.getElementById('message-close');
+    if (messageCloseBtn) {
+        messageCloseBtn.addEventListener('click', () => {
+            const messageEl = document.getElementById('message');
+            if (messageEl) {
+                if (messageEl._replaceFlashTimer != null) {
+                    clearTimeout(messageEl._replaceFlashTimer);
+                    messageEl._replaceFlashTimer = null;
+                }
+                if (messageEl._hideTimer != null) {
+                    clearTimeout(messageEl._hideTimer);
+                    messageEl._hideTimer = null;
+                }
+                messageEl.className = 'message';
+            }
+        });
+    }
+
     setupLanguageComboboxes();
     await loadServerFeatures();
 
@@ -3635,14 +3653,23 @@ async function resetToDefaults() {
     }
 }
 
-// 显示消息（不自动消失，仅被后续 showMessage 覆盖）
+// 显示消息（10秒后自动消失，或被后续 showMessage 覆盖）
 function showMessage(text, type) {
     const messageEl = document.getElementById('message');
+    const messageTextEl = document.getElementById('message-text');
     if (messageEl._replaceFlashTimer != null) {
         clearTimeout(messageEl._replaceFlashTimer);
         messageEl._replaceFlashTimer = null;
     }
-    messageEl.textContent = text;
+    if (messageEl._hideTimer != null) {
+        clearTimeout(messageEl._hideTimer);
+        messageEl._hideTimer = null;
+    }
+    if (messageTextEl) {
+        messageTextEl.textContent = text;
+    } else {
+        messageEl.textContent = text;
+    }
     messageEl.className = 'message ' + type;
     messageEl.classList.remove('message-replace-flash');
     /* 强制重排以便连续相同文案也能重播动画 */
@@ -3652,6 +3679,12 @@ function showMessage(text, type) {
         messageEl.classList.remove('message-replace-flash');
         messageEl._replaceFlashTimer = null;
     }, 520);
+
+    // 10秒后自动隐藏消息
+    messageEl._hideTimer = setTimeout(() => {
+        messageEl.className = 'message';
+        messageEl._hideTimer = null;
+    }, 10000);
 }
 
 // 显示本地化消息（使用消息ID）

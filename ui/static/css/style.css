@@ -210,10 +210,10 @@ body.mode-simple #advanced-view {
     box-shadow: var(--focus-ring-shadow);
 }
 
-/* ---------------- 全局消息（页面底部悬浮提示） ---------------- */
+/* ---------------- 全局消息（页面顶部悬浮提示，位于顶栏下方） ---------------- */
 .toast-area {
     position: fixed;
-    bottom: 16px;
+    top: 70px;
     left: 50%;
     transform: translateX(-50%);
     width: min(720px, calc(100% - 32px));
@@ -222,7 +222,8 @@ body.mode-simple #advanced-view {
 }
 
 .message {
-    padding: 0 15px;
+    position: relative;
+    padding: 0 35px 0 15px;
     border-radius: var(--radius-sm);
     font-size: 14px;
     white-space: pre-line;
@@ -231,6 +232,10 @@ body.mode-simple #advanced-view {
     overflow: hidden;
     box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
     transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
+    pointer-events: auto;
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 auto;
 }
 
 .message.success {
@@ -239,7 +244,7 @@ body.mode-simple #advanced-view {
     border: 1px solid #bbf7d0;
     max-height: 260px;
     opacity: 1;
-    padding: 10px 15px;
+    padding: 10px 35px 10px 15px;
 }
 
 .message.warning {
@@ -248,7 +253,7 @@ body.mode-simple #advanced-view {
     border: 1px solid #fde68a;
     max-height: 260px;
     opacity: 1;
-    padding: 10px 15px;
+    padding: 10px 35px 10px 15px;
 }
 
 .message.error {
@@ -257,7 +262,27 @@ body.mode-simple #advanced-view {
     border: 1px solid #fecaca;
     max-height: 260px;
     opacity: 1;
-    padding: 10px 15px;
+    padding: 10px 35px 10px 15px;
+}
+
+.message-close {
+    position: absolute;
+    top: 9px;
+    right: 10px;
+    background: none;
+    border: none;
+    font-size: 18px;
+    font-weight: bold;
+    color: inherit;
+    opacity: 0.5;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    transition: opacity 0.2s ease;
+}
+
+.message-close:hover {
+    opacity: 0.9;
 }
 
 /* 新消息覆盖旧消息时的强调动画（文案相同时也能感知刷新） */
