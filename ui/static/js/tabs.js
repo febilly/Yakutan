@@ -136,9 +136,7 @@
         // 翻译：LLM 流式 + DeepSeek 模板
         setSelectValue('translation-api-type', 'openrouter');
         setChecked('openrouter-streaming-mode', true);
-        const tplBtn = document.querySelector('[data-llm-template="deepseek-v4-flash"]');
-        if (tplBtn && tplBtn.getAttribute('aria-pressed') !== 'true'
-            && typeof window.applyLLMTemplate === 'function') {
+        if (typeof window.applyLLMTemplate === 'function') {
             window.applyLLMTemplate('deepseek-v4-flash');
         }
         // 正式程度中 + 标准语气
