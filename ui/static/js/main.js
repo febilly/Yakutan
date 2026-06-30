@@ -151,11 +151,11 @@ function resolveVadConfig(config = {}) {
     const legacyLocalAsr = config.local_asr || {};
     const legacyMic = config.mic_control || {};
     const vad = config.vad || {};
+    const hasUnifiedVadEnabled = Object.prototype.hasOwnProperty.call(vad, 'enabled');
     return {
         enabled:
-            vad.enabled ??
+            (hasUnifiedVadEnabled ? vad.enabled : undefined) ??
             (legacyMic.enable_vad_gating === true ? true : undefined) ??
-            legacyAsr.enable_vad ??
             true,
         mode: vad.mode || legacyLocalAsr.vad_mode || 'silero',
         threshold:
