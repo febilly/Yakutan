@@ -3350,6 +3350,20 @@ function buildUdpPortBlockUserMessage(payload, t) {
     return `${detail} ${t('msg.udpPortBlockedCancel')}`;
 }
 
+function buildVrchatOscNotListeningWarning(payload, t) {
+    if (!payload || payload.vrchat_osc_listening === true) {
+        return '';
+    }
+    if (!payload.vrchat_osc_warning_message_id && !payload.vrchat_osc_warning_message) {
+        return '';
+    }
+    const oscPort = payload.osc_udp_port ?? 9000;
+    const localized = t('msg.vrchatOscNotListeningWarning', { port: oscPort });
+    if (localized && localized !== 'msg.vrchatOscNotListeningWarning') {
+        return localized;
+    }
+    return payload.vrchat_osc_warning_message || '';
+}
 
 async function fetchOscUdpPortCheck() {
     const res = await fetch(`${API_BASE}/udp-port-check`);
@@ -3574,11 +3588,15 @@ async function startService() {
                 result.accelerator_warning_message_id,
                 result.accelerator_warning_message,
             );
+            const vrchatOscWarning = buildVrchatOscNotListeningWarning(result, t);
             const hasPendingWarning = !!pendingWarningMessage;
             if (hasPendingWarning) {
                 showMessage('⚠️ ' + pendingWarningMessage, 'warning');
             }
             showMessage('✅ ' + t('msg.serviceStarting'), 'success');
+            if (vrchatOscWarning) {
+                showMessage('⚠️ ' + vrchatOscWarning, 'warning');
+            }
             if (acceleratorWarning) {
                 showMessage('⚠️ ' + acceleratorWarning, 'warning');
             }

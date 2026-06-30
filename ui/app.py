@@ -20,7 +20,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from audio_runtime_guard import hold_portaudio, _suppress_stderr
 from text_processor import sanitize_text_fancy_style
-from udp_port_check import get_non_vrchat_udp_port_occupants
+from udp_port_check import (
+    get_non_vrchat_udp_port_occupants,
+    get_vrchat_udp_port_occupants,
+)
 from vrcx_context_bridge import (
     build_console_script,
     get_status as get_vrcx_bridge_status,
@@ -207,13 +210,45 @@ def _osc_udp_port_status_payload() -> dict:
             "udp_port_conflicts": [],
             "port_clear": True,
             "skipped_due_to_compat_mode": True,
+            "vrchat_udp_port_occupants": [],
+            "vrchat_osc_listening": True,
         }
     conflicts = get_non_vrchat_udp_port_occupants(port)
+    vrchat_occupants = get_vrchat_udp_port_occupants(port)
     return {
         "osc_udp_port": port,
         "udp_port_conflicts": conflicts,
         "port_clear": len(conflicts) == 0,
         "skipped_due_to_compat_mode": False,
+        "vrchat_udp_port_occupants": vrchat_occupants,
+        "vrchat_osc_listening": len(vrchat_occupants) > 0,
+    }
+
+
+def _vrchat_osc_warning_payload(udp_status: Optional[dict] = None) -> dict:
+    """VRChat 未监听 OSC 目标 UDP 端口时返回非阻断启动提示。"""
+    if bool(getattr(config, 'OSC_COMPAT_MODE', False)):
+        return {
+            'vrchat_osc_warning_message_id': None,
+            'vrchat_osc_warning_message': '',
+        }
+    status = udp_status if udp_status is not None else _osc_udp_port_status_payload()
+    if bool(status.get('vrchat_osc_listening', False)):
+        return {
+            'vrchat_osc_warning_message_id': None,
+            'vrchat_osc_warning_message': '',
+        }
+    port = status.get('osc_udp_port', _osc_udp_port())
+    return {
+        'vrchat_osc_warning_message_id': 'msg.vrchatOscNotListeningWarning',
+        'vrchat_osc_warning_message': (
+            f'未检测到 VRChat 正在监听本机 UDP {port} 端口。'
+            '您可能未启动游戏，或未开启 OSC 端口。'
+            '如需开启，请在游戏轮盘菜单的 Options（选项）里的 OSC 中打开开关。'
+        ),
+        'vrchat_osc_listening': False,
+        'osc_udp_port': port,
+        'vrchat_udp_port_occupants': status.get('vrchat_udp_port_occupants', []),
     }
 
 
@@ -1165,6 +1200,7 @@ def start_service():
     )
     if bool(getattr(config, 'OSC_COMPAT_MODE', False)):
         bypass_udp = True
+    udp_status = None
     if not bypass_udp:
         udp_status = _osc_udp_port_status_payload()
         if not udp_status['port_clear']:
@@ -1197,6 +1233,7 @@ def start_service():
             os.environ['DOUBAO_API_KEY'] = api_keys['doubao']
 
         accelerator_warning = _accelerator_window_warning_payload()
+        vrchat_osc_warning = _vrchat_osc_warning_payload(udp_status)
         backend = _sanitize_preferred_backend(config.PREFERRED_ASR_BACKEND)
         _set_service_status(
             lifecycle='starting',
@@ -1212,6 +1249,7 @@ def start_service():
             'lifecycle': 'starting',
             'message': '服务已启动',
             **accelerator_warning,
+            **vrchat_osc_warning,
         })
     except Exception as e:
         _set_service_status(lifecycle='stopped', recognition_active=False)

@@ -182,9 +182,9 @@ def _collect_udp_owners(port: int) -> List[Dict[str, object]]:
     return _lsof_udp_owners(port)
 
 
-def get_non_vrchat_udp_port_occupants(port: int) -> List[Dict[str, object]]:
+def get_udp_port_occupants(port: int) -> List[Dict[str, object]]:
     """
-    返回占用本机 UDP `port` 的进程列表（排除 VRChat），元素为 {'pid', 'name'}。
+    返回占用本机 UDP `port` 的进程列表，元素为 {'pid', 'name'}。
     检测失败时返回空列表，不阻断服务启动。
     """
     try:
@@ -197,5 +197,24 @@ def get_non_vrchat_udp_port_occupants(port: int) -> List[Dict[str, object]]:
         raw = _collect_udp_owners(p)
     except Exception:
         return []
-    merged = _dedupe_entries(raw)
-    return [e for e in merged if not _is_vrchat_process(str(e.get("name", "")))]
+    return _dedupe_entries(raw)
+
+
+def get_non_vrchat_udp_port_occupants(port: int) -> List[Dict[str, object]]:
+    """
+    返回占用本机 UDP `port` 的进程列表（排除 VRChat），元素为 {'pid', 'name'}。
+    """
+    return [
+        e for e in get_udp_port_occupants(port)
+        if not _is_vrchat_process(str(e.get("name", "")))
+    ]
+
+
+def get_vrchat_udp_port_occupants(port: int) -> List[Dict[str, object]]:
+    """
+    返回正在监听本机 UDP `port` 的 VRChat 进程列表，元素为 {'pid', 'name'}。
+    """
+    return [
+        e for e in get_udp_port_occupants(port)
+        if _is_vrchat_process(str(e.get("name", "")))
+    ]
