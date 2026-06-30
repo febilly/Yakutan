@@ -1933,20 +1933,14 @@ document.addEventListener('DOMContentLoaded', async function () {
         window.i18n.initI18n();
     }
 
-    const messageCloseBtn = document.getElementById('message-close');
-    if (messageCloseBtn) {
-        messageCloseBtn.addEventListener('click', () => {
-            const messageEl = document.getElementById('message');
+    const toastArea = document.getElementById('toast-area');
+    if (toastArea) {
+        toastArea.addEventListener('click', (event) => {
+            const closeBtn = event.target.closest('.message-close');
+            if (!closeBtn) return;
+            const messageEl = closeBtn.closest('.message');
             if (messageEl) {
-                if (messageEl._replaceFlashTimer != null) {
-                    clearTimeout(messageEl._replaceFlashTimer);
-                    messageEl._replaceFlashTimer = null;
-                }
-                if (messageEl._hideTimer != null) {
-                    clearTimeout(messageEl._hideTimer);
-                    messageEl._hideTimer = null;
-                }
-                messageEl.className = 'message';
+                dismissToastMessage(messageEl);
             }
         });
     }
@@ -3356,6 +3350,7 @@ function buildUdpPortBlockUserMessage(payload, t) {
     return `${detail} ${t('msg.udpPortBlockedCancel')}`;
 }
 
+
 async function fetchOscUdpPortCheck() {
     const res = await fetch(`${API_BASE}/udp-port-check`);
     if (!res.ok) {
@@ -3580,15 +3575,13 @@ async function startService() {
                 result.accelerator_warning_message,
             );
             const hasPendingWarning = !!pendingWarningMessage;
-            const startMessageLines = [];
             if (hasPendingWarning) {
-                startMessageLines.push('⚠️ ' + pendingWarningMessage);
+                showMessage('⚠️ ' + pendingWarningMessage, 'warning');
             }
-            startMessageLines.push('✅ ' + t('msg.serviceStarting'));
+            showMessage('✅ ' + t('msg.serviceStarting'), 'success');
             if (acceleratorWarning) {
-                startMessageLines.push('⚠️ ' + acceleratorWarning);
+                showMessage('⚠️ ' + acceleratorWarning, 'warning');
             }
-            showMessage(startMessageLines.join('\n'), hasPendingWarning ? 'warning' : 'success');
             pendingWarningMessage = null;
             await updateStatus();
             setTimeout(updateStatus, 500);
@@ -3731,10 +3724,8 @@ async function resetToDefaults() {
     }
 }
 
-// 显示消息（10秒后自动消失，或被后续 showMessage 覆盖）
-function showMessage(text, type) {
-    const messageEl = document.getElementById('message');
-    const messageTextEl = document.getElementById('message-text');
+function dismissToastMessage(messageEl) {
+    if (!messageEl) return;
     if (messageEl._replaceFlashTimer != null) {
         clearTimeout(messageEl._replaceFlashTimer);
         messageEl._replaceFlashTimer = null;
@@ -3743,26 +3734,79 @@ function showMessage(text, type) {
         clearTimeout(messageEl._hideTimer);
         messageEl._hideTimer = null;
     }
-    if (messageTextEl) {
-        messageTextEl.textContent = text;
-    } else {
-        messageEl.textContent = text;
+    delete messageEl.dataset.signature;
+    messageEl.className = 'message';
+    setTimeout(() => {
+        if (messageEl.parentNode) {
+            messageEl.parentNode.removeChild(messageEl);
+        }
+    }, 320);
+}
+
+function flashToastMessage(messageEl) {
+    if (!messageEl) return;
+    if (messageEl._replaceFlashTimer != null) {
+        clearTimeout(messageEl._replaceFlashTimer);
+        messageEl._replaceFlashTimer = null;
     }
-    messageEl.className = 'message ' + type;
     messageEl.classList.remove('message-replace-flash');
-    /* 强制重排以便连续相同文案也能重播动画 */
     void messageEl.offsetWidth;
     messageEl.classList.add('message-replace-flash');
     messageEl._replaceFlashTimer = setTimeout(() => {
         messageEl.classList.remove('message-replace-flash');
         messageEl._replaceFlashTimer = null;
     }, 520);
+}
 
-    // 10秒后自动隐藏消息
-    messageEl._hideTimer = setTimeout(() => {
-        messageEl.className = 'message';
+function scheduleToastAutoHide(messageEl, type) {
+    if (!messageEl) return;
+    if (messageEl._hideTimer != null) {
+        clearTimeout(messageEl._hideTimer);
         messageEl._hideTimer = null;
-    }, 10000);
+    }
+    if (type === 'success') {
+        messageEl._hideTimer = setTimeout(() => {
+            dismissToastMessage(messageEl);
+        }, 10000);
+    }
+}
+
+// 显示消息：不同消息可同时展示；相同消息刷新已有 toast，避免重复堆叠。
+// success 自动消失；warning/error 保留到用户关闭。
+function showMessage(text, type) {
+    const toastArea = document.getElementById('toast-area');
+    if (!toastArea) return;
+
+    const signature = `${type}\u0000${text}`;
+    const existing = Array.from(toastArea.querySelectorAll('.message')).find(
+        (el) => el.dataset.signature === signature,
+    );
+    if (existing) {
+        flashToastMessage(existing);
+        scheduleToastAutoHide(existing, type);
+        return;
+    }
+
+    const messageEl = document.createElement('div');
+    messageEl.className = 'message';
+    messageEl.dataset.signature = signature;
+
+    const messageTextEl = document.createElement('span');
+    messageTextEl.className = 'message-text';
+    messageTextEl.textContent = text;
+    messageEl.appendChild(messageTextEl);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'message-close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = '&times;';
+    messageEl.appendChild(closeBtn);
+
+    toastArea.appendChild(messageEl);
+    messageEl.className = 'message ' + type;
+    flashToastMessage(messageEl);
+    scheduleToastAutoHide(messageEl, type);
 }
 
 // 显示本地化消息（使用消息ID）
