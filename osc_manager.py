@@ -611,16 +611,45 @@ class OSCManager:
         with self._state_lock:
             self._message_history.clear()
 
+    def _send_high_priority_chatbox_update(self, text: str, ongoing: bool = False):
+        """Queue an urgent chatbox update while still respecting send cooldown."""
+        message = QueuedMessage(
+            text=text,
+            ongoing=ongoing,
+            priority=PRIORITY_HIGH,
+            timestamp=time.time(),
+        )
+
+        send_now = None
+
+        with self._state_lock:
+            now = time.time()
+            elapsed = now - self._last_send_time
+            can_send_now = elapsed >= self._cooldown_seconds and self._pending_message is None
+
+            if can_send_now:
+                self._last_send_time = now
+                send_now = message
+            else:
+                if self._pending_message is not None:
+                    logger.debug(
+                        "[OSC] Replaced pending message priority %s -> %s",
+                        self._pending_message.priority,
+                        message.priority,
+                    )
+                else:
+                    logger.debug("[OSC] Added pending high-priority chatbox update")
+
+                self._pending_message = message
+                self._schedule_pending_send_locked()
+
+        if send_now is not None:
+            self._send_message_immediately(send_now.text, send_now.ongoing)
+
     async def clear_chatbox(self):
-        """清空 VRChat 聊天框：清理内部历史与待发消息，并发送空字符串。"""
+        """清空 VRChat 聊天框：清理内部历史，并高优先级排队发送空字符串。"""
         # 清理内部状态，避免随后又把旧内容拼接发送出去
         self.clear_history()
-        with self._state_lock:
-            if self._pending_timer is not None:
-                self._pending_timer.cancel()
-                self._pending_timer = None
-            self._pending_message = None
-            self._last_send_time = time.time()
 
         # IPC 委托模式：通过 IPC 发送空字符串
         if (self._ipc_client is not None
@@ -630,8 +659,8 @@ class OSCManager:
             self._emit("[OSC] Chatbox cleared (via IPC)")
             return
 
-        # 直接通过 UDP 发送空字符串清空聊天框
-        self._send_message_immediately("", False)
+        # 直接通过 UDP 高优先级发送空字符串清空聊天框，但仍遵守发送冷却
+        self._send_high_priority_chatbox_update("", False)
         self._emit("[OSC] Chatbox cleared")
 
     def add_message_and_send(self, text: str, ongoing: bool = False, speaker: Optional[str] = None):

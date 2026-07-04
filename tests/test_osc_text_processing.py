@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import patch
 
-from osc_manager import OSCManager
+from osc_manager import HistoryMessage, OSCManager, PRIORITY_HIGH, PRIORITY_LOW, QueuedMessage
 from text_processor import (
     ARABIC_OSC_LINE_MAX_CHARS,
     ARABIC_PDI,
@@ -58,6 +59,39 @@ def test_ipc_delegate_path_truncates_after_osc_post_processing():
     assert len(sent_text) == 144
     assert sent_text.startswith(ARABIC_RLI)
     assert sent_text.endswith(ARABIC_PDI)
+
+
+def test_clear_chatbox_queues_empty_message_as_high_priority_during_cooldown():
+    manager = OSCManager(truncate_messages=True)
+    manager.clear_ipc_client()
+    manager.reset_runtime_state()
+    manager._last_send_time = time.time()
+    manager._pending_message = QueuedMessage(
+        text="old subtitle",
+        ongoing=True,
+        priority=PRIORITY_LOW,
+        timestamp=time.time(),
+    )
+    manager._message_history.append(
+        HistoryMessage(text="old history", timestamp=time.time(), speaker="?")
+    )
+
+    try:
+        with (
+            patch.object(manager, "_schedule_pending_send_locked") as mock_schedule,
+            patch.object(manager, "_send_message_immediately") as mock_send,
+        ):
+            asyncio.run(manager.clear_chatbox())
+
+        mock_send.assert_not_called()
+        mock_schedule.assert_called_once()
+        assert manager._pending_message is not None
+        assert manager._pending_message.text == ""
+        assert manager._pending_message.ongoing is False
+        assert manager._pending_message.priority == PRIORITY_HIGH
+        assert manager._message_history == []
+    finally:
+        manager.reset_runtime_state()
 
 
 def test_truncate_plain_text_drops_front_within_limit():
