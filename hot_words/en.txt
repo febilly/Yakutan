@@ -1,11 +1,5 @@
 CompSci
-ChatGPT
-Claude
-Gemini
-Deepseek
 VRChat
-VRC
-VRC plus
 Avatar
 World
 VR headset
@@ -15,7 +9,6 @@ Pat
 Booth
 Japan Shrine
 FUJIYAMA
-Tutorial World
 Poppy Street
 Chinese Bar
 Kipfel
@@ -34,7 +27,6 @@ Lime
 Plum
 Eku
 Deltaflair
-emo
 MMD
 DeepL
 Unity
