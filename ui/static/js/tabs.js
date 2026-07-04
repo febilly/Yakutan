@@ -142,6 +142,9 @@
         // 正式程度中 + 标准语气
         setSelectValue('llm-translation-formality', 'medium');
         setSelectValue('llm-translation-style', 'standard');
+        // 简易模式保留常用质量增强项开启，即使本地旧配置曾关闭过。
+        setChecked('enable-arabic-reshaper', true);
+        setChecked('enable-hot-words', true);
         // 不使用自动目标语言推断
         setChecked('smart-target-primary-enabled', false);
         setChecked('smart-target-secondary-enabled', false);
