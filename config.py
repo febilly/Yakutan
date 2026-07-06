@@ -320,7 +320,7 @@ TERMINOLOGY_ENABLED = True
 MIC_DEVICE_INDEX = None
 
 # 是否考虑游戏内麦克风的开关情况
-ENABLE_MIC_CONTROL = True  # True: 根据 VRChat 麦克风状态控制识别的启动/停止
+ENABLE_MIC_CONTROL = False  # True: 根据 VRChat 麦克风状态控制识别的启动/停止
                            # False: 程序启动时立即开始识别,忽略麦克风开关消息
 
 # 收到静音消息后延迟停止识别的秒数

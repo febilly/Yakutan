@@ -2441,7 +2441,7 @@ function loadConfigFromLocalStorage() {
             }
 
             if (config.mic_control) {
-                document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control ?? true;
+                document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control ?? false;
                 document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds || 0.2;
                 document.getElementById('enable-double-mute-clear').checked = config.mic_control.enable_double_mute_clear ?? true;
 
@@ -2602,7 +2602,7 @@ function loadDefaultConfig() {
     if (showTag) showTag.checked = true;
 
     // 麦克风控制
-    document.getElementById('enable-mic-control').checked = true;
+    document.getElementById('enable-mic-control').checked = false;
     document.getElementById('mute-delay').value = 0.2;
     document.getElementById('enable-double-mute-clear').checked = true;
 

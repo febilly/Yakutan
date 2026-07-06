@@ -1409,7 +1409,7 @@ def get_defaults():
             'enable_reverse_translation': False,
         },
         'mic_control': {
-            'enable_mic_control': True,
+            'enable_mic_control': False,
             'mute_delay_seconds': 0.2,
             'enable_double_mute_clear': True,
         },
