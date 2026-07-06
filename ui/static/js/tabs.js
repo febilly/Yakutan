@@ -145,6 +145,8 @@
         // 简易模式保留常用质量增强项开启，即使本地旧配置曾关闭过。
         setChecked('enable-arabic-reshaper', true);
         setChecked('enable-hot-words', true);
+        // 简易模式确保 VAD 开启
+        setChecked('vad-enabled', true);
         // 不使用自动目标语言推断
         setChecked('smart-target-primary-enabled', false);
         setChecked('smart-target-secondary-enabled', false);
