@@ -6,7 +6,7 @@ import os
 import threading
 from typing import List
 
-from proxy_detector import detect_system_proxy
+from proxy_detector import refresh_system_proxy_env
 
 try:
     from openai import OpenAI
@@ -36,6 +36,7 @@ class OpenAICompatClientBase:
 
         self.app_url = os.getenv("LLM_APP_URL", "") or os.getenv("OPENROUTER_APP_URL", "")
         self.app_title = os.getenv("LLM_APP_TITLE", "") or os.getenv("OPENROUTER_APP_TITLE", "")
+        self.proxy_url = None
 
         self._create_client()
 
@@ -63,10 +64,17 @@ class OpenAICompatClientBase:
             return self._api_keys[self._key_index]
 
     def _maybe_rotate_key(self) -> None:
+        self._refresh_proxy()
         next_key = self._get_next_api_key()
         if next_key != self.api_key:
             with self._client_lock:
                 if next_key != self.api_key:
+                    close = getattr(self.client, "close", None)
+                    if callable(close):
+                        try:
+                            close()
+                        except Exception:
+                            pass
                     self.api_key = next_key
                     self._create_client()
 
@@ -84,14 +92,36 @@ class OpenAICompatClientBase:
         if default_headers:
             client_kwargs["default_headers"] = default_headers
 
-        proxies = detect_system_proxy()
+        proxies = refresh_system_proxy_env()
+        self.proxy_url = None
         if proxies:
             import httpx
             proxy_url = proxies.get('https') or proxies.get('http')
             if proxy_url:
                 client_kwargs["http_client"] = httpx.Client(proxy=proxy_url)
+                self.proxy_url = proxy_url
 
         self.client = OpenAI(**client_kwargs)
+
+    def _refresh_proxy(self) -> None:
+        proxies = refresh_system_proxy_env()
+        proxy_url = None
+        if proxies:
+            proxy_url = proxies.get('https') or proxies.get('http')
+        if proxy_url != self.proxy_url:
+            with self._client_lock:
+                proxies = refresh_system_proxy_env()
+                proxy_url = None
+                if proxies:
+                    proxy_url = proxies.get('https') or proxies.get('http')
+                if proxy_url != self.proxy_url:
+                    close = getattr(self.client, "close", None)
+                    if callable(close):
+                        try:
+                            close()
+                        except Exception:
+                            pass
+                    self._create_client()
 
     def _is_openrouter_base_url(self) -> bool:
         return 'openrouter.ai' in (self.base_url or '').lower()

@@ -4,6 +4,7 @@ from contextlib import suppress
 from typing import Any, Optional
 
 from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
+from proxy_detector import refresh_system_proxy_env
 
 from .base_speech_recognizer import (
     RecognitionEvent,
@@ -81,6 +82,7 @@ class DashscopeSpeechRecognizer(SpeechRecognizer):
         return self._recognition
 
     def start(self) -> None:
+        refresh_system_proxy_env()
         self._require_recognition().start()
 
     def stop(self) -> None:

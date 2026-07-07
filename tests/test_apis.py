@@ -580,3 +580,17 @@ class TestProxyDetection:
         with patch.dict(os.environ, {"HTTPS_PROXY": "http://proxy:8080"}, clear=True):
             result = detect_system_proxy()
             assert result == "http://proxy:8080"
+
+    def test_refresh_system_proxy_clears_managed_env(self):
+        import os
+        from streaming_translation._proxy import refresh_system_proxy
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("streaming_translation._proxy.urllib.request.ProxyHandler") as mock_handler:
+                mock_handler.return_value.proxies = {"https": "http://proxy:8080"}
+                assert refresh_system_proxy() == "http://proxy:8080"
+                assert os.environ.get("HTTPS_PROXY") == "http://proxy:8080"
+
+                mock_handler.return_value.proxies = {}
+                assert refresh_system_proxy() is None
+                assert os.environ.get("HTTPS_PROXY") is None

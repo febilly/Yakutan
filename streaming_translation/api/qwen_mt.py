@@ -3,7 +3,7 @@ from typing import Optional, List, Dict
 
 from .base import BaseTranslationAPI
 from .._config import TranslationConfig
-from .._proxy import detect_system_proxy
+from .._proxy import refresh_system_proxy
 
 try:
     from openai import OpenAI
@@ -52,15 +52,34 @@ class QwenMTAPI(BaseTranslationAPI):
             )
 
         self.model = model
-        base_url = self.BASE_URL_INTERNATIONAL if use_international else self.BASE_URL
+        self.base_url = self.BASE_URL_INTERNATIONAL if use_international else self.BASE_URL
+        self._explicit_proxy_url = proxy_url
+        self.proxy_url = proxy_url if proxy_url is not None else refresh_system_proxy()
+        self.client = self._build_client()
 
-        resolved_proxy = proxy_url or detect_system_proxy()
-        client_kwargs = {"api_key": self.api_key, "base_url": base_url}
-        if resolved_proxy:
+    def _build_client(self) -> OpenAI:
+        client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
+        if self.proxy_url:
             import httpx
-            client_kwargs["http_client"] = httpx.Client(proxy=resolved_proxy)
+            client_kwargs["http_client"] = httpx.Client(proxy=self.proxy_url)
+        return OpenAI(**client_kwargs)
 
-        self.client = OpenAI(**client_kwargs)
+    def _close_client(self) -> None:
+        close = getattr(self.client, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
+
+    def _refresh_proxy(self) -> None:
+        if self._explicit_proxy_url is not None:
+            return
+        current_proxy = refresh_system_proxy()
+        if current_proxy != self.proxy_url:
+            self._close_client()
+            self.proxy_url = current_proxy
+            self.client = self._build_client()
 
     def _get_language_code(self, lang_code: str) -> str:
         code = lang_code.lower()
@@ -89,6 +108,7 @@ class QwenMTAPI(BaseTranslationAPI):
         **kwargs,
     ) -> str:
         try:
+            self._refresh_proxy()
             source_lang = self._get_language_code(source_language)
             target_lang = self._get_language_code(target_language)
 

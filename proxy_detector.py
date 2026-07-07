@@ -5,6 +5,34 @@
 import os
 import urllib.request
 
+_MANAGED_ENV_PREFIX = 'YAKUTAN_MANAGED_PROXY_'
+_PROXY_ENV_MAP = {
+    'http': ('HTTP_PROXY', 'http_proxy'),
+    'https': ('HTTPS_PROXY', 'https_proxy'),
+    'all': ('ALL_PROXY', 'all_proxy'),
+    'ws': ('WS_PROXY', 'ws_proxy'),
+    'wss': ('WSS_PROXY', 'wss_proxy'),
+    'no': ('NO_PROXY', 'no_proxy'),
+}
+
+
+def _marker_name(env_name):
+    return f'{_MANAGED_ENV_PREFIX}{env_name}'
+
+
+def _clear_managed_proxy_env():
+    """清除本程序上次自动写入的代理环境变量，保留用户手动设置的变量。"""
+    for env_names in _PROXY_ENV_MAP.values():
+        for env_name in env_names:
+            marker = _marker_name(env_name)
+            previous_value = os.environ.get(marker)
+            if previous_value is None:
+                continue
+            current_value = os.environ.get(env_name)
+            if current_value == previous_value:
+                os.environ.pop(env_name, None)
+            os.environ.pop(marker, None)
+
 
 def _normalize_proxies(proxies):
     """
@@ -90,24 +118,30 @@ def apply_system_proxy(proxies=None, override=False):
     if not resolved:
         return None
 
-    env_map = {
-        'http': ('HTTP_PROXY', 'http_proxy'),
-        'https': ('HTTPS_PROXY', 'https_proxy'),
-        'all': ('ALL_PROXY', 'all_proxy'),
-        'ws': ('WS_PROXY', 'ws_proxy'),
-        'wss': ('WSS_PROXY', 'wss_proxy'),
-        'no': ('NO_PROXY', 'no_proxy'),
-    }
-
-    for proxy_type, env_names in env_map.items():
+    for proxy_type, env_names in _PROXY_ENV_MAP.items():
         value = resolved.get(proxy_type)
         if not value:
             continue
         for env_name in env_names:
             if override or not os.environ.get(env_name):
                 os.environ[env_name] = value
+                os.environ[_marker_name(env_name)] = value
 
     return resolved
+
+
+def refresh_system_proxy_env():
+    """
+    刷新当前进程代理环境变量。
+
+    先清掉本程序之前自动写入的代理，再重新读取系统代理。这样系统代理关闭
+    后，后续请求不会继续使用旧的 HTTP_PROXY/HTTPS_PROXY。
+    """
+    _clear_managed_proxy_env()
+    proxies = detect_system_proxy()
+    if not proxies:
+        return None
+    return apply_system_proxy(proxies)
 
 
 def print_proxy_info(proxies):

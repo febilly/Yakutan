@@ -9,6 +9,7 @@ from contextlib import suppress
 from typing import Any, Dict, List, Optional
 import config as app_config
 from resource_path import get_resource_path, get_user_data_path, ensure_dir
+from proxy_detector import refresh_system_proxy_env
 from vrcx_context_bridge import build_asr_context_text, get_asr_context_terms
 
 try:
@@ -106,6 +107,7 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
         """建立 WebSocket 连接并发送配置"""
         try:
             print("[Soniox] Connecting to Soniox...")
+            refresh_system_proxy_env()
             self._ws = ws_connect(SONIOX_WEBSOCKET_URL)
             
             # 构建配置消息

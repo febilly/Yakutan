@@ -2,7 +2,7 @@ import asyncio
 from typing import Optional
 
 from .base import BaseTranslationAPI
-from .._proxy import detect_system_proxy
+from .._proxy import refresh_system_proxy
 
 try:
     from googletrans import Translator as GoogleWebTranslatorAPI
@@ -18,11 +18,31 @@ class GoogleWebAPI(BaseTranslationAPI):
     SUPPORTS_CONTEXT = False
 
     def __init__(self, proxy_url: Optional[str] = None):
-        resolved = proxy_url or detect_system_proxy()
-        if resolved:
-            self.google_translator = GoogleWebTranslatorAPI(proxy=resolved)
-        else:
-            self.google_translator = GoogleWebTranslatorAPI()
+        self._explicit_proxy_url = proxy_url
+        self.proxy_url = proxy_url if proxy_url is not None else refresh_system_proxy()
+        self.google_translator = self._build_translator()
+
+    def _build_translator(self):
+        if self.proxy_url:
+            return GoogleWebTranslatorAPI(proxy=self.proxy_url)
+        return GoogleWebTranslatorAPI()
+
+    def _refresh_proxy(self) -> None:
+        if self._explicit_proxy_url is not None:
+            return
+        current_proxy = refresh_system_proxy()
+        if current_proxy != self.proxy_url:
+            self.proxy_url = current_proxy
+            close = getattr(self.google_translator, "close", None)
+            if callable(close):
+                try:
+                    result = close()
+                    if asyncio.iscoroutine(result):
+                        loop = asyncio.get_event_loop()
+                        loop.run_until_complete(result)
+                except Exception:
+                    pass
+            self.google_translator = self._build_translator()
 
     async def _translate_async(
         self, text: str, source_language: str, target_language: str
@@ -45,6 +65,7 @@ class GoogleWebAPI(BaseTranslationAPI):
                 "Google Web Translator does not support native context. "
                 "Use ContextAwareTranslator wrapper instead."
             )
+        self._refresh_proxy()
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:

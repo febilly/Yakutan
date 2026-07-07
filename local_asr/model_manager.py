@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen, urlretrieve
 
 from . import LOCAL_ASR_DISPLAY_NAMES, get_engine_runtime_issues
-from proxy_detector import apply_system_proxy
+from proxy_detector import refresh_system_proxy_env
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ def apply_cache_env() -> None:
     resolved = str(MODELS_DIR.resolve())
     os.environ["HF_HOME"] = os.path.join(resolved, "huggingface")
     # 让 HuggingFace Hub、urllib 下载、websocket/socks 代理等统一复用系统代理。
-    apply_system_proxy()
+    refresh_system_proxy_env()
 
 
 def _qwen_vendor_package_dir() -> Path:
@@ -545,4 +545,3 @@ def get_engine_status(engine: str) -> dict:
         "ready": is_asr_cached(engine),
         "missing": get_missing_models(engine),
     }
-

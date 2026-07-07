@@ -16,10 +16,10 @@ def _run_web_ui_mode():
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ui'))
 
     import webbrowser
-    from proxy_detector import apply_system_proxy, detect_system_proxy, print_proxy_info
+    from proxy_detector import refresh_system_proxy_env, print_proxy_info
 
     # 检测并应用系统代理设置
-    system_proxies = apply_system_proxy(detect_system_proxy())
+    system_proxies = refresh_system_proxy_env()
     print_proxy_info(system_proxies)
 
     from ui.app import app

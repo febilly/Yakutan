@@ -4,7 +4,7 @@ import json
 from typing import Optional
 
 from .base import BaseTranslationAPI
-from .._proxy import detect_system_proxy
+from .._proxy import refresh_system_proxy
 
 try:
     import aiohttp
@@ -42,7 +42,8 @@ class GoogleDictionaryAPI(BaseTranslationAPI):
 
     def __init__(self, max_retries: int = 3, proxy_url: Optional[str] = None):
         self.max_retries = max_retries
-        self.proxy_url = proxy_url or detect_system_proxy()
+        self._explicit_proxy_url = proxy_url
+        self.proxy_url = proxy_url if proxy_url is not None else refresh_system_proxy()
         self._session_timeout = aiohttp.ClientTimeout(total=self.TIMEOUT)
         self._session: Optional[aiohttp.ClientSession] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -66,12 +67,23 @@ class GoogleDictionaryAPI(BaseTranslationAPI):
             await self._session.close()
         self._session = None
 
+    async def _refresh_proxy(self) -> None:
+        if self._explicit_proxy_url is not None:
+            return
+        current_proxy = refresh_system_proxy()
+        if current_proxy != self.proxy_url:
+            self.proxy_url = current_proxy
+            if self._session and not self._session.closed:
+                await self._session.close()
+            self._session = None
+
     async def _translate_async(
         self, text: str, source_language: str, target_language: str
     ) -> str:
         api_language = self._coerce_language_code(target_language)
         for attempt in range(self.max_retries + 1):
             try:
+                await self._refresh_proxy()
                 encoded = urllib.parse.quote(text)
                 url = (
                     f"{self.API_ENDPOINT}?"

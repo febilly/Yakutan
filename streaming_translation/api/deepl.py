@@ -2,7 +2,7 @@ import os
 from typing import Optional, List, Dict
 
 from .base import BaseTranslationAPI
-from .._proxy import detect_system_proxy
+from .._proxy import refresh_system_proxy
 
 try:
     import deepl
@@ -29,19 +29,30 @@ class DeepLAPI(BaseTranslationAPI):
                 "DeepL API key is required. Pass it explicitly or set DEEPL_API_KEY."
             )
 
-        resolved_proxy = proxy_url or detect_system_proxy()
-        proxy_config = None
-        if resolved_proxy:
-            proxy_config = {"https": resolved_proxy, "http": resolved_proxy}
-
-        if proxy_config:
-            self.client = deepl.DeepLClient(auth_key, proxy=proxy_config)
-        else:
-            self.client = deepl.DeepLClient(auth_key)
-
+        self.auth_key = auth_key
         self.formality = formality
+        self._explicit_proxy_url = proxy_url
+        self.proxy_url = proxy_url if proxy_url is not None else refresh_system_proxy()
+        self.client = self._build_client()
+
         # warm-up
         self.translate("Hello", source_language="auto", target_language="en")
+
+    def _build_client(self):
+        if self.proxy_url:
+            return deepl.DeepLClient(
+                self.auth_key,
+                proxy={"https": self.proxy_url, "http": self.proxy_url},
+            )
+        return deepl.DeepLClient(self.auth_key)
+
+    def _refresh_proxy(self) -> None:
+        if self._explicit_proxy_url is not None:
+            return
+        current_proxy = refresh_system_proxy()
+        if current_proxy != self.proxy_url:
+            self.proxy_url = current_proxy
+            self.client = self._build_client()
 
     @staticmethod
     def _extract_vrcx_context(context: Optional[str]) -> str:
@@ -65,6 +76,7 @@ class DeepLAPI(BaseTranslationAPI):
         **kwargs,
     ) -> str:
         try:
+            self._refresh_proxy()
             target_lang = target_language.upper()
             lang_map = {
                 "zh": "ZH-HANS",

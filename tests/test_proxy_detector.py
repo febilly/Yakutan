@@ -10,6 +10,7 @@ from proxy_detector import (
     apply_system_proxy,
     detect_system_proxy,
     print_proxy_info,
+    refresh_system_proxy_env,
 )
 
 
@@ -112,6 +113,26 @@ class TestApplySystemProxy:
     def test_none_proxies_returns_none(self):
         with patch.dict(os.environ, {}, clear=True):
             assert apply_system_proxy(None) is None
+
+    def test_refresh_clears_managed_proxy_when_system_proxy_removed(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("proxy_detector.urllib.request.ProxyHandler") as mock_handler:
+                mock_handler.return_value.proxies = {"https": "http://proxy:8080"}
+                applied = refresh_system_proxy_env()
+                assert applied is not None
+                assert os.environ.get("HTTPS_PROXY") == "http://proxy:8080"
+
+                mock_handler.return_value.proxies = {}
+                refreshed = refresh_system_proxy_env()
+                assert refreshed is None
+                assert os.environ.get("HTTPS_PROXY") is None
+                assert os.environ.get("YAKUTAN_MANAGED_PROXY_HTTPS_PROXY") is None
+
+    def test_refresh_keeps_user_proxy_env(self):
+        with patch.dict(os.environ, {"HTTPS_PROXY": "http://manual:8080"}, clear=True):
+            refreshed = refresh_system_proxy_env()
+            assert refreshed is not None
+            assert os.environ.get("HTTPS_PROXY") == "http://manual:8080"
 
 
 class TestPrintProxyInfo:

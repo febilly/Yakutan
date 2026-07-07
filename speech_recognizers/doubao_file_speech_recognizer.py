@@ -10,6 +10,8 @@ import uuid
 import wave
 from typing import Any, Dict, Optional
 
+from proxy_detector import refresh_system_proxy_env
+
 from .base_speech_recognizer import (
     RecognitionEvent,
     SpeechRecognitionCallback,
@@ -241,6 +243,7 @@ class DoubaoFileSpeechRecognizer(SpeechRecognizer):
         response_headers: Dict[str, str] = {}
         raw_text = ""
         try:
+            refresh_system_proxy_env()
             with urllib.request.urlopen(request, timeout=self._timeout_seconds) as response:
                 response_headers = {k: v for k, v in response.headers.items()}
                 raw_text = response.read().decode("utf-8", errors="replace")

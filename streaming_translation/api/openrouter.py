@@ -13,7 +13,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Dict, List, Optional
 
 from .base import BaseTranslationAPI
-from .._proxy import detect_system_proxy
+from .._proxy import refresh_system_proxy
 
 try:
     from openai import OpenAI
@@ -78,7 +78,8 @@ class _OpenAIClientManager:
         self.base_url = base_url
         self.model = model
         self.api_key = api_key
-        self.proxy_url = proxy_url or detect_system_proxy()
+        self._explicit_proxy_url = proxy_url
+        self.proxy_url = proxy_url if proxy_url is not None else refresh_system_proxy()
 
         self._key_lock = threading.Lock()
         self._client_lock = threading.Lock()
@@ -93,6 +94,14 @@ class _OpenAIClientManager:
             kwargs["http_client"] = httpx.Client(proxy=self.proxy_url)
         return OpenAI(**kwargs)
 
+    def _close_client(self) -> None:
+        close = getattr(self.client, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
+
     def rotate_key(self) -> None:
         if len(self._api_keys) <= 1:
             return
@@ -104,6 +113,24 @@ class _OpenAIClientManager:
                 if next_key != self.api_key:
                     self.api_key = next_key
                     self.client = self._build_client()
+
+    def refresh_proxy(self) -> None:
+        if self._explicit_proxy_url is not None:
+            return
+        current_proxy = refresh_system_proxy()
+        if current_proxy == self.proxy_url:
+            return
+        with self._client_lock:
+            current_proxy = refresh_system_proxy()
+            if current_proxy == self.proxy_url:
+                return
+            self._close_client()
+            self.proxy_url = current_proxy
+            self.client = self._build_client()
+
+    def get_client(self) -> OpenAI:
+        self.refresh_proxy()
+        return self.client
 
 
 class OpenRouterAPI(BaseTranslationAPI):
@@ -422,7 +449,7 @@ class OpenRouterAPI(BaseTranslationAPI):
     def _execute_completion(self, request_kwargs: Dict) -> str:
         try:
             self._client_mgr.rotate_key()
-            completion = self.client.chat.completions.create(**request_kwargs)
+            completion = self._client_mgr.get_client().chat.completions.create(**request_kwargs)
             if completion.choices and completion.choices[0].message.content:
                 return self._clean_response(completion.choices[0].message.content)
             return "[ERROR] Empty response from model"

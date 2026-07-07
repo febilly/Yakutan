@@ -6,6 +6,8 @@ import threading
 import time
 from typing import Any, Dict, Optional, Set
 
+from proxy_detector import refresh_system_proxy_env
+
 from dashscope.audio.qwen_omni import (
     MultiModality,
     OmniRealtimeCallback,
@@ -274,6 +276,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         conversation = self._conversation
         assert conversation is not None  # for type checkers
         try:
+            refresh_system_proxy_env()
             conversation.connect()
             corpus_text = self._resolve_corpus_text()
             update_kwargs = self._build_update_session_kwargs(corpus_text)
@@ -681,6 +684,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         assert conversation is not None
         
         try:
+            refresh_system_proxy_env()
             conversation.connect()
             corpus_text = self._resolve_corpus_text()
             update_kwargs = self._build_update_session_kwargs(corpus_text)
