@@ -3402,7 +3402,9 @@ async function startService() {
         const llmKey = getEffectiveLLMApiKeyForCurrentMode();
         const llmBaseUrl = document.getElementById('llm-base-url').value.trim();
         const llmModel = document.getElementById('llm-model').value.trim();
-        const hasLLMKey = envStatus.llm.api_key_set || !!llmKey;
+        const hasLLMKey = document.body.classList.contains('mode-simple')
+            ? !!llmKey
+            : (envStatus.llm.api_key_set || !!llmKey);
 
         const enableTranslation = document.getElementById('enable-translation').checked;
         const translationApiSelect = document.getElementById('translation-api-type');
@@ -3442,7 +3444,10 @@ async function startService() {
         }
 
         if (requiresDashscopeKey && !dashscopeKey) {
-            showMessage('❌ ' + t('msg.dashscopeRequired'), 'error');
+            const messageKey = document.body.classList.contains('mode-simple')
+                ? 'msg.simpleDashscopeKeyMissing'
+                : 'msg.dashscopeRequired';
+            showMessage('❌ ' + t(messageKey), 'error');
             startBtn.disabled = false;
             startBtn.textContent = t('btn.startService');
 
@@ -3517,11 +3522,19 @@ async function startService() {
                 }
                 if (!hasLLMKey) {
                     missingFields.push('llm-api-key');
-                    missingLabels.push(t('label.llmKey'));
+                    missingLabels.push(document.body.classList.contains('mode-simple')
+                        ? t('label.deepseekKey')
+                        : t('label.llmKey'));
                 }
 
                 if (missingFields.length > 0) {
-                    showMessage('❌ ' + t('msg.llmFieldRequired', { field: missingLabels[0] }), 'error');
+                    const message = (
+                        document.body.classList.contains('mode-simple')
+                        && missingFields[0] === 'llm-api-key'
+                    )
+                        ? t('msg.simpleDeepseekKeyMissing')
+                        : t('msg.llmFieldRequired', { field: missingLabels[0] });
+                    showMessage('❌ ' + message, 'error');
                     startBtn.disabled = false;
                     startBtn.textContent = t('btn.startService');
                     expandLLMSettingsPanel(missingFields);

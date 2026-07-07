@@ -74,8 +74,34 @@
         });
     }
 
+    function getSimpleModeDeepSeekKey() {
+        if (typeof getEffectiveLLMApiKeyForCurrentMode === 'function') {
+            return getEffectiveLLMApiKeyForCurrentMode();
+        }
+        return (byId('llm-api-key')?.value || '').trim();
+    }
+
+    function showMissingDeepSeekKeyWarning() {
+        const t = (window.i18n && typeof window.i18n.t === 'function')
+            ? window.i18n.t
+            : (key) => key;
+        if (typeof showMessage === 'function') {
+            showMessage('⚠️ ' + t('msg.simpleDeepseekKeyMissing'), 'warning');
+        }
+    }
+
+    function isServiceApplyingLiveConfig() {
+        const lifecycle = document.body.dataset.serviceLifecycle || 'stopped';
+        return lifecycle === 'starting' || lifecycle === 'running';
+    }
+
     function setTranslationEnabled(enabled) {
         const enableEl = byId('enable-translation');
+        if (mode === 'simple' && enabled && isServiceApplyingLiveConfig() && !getSimpleModeDeepSeekKey()) {
+            showMissingDeepSeekKeyWarning();
+            syncSimpleTranslationModeControl();
+            return;
+        }
         if (!enableEl || enableEl.checked === enabled) {
             syncSimpleTranslationModeControl();
             return;
