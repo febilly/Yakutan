@@ -3265,6 +3265,7 @@ function renderServiceLifecycle(status, t) {
     const startBtn = document.getElementById('start-btn');
     const stopBtn = document.getElementById('stop-btn');
 
+    document.body.dataset.serviceLifecycle = lifecycle;
     statusDot.classList.remove('running', 'starting', 'stopping');
 
     if (lifecycle === 'running') {
@@ -3341,15 +3342,6 @@ function buildUdpPortConflictWarning(payload, t) {
     return t('msg.udpPortConflictWarning', { port: oscPort, programs });
 }
 
-/** 冲突详情 + 已取消操作说明（供错误提示使用）。 */
-function buildUdpPortBlockUserMessage(payload, t) {
-    const detail = buildUdpPortConflictWarning(payload, t);
-    if (!detail) {
-        return '';
-    }
-    return `${detail} ${t('msg.udpPortBlockedCancel')}`;
-}
-
 function buildVrchatOscNotListeningWarning(payload, t) {
     if (!payload || payload.vrchat_osc_listening === true) {
         return '';
@@ -3388,12 +3380,13 @@ async function startService() {
     if (!bypassOscUdp) {
         try {
             const udpPayload = await fetchOscUdpPortCheck();
-            const blockMsg = buildUdpPortBlockUserMessage(udpPayload, t);
-            if (blockMsg) {
-                showMessage('❌ ' + blockMsg, 'error');
-                startBtn.disabled = false;
-                startBtn.textContent = t('btn.startService');
-                return;
+            const conflictWarning = buildUdpPortConflictWarning(udpPayload, t);
+            const vrchatOscWarning = buildVrchatOscNotListeningWarning(udpPayload, t);
+            if (conflictWarning) {
+                showMessage('⚠️ ' + conflictWarning, 'warning');
+            }
+            if (vrchatOscWarning) {
+                showMessage('⚠️ ' + vrchatOscWarning, 'warning');
             }
         } catch (e) {
             console.warn('OSC UDP port check failed:', e);
@@ -3588,12 +3581,16 @@ async function startService() {
                 result.accelerator_warning_message_id,
                 result.accelerator_warning_message,
             );
+            const udpConflictWarning = buildUdpPortConflictWarning(result, t);
             const vrchatOscWarning = buildVrchatOscNotListeningWarning(result, t);
             const hasPendingWarning = !!pendingWarningMessage;
             if (hasPendingWarning) {
                 showMessage('⚠️ ' + pendingWarningMessage, 'warning');
             }
             showMessage('✅ ' + t('msg.serviceStarting'), 'success');
+            if (udpConflictWarning) {
+                showMessage('⚠️ ' + udpConflictWarning, 'warning');
+            }
             if (vrchatOscWarning) {
                 showMessage('⚠️ ' + vrchatOscWarning, 'warning');
             }
@@ -3604,13 +3601,8 @@ async function startService() {
             await updateStatus();
             setTimeout(updateStatus, 500);
         } else {
-            if (Array.isArray(result.udp_port_conflicts) && result.udp_port_conflicts.length) {
-                const blockMsg = buildUdpPortBlockUserMessage(result, t);
-                showMessage('❌ ' + (blockMsg || localizeBackendMessage(result.message_id, result.message)), 'error');
-            } else {
-                const localizedMsg = localizeBackendMessage(result.message_id, result.message);
-                showMessage('❌ ' + t('msg.serviceStartFailed') + localizedMsg, 'error');
-            }
+            const localizedMsg = localizeBackendMessage(result.message_id, result.message);
+            showMessage('❌ ' + t('msg.serviceStartFailed') + localizedMsg, 'error');
             startBtn.disabled = false;
         }
     } catch (error) {
@@ -3664,10 +3656,13 @@ async function restartService() {
         if (!bypassOscRestart) {
             try {
                 const udpPayload = await fetchOscUdpPortCheck();
-                const blockMsg = buildUdpPortBlockUserMessage(udpPayload, tr);
-                if (blockMsg) {
-                    showMessage('❌ ' + blockMsg, 'error');
-                    return;
+                const conflictWarning = buildUdpPortConflictWarning(udpPayload, tr);
+                const vrchatOscWarning = buildVrchatOscNotListeningWarning(udpPayload, tr);
+                if (conflictWarning) {
+                    showMessage('⚠️ ' + conflictWarning, 'warning');
+                }
+                if (vrchatOscWarning) {
+                    showMessage('⚠️ ' + vrchatOscWarning, 'warning');
                 }
             } catch (e) {
                 console.warn('OSC UDP port check failed:', e);
@@ -3682,11 +3677,16 @@ async function restartService() {
 
         if (result.success) {
             console.log('服务已重启');
+            const udpConflictWarning = buildUdpPortConflictWarning(result, tr);
+            const vrchatOscWarning = buildVrchatOscNotListeningWarning(result, tr);
             showMessage('✅ ' + tr('msg.serviceRestarted'), 'success');
+            if (udpConflictWarning) {
+                showMessage('⚠️ ' + udpConflictWarning, 'warning');
+            }
+            if (vrchatOscWarning) {
+                showMessage('⚠️ ' + vrchatOscWarning, 'warning');
+            }
             setTimeout(updateStatus, 500);
-        } else if (Array.isArray(result.udp_port_conflicts) && result.udp_port_conflicts.length) {
-            const blockMsg = buildUdpPortBlockUserMessage(result, tr);
-            showMessage('❌ ' + (blockMsg || localizeBackendMessage(result.message_id, result.message)), 'error');
         } else {
             const localizedMsg = localizeBackendMessage(result.message_id, result.message);
             showMessage('❌ ' + localizedMsg, 'error');

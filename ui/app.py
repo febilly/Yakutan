@@ -1203,14 +1203,6 @@ def start_service():
     udp_status = None
     if not bypass_udp:
         udp_status = _osc_udp_port_status_payload()
-        if not udp_status['port_clear']:
-            return jsonify({
-                'success': False,
-                'message_id': 'msg.udpPortOccupied',
-                'message': 'UDP 端口被占用，无法启动服务',
-                'osc_udp_port': udp_status['osc_udp_port'],
-                'udp_port_conflicts': udp_status['udp_port_conflicts'],
-            })
 
     try:
         # 从请求中获取 API Keys
@@ -1248,6 +1240,7 @@ def start_service():
             'message_id': 'msg.serviceStarting',
             'lifecycle': 'starting',
             'message': '服务已启动',
+            **(udp_status or {}),
             **accelerator_warning,
             **vrchat_osc_warning,
         })
@@ -1320,19 +1313,12 @@ def restart_service():
     if _get_service_lifecycle() != 'running':
         return jsonify({'success': False, 'message_id': 'msg.noRestartNeeded', 'message': '服务未运行，无需重启'})
 
+    udp_status = None
     if (
         not bool(getattr(config, 'BYPASS_OSC_UDP_PORT_CHECK', False))
         and not bool(getattr(config, 'OSC_COMPAT_MODE', False))
     ):
         udp_status = _osc_udp_port_status_payload()
-        if not udp_status['port_clear']:
-            return jsonify({
-                'success': False,
-                'message_id': 'msg.udpPortOccupied',
-                'message': 'UDP 端口被占用，无法重启服务',
-                'osc_udp_port': udp_status['osc_udp_port'],
-                'udp_port_conflicts': udp_status['udp_port_conflicts'],
-            })
 
     try:
         # 从 main 模块获取最新的 stop_event
@@ -1365,6 +1351,8 @@ def restart_service():
             'message_id': 'msg.serviceRestarted',
             'lifecycle': 'starting',
             'message': '服务已重启',
+            **(udp_status or {}),
+            **_vrchat_osc_warning_payload(udp_status),
         })
     except Exception as e:
         _set_service_status(lifecycle='stopped', recognition_active=False)
