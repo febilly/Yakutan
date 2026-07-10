@@ -114,6 +114,10 @@ def update_subtitles(original: str, translated: str, ongoing: bool, reverse_tran
 def reinitialize_translator_compat():
     state = get_state()
     if state:
+        # 翻译关闭时跳过（重）构建翻译器，避免未配置对应 API Key 时报错。
+        # 运行时重新开启翻译会再次调用本函数并正常构建。
+        if not getattr(config, 'ENABLE_TRANSLATION', True):
+            return
         cfg = config_from_module(config)
         if _is_primary_translator_config_changed(state, cfg):
             reinitialize_translator(state, cfg)
@@ -392,9 +396,11 @@ async def main(
     else:
         print('[VAD] — 本地 ASR 后端：门控由识别器内部 VAD 负责，采集侧不做门控')
 
-    # 初始化翻译器
+    # 初始化翻译器（仅在启用翻译时构建；否则识别流程不会用到翻译器，
+    # 且此时构建会因未配置对应 API Key 而在启动阶段直接报错）
     cfg = config_from_module(config)
-    reinitialize_translator(state, cfg)
+    if config.ENABLE_TRANSLATION:
+        reinitialize_translator(state, cfg)
 
     # 初始化热词（在线：qwen 语料 / dashscope 热词表；本地：Qwen3-ASR 走与在线 Qwen 相同的语料注入）
     if config.ENABLE_HOT_WORDS and backend in {'qwen', 'dashscope', 'local'}:
