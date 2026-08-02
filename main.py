@@ -18,7 +18,17 @@ from typing import Callable, Optional
 # Allow PyTorch and DirectML/ONNX stacks to coexist in one process.
 os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
 
-from dotenv import load_dotenv
+# 旧版纯命令行入口继续完全依靠 .env。WebUI 会以 ``import main`` 的方式
+# 启动服务，此时绝不加载 .env，也不应用任何用户配置环境变量。
+if __name__ == '__main__':
+    from dotenv import load_dotenv
+    load_dotenv()
+
+# 必须先完成 CLI 的 .env 引导，再导入任何会读取 config 的业务模块。
+import config
+
+if __name__ == '__main__':
+    config.apply_cli_env()
 
 from hot_words_manager import HotWordsManager
 from proxy_detector import refresh_system_proxy_env, print_proxy_info
@@ -27,12 +37,6 @@ from speech_recognizers.recognizer_factory import (
     create_recognizer,
     select_backend,
 )
-
-# 导入配置
-import config
-
-# 加载 .env 文件中的环境变量
-load_dotenv()
 
 from osc_manager import osc_manager
 from ipc_client import IPCClient
@@ -406,7 +410,9 @@ async def main(
     if config.ENABLE_HOT_WORDS and backend in {'qwen', 'dashscope', 'local'}:
         print('\n[热词] 初始化热词资源...')
         try:
-            hot_words_manager = HotWordsManager()
+            hot_words_manager = HotWordsManager(
+                api_key=str(getattr(config, 'DASHSCOPE_API_KEY', '') or '').strip()
+            )
             hot_words_manager.load_all_hot_words()
             if backend == 'qwen':
                 words = [

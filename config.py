@@ -4,31 +4,35 @@
 import os
 import time
 from typing import Optional
-from dotenv import load_dotenv
 from shared.vrchat_text_limits import (
     VRCHAT_OSC_TEXT_MAX_LENGTH,
     normalize_osc_text_max_length,
 )
 
-load_dotenv()
-
-
-def _get_env_bool(name: str, default: bool = False) -> bool:
+def _read_env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
         return default
     return value.strip().lower() not in {'', '0', 'false', 'no', 'off'}
 
 
-def _get_env_int(name: str, default: int, *, min_v: int = 1, max_v: int = 65535) -> int:
+def _read_env_int(name: str, default: int, *, min_v: int = 1, max_v: int = 65535) -> int:
     raw = os.getenv(name)
     if raw is None or str(raw).strip() == '':
         return default
     try:
         v = int(str(raw).strip(), 10)
         return max(min_v, min(max_v, v))
-    except ValueError:
+    except (TypeError, ValueError):
         return default
+
+
+def _read_first_env(*names: str, default: str = '') -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and value.strip():
+            return value.strip()
+    return default
 
 # ============================================================================
 # 语音识别后端配置
@@ -103,7 +107,7 @@ if LOCAL_ASR_ENGINE not in _VALID_LOCAL_ASR_ENGINES:
 # ============================================================================
 # 一个总开关 + 一组参数，既用于在线 API 后端的发送门控（静音时不向 ASR
 # 发送音频以省流），也用于本地 ASR 的分段断句。
-VAD_ENABLED = _get_env_bool('VAD_ENABLED', True)
+VAD_ENABLED = True
 LOCAL_VAD_MODE = 'silero'  # 可选: 'silero', 'energy'；在线门控固定使用 Silero
 LOCAL_VAD_THRESHOLD = 0.50
 LOCAL_VAD_MIN_SPEECH_DURATION = 1.0
@@ -121,11 +125,11 @@ LOCAL_INTERIM_INTERVAL = 2.0
 LOCAL_QWEN_ASR_N_CTX = 2048
 # 传入 LLM system 区的背景/滚动文本：按模型分词后最多保留的 token 数（取尾部）。
 LOCAL_QWEN_CONTEXT_MAX_TOKENS = 1024
-# 是否在每条识别后打印 Qwen3-ASR 各阶段耗时（ONNX 编码 / LLM prefill / 生成），使用 INFO 级别。环境变量 LOCAL_QWEN_LOG_PIPELINE_TIMING=0 可关闭。
+# 是否在每条识别后打印 Qwen3-ASR 各阶段耗时（ONNX 编码 / LLM prefill / 生成），使用 INFO 级别。旧版 CLI 可在 .env 中用 LOCAL_QWEN_LOG_PIPELINE_TIMING=0 关闭。
 # 需在 config.LOG_LEVEL 为 INFO/DEBUG 时才能在终端看到（默认 ERROR 时不会输出）。
-LOCAL_QWEN_LOG_PIPELINE_TIMING = _get_env_bool('LOCAL_QWEN_LOG_PIPELINE_TIMING', True)
+LOCAL_QWEN_LOG_PIPELINE_TIMING = True
 # ONNX 音频编码（前后端）是否使用 DirectML；False 时仅用 CPUExecutionProvider（Mel 本就为 CPU）。
-LOCAL_QWEN_ENCODER_USE_DML = _get_env_bool('LOCAL_QWEN_ENCODER_USE_DML', False)
+LOCAL_QWEN_ENCODER_USE_DML = False
 
 # ============================================================================
 # 音频参数配置
@@ -139,13 +143,16 @@ FORMAT_PCM = 'pcm'  # 音频数据格式
 BLOCK_SIZE = 1600  # 每个缓冲区的帧数
 
 # 是否将重采样后的音频保存到本地 WAV（调试用）
-SAVE_POST_RESAMPLE_AUDIO = _get_env_bool('SAVE_POST_RESAMPLE_AUDIO', False)
+SAVE_POST_RESAMPLE_AUDIO = False
 
 # 是否将重采样前的原始采集音频保存到本地 WAV（调试用）
-SAVE_PRE_RESAMPLE_AUDIO = _get_env_bool('SAVE_PRE_RESAMPLE_AUDIO', False)
+SAVE_PRE_RESAMPLE_AUDIO = False
 
 # 调试音频输出目录（相对路径时相对于项目根目录）
-DEBUG_AUDIO_OUTPUT_DIR = os.getenv('DEBUG_AUDIO_OUTPUT_DIR', 'debug_audio').strip() or 'debug_audio'
+DEBUG_AUDIO_OUTPUT_DIR = 'debug_audio'
+
+# 采集侧 VAD 调试日志。仅旧版 CLI 会通过 ``apply_cli_env`` 从 .env 覆盖。
+ENABLE_VAD_GATING_VERBOSE = False
 
 # ============================================================================
 # 翻译语言配置
@@ -195,20 +202,20 @@ def bump_config_applied_at_ms() -> int:
 # - openrouter_streaming 是 LLM 翻译的流式模式，支持翻译部分结果
 # - openrouter_streaming_deepl_hybrid 在静音触发终译时，按流式更新次数阈值决定
 #   使用 DeepL（更新次数较少）或 LLM（更新次数较多）进行最终翻译
-TRANSLATION_API_TYPE = 'qwen_mt'
+DEFAULT_TRANSLATION_API_TYPE = 'openrouter_streaming'
+DEFAULT_LLM_TEMPLATE = 'deepseek-v4-flash'
+DEFAULT_LLM_BASE_URL = 'https://api.deepseek.com'
+DEFAULT_LLM_MODEL = 'deepseek-v4-flash'
+DEFAULT_LLM_EXTRA_BODY_JSON = '{"thinking": {"type": "disabled"}}'
+DEFAULT_LLM_TRANSLATION_FORMALITY = 'medium'
+DEFAULT_LLM_TRANSLATION_STYLE = 'standard'
+
+TRANSLATION_API_TYPE = DEFAULT_TRANSLATION_API_TYPE
 
 # LLM（OpenAI 兼容接口）配置
-LLM_BASE_URL = (
-    os.getenv('LLM_BASE_URL', '').strip()
-    or os.getenv('OPENAI_BASE_URL', '').strip()
-    or os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1').strip()
-)
-LLM_MODEL = (
-    os.getenv('LLM_MODEL', '').strip()
-    or os.getenv('OPENAI_MODEL', '').strip()
-    or os.getenv('OPENROUTER_TRANSLATION_MODEL', 'qwen/qwen3-235b-a22b-2507').strip()
-)
-LLM_TEMPLATE = os.getenv('LLM_TEMPLATE', '').strip() or 'custom1'
+LLM_BASE_URL = DEFAULT_LLM_BASE_URL
+LLM_MODEL = DEFAULT_LLM_MODEL
+LLM_TEMPLATE = DEFAULT_LLM_TEMPLATE
 LLM_TRANSLATION_TEMPERATURE = 0.2
 LLM_TRANSLATION_TIMEOUT = 30
 LLM_TRANSLATION_MAX_RETRIES = 3
@@ -216,23 +223,32 @@ LLM_TRANSLATION_MAX_RETRIES = 3
 # LLM 翻译正式程度
 # 可选: 'low', 'medium', 'high'
 # 默认保持接近当前偏口语、轻礼貌的风格
-LLM_TRANSLATION_FORMALITY = (
-    os.getenv('LLM_TRANSLATION_FORMALITY', 'medium').strip().lower() or 'medium'
-)
+LLM_TRANSLATION_FORMALITY = DEFAULT_LLM_TRANSLATION_FORMALITY
 
 # LLM 句子风格
 # 可选: 'standard', 'light'
-LLM_TRANSLATION_STYLE = (
-    os.getenv('LLM_TRANSLATION_STYLE', 'light').strip().lower() or 'light'
-)
+LLM_TRANSLATION_STYLE = DEFAULT_LLM_TRANSLATION_STYLE
 
 # OpenAI 兼容翻译接口的 extra_body 控制
 # 留空表示不发送 extra_body，由用户在网页中按需填写 JSON 对象
-OPENAI_COMPAT_EXTRA_BODY_JSON = ''
+OPENAI_COMPAT_EXTRA_BODY_JSON = DEFAULT_LLM_EXTRA_BODY_JSON
 
 # LLM 并行双发（两次相同请求，取先返回结果）：off 关闭；final_only 仅终译
 # （流式时对中间断句不双发）；all 对每个请求都双发。会增加 token 用量
 LLM_PARALLEL_FASTEST_MODE = 'off'
+
+# 运行期凭据。WebUI 只会通过页面请求更新这些进程内字段，不会读取或写入
+# os.environ；旧版 CLI 则由 ``apply_cli_env`` 从 .env 显式填充。
+DASHSCOPE_API_KEY = ''
+DEEPL_API_KEY = ''
+LLM_API_KEY = ''
+OPENAI_API_KEY = ''
+SONIOX_API_KEY = ''
+DOUBAO_API_KEY = ''
+DOUBAO_APP_ID = ''
+DOUBAO_ACCESS_KEY = ''
+LLM_APP_URL = ''
+LLM_APP_TITLE = ''
 
 # ============================================================================
 # 翻译功能配置
@@ -245,7 +261,7 @@ ENABLE_TRANSLATION = True  # True: 识别后翻译文本
 # 是否启用流式翻译（翻译部分结果）
 # 当 TRANSLATION_API_TYPE 为 'openrouter_streaming' 或
 # 'openrouter_streaming_deepl_hybrid' 时自动启用
-TRANSLATE_PARTIAL_RESULTS = False
+TRANSLATE_PARTIAL_RESULTS = True
 
 # 触发流式中间翻译所需的最小文本长度（字符数）
 # 仅影响中间翻译触发，不影响最终整句翻译
@@ -375,7 +391,7 @@ KEEPALIVE_INTERVAL = 30  # 设置为0则禁用心跳功能
 # ============================================================================
 
 # 小面板默认宽度（像素）
-PANEL_WIDTH = max(300, int(os.getenv('PANEL_WIDTH', '600') or 600))
+PANEL_WIDTH = 600
 
 # 是否显示识别中的部分结果（ongoing）
 SHOW_PARTIAL_RESULTS = False  # True: 显示部分识别结果到聊天框（可能覆盖掉之前的翻译结果）
@@ -409,17 +425,22 @@ OSC_CLIENT_IP = '127.0.0.1'
 OSC_CLIENT_PORT = 9001
 
 # 发往 VRChat 的 OSC（如聊天框）使用的目标 UDP 端口，默认与游戏一致为 9000
-OSC_SEND_TARGET_PORT = _get_env_int('OSC_SEND_TARGET_PORT', 9000)
+OSC_SEND_TARGET_PORT = 9000
 
 # 兼容模式：不使用 OSCQuery，而是在固定端口监听兼容 OSC 的游戏事件。
-OSC_COMPAT_MODE = _get_env_bool('OSC_COMPAT_MODE', False)
-OSC_COMPAT_LISTEN_PORT = _get_env_int('OSC_COMPAT_LISTEN_PORT', 9001)
+OSC_COMPAT_MODE = False
+OSC_COMPAT_LISTEN_PORT = 9001
 
-# 是否绕过「VRChat OSC 所用 UDP 端口」占用检测（可由网页高级设置或环境变量覆盖）
-BYPASS_OSC_UDP_PORT_CHECK = _get_env_bool('BYPASS_OSC_UDP_PORT_CHECK', False)
+# 是否绕过「VRChat OSC 所用 UDP 端口」占用检测（可由网页高级设置覆盖；
+# 旧版 CLI 也可在 .env 中设置）
+BYPASS_OSC_UDP_PORT_CHECK = False
 
 # 出错时是否仍将错误消息发送到 OSC（小面板始终显示错误，不受此项影响）
-OSC_SEND_ERROR_MESSAGES = _get_env_bool('OSC_SEND_ERROR_MESSAGES', False)
+OSC_SEND_ERROR_MESSAGES = False
+
+# OSCQuery 运行配置。WebUI 使用这里的默认值，CLI 可由 .env 覆盖。
+OSC_QUERY_ENABLED = True
+OSCQUERY_APP_NAME = 'DeafaultAppName'
 
 # ============================================================================
 # 线程池配置
@@ -450,21 +471,16 @@ DASHSCOPE_HOTWORD_MODEL = 'fun-asr-realtime'
 # ============================================================================
 
 # 是否启用 IPC 功能
-IPC_ENABLED = _get_env_bool('IPC_ENABLED', True)
+IPC_ENABLED = True
 
 # IPC 服务器地址
-IPC_HOST = os.getenv('IPC_HOST', '127.0.0.1').strip()
+IPC_HOST = '127.0.0.1'
 
 # IPC 端口范围
 IPC_PORT_RANGE = range(17353, 17364)
 
-import tempfile
-import sys
 from shared.vrchat_bridge import get_discovery_path
-IPC_DISCOVERY_FILE = os.getenv(
-    'IPC_DISCOVERY_FILE',
-    get_discovery_path()
-).strip()
+IPC_DISCOVERY_FILE = get_discovery_path()
 
 # IPC 发现超时时间（秒）
 IPC_DISCOVERY_TIMEOUT = 30.0
@@ -477,3 +493,188 @@ IPC_RECONNECT_MAX_DELAY = 30.0
 
 # IPC 轮询间隔（秒，当服务器未启动时）
 IPC_POLL_INTERVAL = 3.0
+
+
+def apply_cli_env() -> None:
+    """Apply legacy CLI settings from the already-loaded process environment.
+
+    ``main.py`` is the only application entry point that calls this function.
+    WebUI imports ``config`` directly and therefore always starts from the
+    built-in defaults until the browser submits its saved settings.
+    """
+    global VAD_ENABLED
+    global LOCAL_QWEN_LOG_PIPELINE_TIMING, LOCAL_QWEN_ENCODER_USE_DML
+    global SAVE_POST_RESAMPLE_AUDIO, SAVE_PRE_RESAMPLE_AUDIO
+    global DEBUG_AUDIO_OUTPUT_DIR, ENABLE_VAD_GATING_VERBOSE
+    global TRANSLATION_API_TYPE, LLM_BASE_URL, LLM_MODEL, LLM_TEMPLATE
+    global LLM_TRANSLATION_FORMALITY, LLM_TRANSLATION_STYLE
+    global OPENAI_COMPAT_EXTRA_BODY_JSON, TRANSLATE_PARTIAL_RESULTS
+    global DASHSCOPE_API_KEY, DEEPL_API_KEY, LLM_API_KEY, OPENAI_API_KEY
+    global SONIOX_API_KEY, DOUBAO_API_KEY, DOUBAO_APP_ID, DOUBAO_ACCESS_KEY
+    global LLM_APP_URL, LLM_APP_TITLE
+    global PANEL_WIDTH
+    global OSC_SEND_TARGET_PORT, OSC_COMPAT_MODE, OSC_COMPAT_LISTEN_PORT
+    global BYPASS_OSC_UDP_PORT_CHECK, OSC_SEND_ERROR_MESSAGES
+    global OSC_QUERY_ENABLED, OSCQUERY_APP_NAME
+    global IPC_ENABLED, IPC_HOST, IPC_DISCOVERY_FILE
+
+    VAD_ENABLED = _read_env_bool('VAD_ENABLED', VAD_ENABLED)
+    LOCAL_QWEN_LOG_PIPELINE_TIMING = _read_env_bool(
+        'LOCAL_QWEN_LOG_PIPELINE_TIMING', LOCAL_QWEN_LOG_PIPELINE_TIMING
+    )
+    LOCAL_QWEN_ENCODER_USE_DML = _read_env_bool(
+        'LOCAL_QWEN_ENCODER_USE_DML', LOCAL_QWEN_ENCODER_USE_DML
+    )
+    SAVE_POST_RESAMPLE_AUDIO = _read_env_bool(
+        'SAVE_POST_RESAMPLE_AUDIO', SAVE_POST_RESAMPLE_AUDIO
+    )
+    SAVE_PRE_RESAMPLE_AUDIO = _read_env_bool(
+        'SAVE_PRE_RESAMPLE_AUDIO', SAVE_PRE_RESAMPLE_AUDIO
+    )
+    DEBUG_AUDIO_OUTPUT_DIR = _read_first_env(
+        'DEBUG_AUDIO_OUTPUT_DIR', default=DEBUG_AUDIO_OUTPUT_DIR
+    )
+    ENABLE_VAD_GATING_VERBOSE = _read_env_bool(
+        'ENABLE_VAD_GATING_VERBOSE',
+        _read_env_bool('ENABLE_LOCAL_VAD_GATING_VERBOSE', ENABLE_VAD_GATING_VERBOSE),
+    )
+
+    TRANSLATION_API_TYPE = _read_first_env(
+        'TRANSLATION_API_TYPE', default=TRANSLATION_API_TYPE
+    )
+    LLM_BASE_URL = _read_first_env(
+        'LLM_BASE_URL',
+        'OPENAI_BASE_URL',
+        'OPENROUTER_BASE_URL',
+        default=LLM_BASE_URL,
+    )
+    LLM_MODEL = _read_first_env(
+        'LLM_MODEL',
+        'OPENAI_MODEL',
+        'OPENROUTER_TRANSLATION_MODEL',
+        default=LLM_MODEL,
+    )
+    LLM_TEMPLATE = _read_first_env('LLM_TEMPLATE', default=LLM_TEMPLATE)
+    LLM_TRANSLATION_FORMALITY = _read_first_env(
+        'LLM_TRANSLATION_FORMALITY', default=LLM_TRANSLATION_FORMALITY
+    ).lower()
+    LLM_TRANSLATION_STYLE = _read_first_env(
+        'LLM_TRANSLATION_STYLE', default=LLM_TRANSLATION_STYLE
+    ).lower()
+    OPENAI_COMPAT_EXTRA_BODY_JSON = os.getenv(
+        'OPENAI_COMPAT_EXTRA_BODY_JSON', OPENAI_COMPAT_EXTRA_BODY_JSON
+    ).strip()
+    TRANSLATE_PARTIAL_RESULTS = _read_env_bool(
+        'TRANSLATE_PARTIAL_RESULTS',
+        TRANSLATION_API_TYPE in (
+            'openrouter_streaming',
+            'openrouter_streaming_deepl_hybrid',
+        ),
+    )
+
+    DASHSCOPE_API_KEY = _read_first_env('DASHSCOPE_API_KEY')
+    DEEPL_API_KEY = _read_first_env('DEEPL_API_KEY')
+    LLM_API_KEY = _read_first_env('LLM_API_KEY', 'OPENROUTER_API_KEY')
+    OPENAI_API_KEY = _read_first_env('OPENAI_API_KEY')
+    SONIOX_API_KEY = _read_first_env('SONIOX_API_KEY')
+    DOUBAO_API_KEY = _read_first_env('DOUBAO_API_KEY')
+    DOUBAO_APP_ID = _read_first_env('DOUBAO_APP_ID')
+    DOUBAO_ACCESS_KEY = _read_first_env('DOUBAO_ACCESS_KEY')
+    LLM_APP_URL = _read_first_env('LLM_APP_URL', 'OPENROUTER_APP_URL')
+    LLM_APP_TITLE = _read_first_env('LLM_APP_TITLE', 'OPENROUTER_APP_TITLE')
+
+    PANEL_WIDTH = max(300, _read_env_int('PANEL_WIDTH', PANEL_WIDTH, max_v=10000))
+    OSC_SEND_TARGET_PORT = _read_env_int(
+        'OSC_SEND_TARGET_PORT', OSC_SEND_TARGET_PORT
+    )
+    OSC_COMPAT_MODE = _read_env_bool('OSC_COMPAT_MODE', OSC_COMPAT_MODE)
+    OSC_COMPAT_LISTEN_PORT = _read_env_int(
+        'OSC_COMPAT_LISTEN_PORT', OSC_COMPAT_LISTEN_PORT
+    )
+    BYPASS_OSC_UDP_PORT_CHECK = _read_env_bool(
+        'BYPASS_OSC_UDP_PORT_CHECK', BYPASS_OSC_UDP_PORT_CHECK
+    )
+    OSC_SEND_ERROR_MESSAGES = _read_env_bool(
+        'OSC_SEND_ERROR_MESSAGES', OSC_SEND_ERROR_MESSAGES
+    )
+    OSC_QUERY_ENABLED = _read_env_bool('OSC_QUERY_ENABLED', OSC_QUERY_ENABLED)
+    OSCQUERY_APP_NAME = _read_first_env(
+        'OSCQUERY_APP_NAME', default=OSCQUERY_APP_NAME
+    )
+
+    IPC_ENABLED = _read_env_bool('IPC_ENABLED', IPC_ENABLED)
+    IPC_HOST = _read_first_env('IPC_HOST', default=IPC_HOST)
+    IPC_DISCOVERY_FILE = _read_first_env(
+        'IPC_DISCOVERY_FILE', default=IPC_DISCOVERY_FILE
+    )
+
+
+def get_default_ui_config() -> dict:
+    """Return a fresh copy of the browser-managed configuration defaults."""
+    return {
+        'asr': {
+            'preferred_backend': 'qwen',
+            'keepalive_interval': 30,
+            'enable_hot_words': True,
+            'use_international_endpoint': False,
+        },
+        'vad': {
+            'enabled': True,
+            'mode': 'silero',
+            'threshold': 0.50,
+            'min_speech_duration': 1.0,
+            'max_speech_duration': 30.0,
+            'silence_duration': 0.8,
+            'pre_speech_duration': 0.2,
+        },
+        'translation': {
+            'enable_translation': True,
+            'source_language': 'auto',
+            'target_language': 'ja',
+            'secondary_target_language': None,
+            'fallback_language': 'en',
+            'api_type': DEFAULT_TRANSLATION_API_TYPE,
+            'llm_template': DEFAULT_LLM_TEMPLATE,
+            'llm_base_url': DEFAULT_LLM_BASE_URL,
+            'llm_model': DEFAULT_LLM_MODEL,
+            'llm_translation_formality': DEFAULT_LLM_TRANSLATION_FORMALITY,
+            'llm_translation_style': DEFAULT_LLM_TRANSLATION_STYLE,
+            'openai_compat_extra_body_json': DEFAULT_LLM_EXTRA_BODY_JSON,
+            'llm_parallel_fastest_mode': 'off',
+            'show_partial_results': False,
+            'enable_furigana': False,
+            'enable_pinyin': False,
+            'enable_arabic_reshaper': True,
+            'remove_trailing_period': False,
+            'text_fancy_style': 'none',
+            'enable_reverse_translation': False,
+            'show_original_and_lang_tag': True,
+        },
+        'mic_control': {
+            'enable_mic_control': False,
+            'mute_delay_seconds': 0.2,
+            'mic_device_index': None,
+            'enable_double_mute_clear': True,
+        },
+        'language_detector': {
+            'type': 'cjke',
+        },
+        'smart_target_language': {
+            'primary_enabled': False,
+            'secondary_enabled': False,
+            'strategy': 'most_common',
+            'window_size': 5,
+            'exclude_self_language': True,
+            'min_samples': 3,
+        },
+        'panel': {
+            'width': 600,
+        },
+        'osc': {
+            'send_target_port': 9000,
+            'compat_mode': False,
+            'compat_listen_port': 9001,
+            'bypass_udp_port_check': False,
+            'send_error_messages': False,
+        },
+    }
