@@ -268,12 +268,12 @@
                             <label for="translation-api-type" data-i18n="label.translationApi">翻译API</label>
                             <select id="translation-api-type" class="form-control"
                                 onchange="handleTranslationApiChange(event)">
-                                <option value="qwen_mt" data-i18n="api.qwenMt" selected>Qwen-MT（阿里云，使用 DashScope Key）</option>
+                                <option value="qwen_mt" data-i18n="api.qwenMt">Qwen-MT（阿里云，使用 DashScope Key）</option>
                                 <option value="deepl" data-i18n="api.deepl">DeepL（高质量）</option>
                                 <option value="google_dictionary" data-i18n="api.googleDict">Google
                                     Dictionary（免费，更快，请注意网络连通性）</option>
                                 <option value="google_web" data-i18n="api.googleWeb">Google Web（免费，备用，请注意网络连通性）</option>
-                                <option value="openrouter" data-i18n="api.openrouter">LLM（自定义兼容接口）</option>
+                                <option value="openrouter" data-i18n="api.openrouter" selected>LLM（自定义兼容接口）</option>
                                 <option value="openrouter_streaming_deepl_hybrid" data-i18n="api.openrouterStreamingDeeplHybrid">LLM 流式 + DeepL 终译（混合）</option>
                             </select>
                             <small id="translation-api-warning" class="form-text"
@@ -287,7 +287,7 @@
                             <label class="switch-label">
                                 <span data-i18n="label.streamingMode">流式翻译模式</span>
                                 <label class="switch">
-                                    <input type="checkbox" id="openrouter-streaming-mode" onchange="onSettingChange()">
+                                    <input type="checkbox" id="openrouter-streaming-mode" onchange="onSettingChange()" checked>
                                     <span class="slider"></span>
                                 </label>
                             </label>
@@ -362,6 +362,7 @@
                                 <div class="form-group">
                                     <label for="llm-base-url" data-i18n="label.llmBaseUrl">LLM 地址</label>
                                     <input type="text" id="llm-base-url" class="form-control" placeholder="https://..."
+                                        value="https://api.deepseek.com"
                                         onblur="onSettingChange()">
                                     <small class="form-text" data-i18n="hint.llmBaseUrl">填写兼容接口的根地址，例如 https://openrouter.ai/api/v1 或 https://dashscope.aliyuncs.com/compatible-mode/v1，不要带 /chat/completions。</small>
                                 </div>
@@ -369,6 +370,7 @@
                                 <div class="form-group">
                                     <label for="llm-model" data-i18n="label.llmModel">LLM 模型名</label>
                                     <input type="text" id="llm-model" class="form-control" placeholder="qwen3.5-plus"
+                                        value="deepseek-v4-flash"
                                         onblur="onSettingChange()">
                                 </div>
 
@@ -400,6 +402,7 @@
                                     <label for="openai-compat-extra-body-json"
                                         data-i18n="label.openaiCompatExtraBodyJson">自定义 extra_body（可选）</label>
                                     <input type="text" id="openai-compat-extra-body-json" class="form-control"
+                                        value='{"thinking": {"type": "disabled"}}'
                                         placeholder='{"enable_thinking": false}' onblur="onSettingChange()">
                                     <small class="form-text" data-i18n="hint.openaiCompatExtraBodyJson">留空则不发送 extra_body。</small>
                                 </div>

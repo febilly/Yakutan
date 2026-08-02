@@ -81,7 +81,7 @@ CORS(app)
 VALID_LLM_TRANSLATION_FORMALITY = ('low', 'medium', 'high')
 VALID_LLM_TRANSLATION_STYLE = ('standard', 'light')
 DEFAULT_LLM_TRANSLATION_FORMALITY = 'medium'
-DEFAULT_LLM_TRANSLATION_STYLE = 'light'
+DEFAULT_LLM_TRANSLATION_STYLE = 'standard'
 
 def _sanitize_llm_translation_formality(value: Optional[str]) -> str:
     normalized = str(value or DEFAULT_LLM_TRANSLATION_FORMALITY).strip().lower()
@@ -155,13 +155,44 @@ def _is_service_active() -> bool:
     return _get_service_lifecycle() in {'starting', 'running', 'stopping'}
 
 
-def set_or_clear_env_var(name: str, value: Optional[str]) -> None:
-    """设置环境变量；空值时删除，确保运行中服务读取到最新密钥。"""
-    normalized = (value or '').strip()
-    if normalized:
-        os.environ[name] = normalized
-    else:
-        os.environ.pop(name, None)
+RUNTIME_CREDENTIAL_FIELDS = {
+    'dashscope': 'DASHSCOPE_API_KEY',
+    'deepl': 'DEEPL_API_KEY',
+    'llm': 'LLM_API_KEY',
+    'soniox': 'SONIOX_API_KEY',
+    'doubao': 'DOUBAO_API_KEY',
+}
+
+
+def update_runtime_credentials(api_keys: Optional[dict]) -> None:
+    """Update browser-managed credentials in process memory only."""
+    if not isinstance(api_keys, dict):
+        return
+    for field_name, config_attr in RUNTIME_CREDENTIAL_FIELDS.items():
+        if field_name in api_keys:
+            setattr(config, config_attr, str(api_keys[field_name] or '').strip())
+
+
+def _snapshot_runtime_config() -> dict:
+    """Capture mutable process configuration for transactional updates."""
+    return {
+        name: value
+        for name, value in vars(config).items()
+        if name.isupper()
+    }
+
+
+def _restore_runtime_config(snapshot: dict) -> None:
+    for name, value in snapshot.items():
+        setattr(config, name, value)
+    try:
+        from app_state import get_smart_selector
+        from streaming_translation import config_from_module
+        get_smart_selector().reload_config(config_from_module(config))
+    except Exception:
+        # Rollback of the authoritative config must not be masked by an
+        # optional runtime consumer that has not been initialized yet.
+        pass
 
 
 def _get_feature_flags() -> dict:
@@ -370,16 +401,26 @@ def get_config_dict():
             'secondary_target_language': getattr(config, 'SECONDARY_TARGET_LANGUAGE', None),
             'fallback_language': config.FALLBACK_LANGUAGE,
             'api_type': config.TRANSLATION_API_TYPE,
-            'llm_template': getattr(config, 'LLM_TEMPLATE', 'custom1'),
-            'llm_base_url': getattr(config, 'LLM_BASE_URL', ''),
-            'llm_model': getattr(config, 'LLM_MODEL', ''),
+            'llm_template': getattr(
+                config, 'LLM_TEMPLATE', config.DEFAULT_LLM_TEMPLATE
+            ),
+            'llm_base_url': getattr(
+                config, 'LLM_BASE_URL', config.DEFAULT_LLM_BASE_URL
+            ),
+            'llm_model': getattr(
+                config, 'LLM_MODEL', config.DEFAULT_LLM_MODEL
+            ),
             'llm_translation_formality': _sanitize_llm_translation_formality(
                 getattr(config, 'LLM_TRANSLATION_FORMALITY', DEFAULT_LLM_TRANSLATION_FORMALITY)
             ),
             'llm_translation_style': _sanitize_llm_translation_style(
                 getattr(config, 'LLM_TRANSLATION_STYLE', DEFAULT_LLM_TRANSLATION_STYLE)
             ),
-            'openai_compat_extra_body_json': getattr(config, 'OPENAI_COMPAT_EXTRA_BODY_JSON', ''),
+            'openai_compat_extra_body_json': getattr(
+                config,
+                'OPENAI_COMPAT_EXTRA_BODY_JSON',
+                config.DEFAULT_LLM_EXTRA_BODY_JSON,
+            ),
             'llm_parallel_fastest_mode': getattr(
                 config, 'LLM_PARALLEL_FASTEST_MODE', 'off'
             ),
@@ -440,10 +481,10 @@ def get_config_dict():
 
 def update_config(config_data):
     """更新配置"""
+    snapshot = _snapshot_runtime_config()
     try:
         api_keys = config_data.get('api_keys') or {}
-        if 'llm' in api_keys:
-            set_or_clear_env_var('LLM_API_KEY', api_keys['llm'])
+        update_runtime_credentials(api_keys)
 
         # 更新ASR配置
         if 'asr' in config_data:
@@ -503,7 +544,9 @@ def update_config(config_data):
                     'openrouter_streaming_deepl_hybrid',
                 )
             if 'llm_template' in trans:
-                config.LLM_TEMPLATE = (trans['llm_template'] or 'custom1').strip() or 'custom1'
+                config.LLM_TEMPLATE = (
+                    trans['llm_template'] or config.DEFAULT_LLM_TEMPLATE
+                ).strip() or config.DEFAULT_LLM_TEMPLATE
             if 'llm_base_url' in trans:
                 config.LLM_BASE_URL = (trans['llm_base_url'] or '').strip()
             if 'llm_model' in trans:
@@ -521,11 +564,12 @@ def update_config(config_data):
                 if raw_extra_body:
                     parsed_extra_body = json.loads(raw_extra_body)
                     if not isinstance(parsed_extra_body, dict):
-                        return False, 'msg.invalidExtraBodyJson', 'OpenAI 兼容 extra_body 必须是 JSON 对象'
+                        raise ValueError('OpenAI 兼容 extra_body 必须是 JSON 对象')
                 config.OPENAI_COMPAT_EXTRA_BODY_JSON = raw_extra_body
             if 'llm_parallel_fastest_mode' in trans:
                 mode = trans['llm_parallel_fastest_mode']
                 if mode not in ('off', 'final_only', 'all'):
+                    _restore_runtime_config(snapshot)
                     return (
                         False,
                         'msg.invalidParallelFastestMode',
@@ -654,8 +698,16 @@ def update_config(config_data):
         config.bump_config_applied_at_ms()
         return True, 'msg.configUpdated', '配置已更新'
     except json.JSONDecodeError:
+        _restore_runtime_config(snapshot)
         return False, 'msg.invalidExtraBodyJson', 'OpenAI 兼容 extra_body 不是合法的 JSON 对象'
+    except ValueError as e:
+        _restore_runtime_config(snapshot)
+        if 'extra_body' in str(e):
+            return False, 'msg.invalidExtraBodyJson', str(e)
+        print(f'Error updating config: {e}')
+        return False, 'msg.configUpdateFailed', '配置更新失败'
     except Exception as e:
+        _restore_runtime_config(snapshot)
         print(f'Error updating config: {e}')
         return False, 'msg.configUpdateFailed', '配置更新失败'
 
@@ -826,13 +878,13 @@ def get_local_asr_download_progress():
     return jsonify({'success': True, **_snapshot_local_asr_download_state()})
 
 
+@app.route('/api/credentials/status', methods=['GET'])
 @app.route('/api/env', methods=['GET'])
-def get_env_status():
-    """获取环境变量状态（不返回敏感信息）"""
+def get_credential_status():
+    """获取进程内凭据状态；旧 /api/env 路径仅用于向后兼容。"""
     llm_api_key_set = bool(
-        os.getenv('LLM_API_KEY')
-        or os.getenv('OPENAI_API_KEY')
-        or os.getenv('OPENROUTER_API_KEY')
+        str(getattr(config, 'LLM_API_KEY', '') or '').strip()
+        or str(getattr(config, 'OPENAI_API_KEY', '') or '').strip()
     )
     return jsonify({
         'llm': {
@@ -1029,21 +1081,12 @@ def panel():
 def open_panel():
     """打开迷你面板窗口"""
     try:
-        # 接收大面板传来的 API Keys 并写入环境变量
+        # 接收大面板传来的 API Keys，仅写入进程内运行配置
         data = request.json or {}
         api_keys = data.get('api_keys', {})
         floating_mode = bool(data.get('floating_mode', False))
         quick_language_settings = data.get('quick_language_settings') or {}
-        if api_keys.get('dashscope'):
-            os.environ['DASHSCOPE_API_KEY'] = api_keys['dashscope']
-        if api_keys.get('deepl'):
-            os.environ['DEEPL_API_KEY'] = api_keys['deepl']
-        if api_keys.get('llm'):
-            os.environ['LLM_API_KEY'] = api_keys['llm']
-        if api_keys.get('soniox'):
-            os.environ['SONIOX_API_KEY'] = api_keys['soniox']
-        if api_keys.get('doubao'):
-            os.environ['DOUBAO_API_KEY'] = api_keys['doubao']
+        update_runtime_credentials(api_keys)
 
         quick_lang_defaults = ['en', 'zh-CN', 'ja', 'ko']
         raw_quick_langs = quick_language_settings.get('languages')
@@ -1208,21 +1251,7 @@ def start_service():
         # 从请求中获取 API Keys
         api_keys = data.get('api_keys', {})
         
-        # 设置 API Keys 到环境变量
-        if 'dashscope' in api_keys and api_keys['dashscope']:
-            os.environ['DASHSCOPE_API_KEY'] = api_keys['dashscope']
-        
-        if 'deepl' in api_keys and api_keys['deepl']:
-            os.environ['DEEPL_API_KEY'] = api_keys['deepl']
-        
-        if 'llm' in api_keys and api_keys['llm']:
-            os.environ['LLM_API_KEY'] = api_keys['llm']
-        
-        if 'soniox' in api_keys and api_keys['soniox']:
-            os.environ['SONIOX_API_KEY'] = api_keys['soniox']
-
-        if 'doubao' in api_keys and api_keys['doubao']:
-            os.environ['DOUBAO_API_KEY'] = api_keys['doubao']
+        update_runtime_credentials(api_keys)
 
         accelerator_warning = _accelerator_window_warning_payload()
         vrchat_osc_warning = _vrchat_osc_warning_payload(udp_status)
@@ -1363,59 +1392,18 @@ def restart_service():
 @app.route('/api/config/defaults', methods=['GET'])
 def get_defaults():
     """获取默认配置"""
-    return jsonify({
-        'features': _get_feature_flags(),
-        'asr': {
-            'preferred_backend': 'qwen',  # 可选: 'qwen', 'qwen_international', 'dashscope'
-            'keepalive_interval': 30,
-            'enable_hot_words': True,
-            'use_international_endpoint': False,
-        },
-        'vad': {
-            'enabled': True,
-            'mode': 'silero',
-            'threshold': 0.50,
-            'min_speech_duration': 1.0,
-            'max_speech_duration': 30.0,
-            'silence_duration': 0.8,
-            'pre_speech_duration': 0.2,
-        },
-        'translation': {
-            'enable_translation': True,
-            'source_language': 'auto',
-            'target_language': 'ja',
-            'secondary_target_language': None,
-            'fallback_language': 'en',
-            'api_type': 'deepl',
-            'llm_parallel_fastest_mode': 'off',
-            'show_partial_results': False,
-            'enable_furigana': False,
-            'enable_pinyin': False,
-            'enable_arabic_reshaper': True,
-            'remove_trailing_period': False,
-            'text_fancy_style': 'none',
-            'enable_reverse_translation': False,
-        },
-        'mic_control': {
-            'enable_mic_control': False,
-            'mute_delay_seconds': 0.2,
-            'enable_double_mute_clear': True,
-        },
-        'language_detector': {
-            'type': 'cjke',
-        },
-        'panel': {
-            'width': 600,
-        },
-        'osc': {
-            'send_target_port': 9000,
-            'compat_mode': False,
-            'compat_listen_port': 9001,
-            'bypass_udp_port_check': False,
-            'send_error_messages': False,
-        },
-        'local_asr': _local_asr_config_dict() if is_local_asr_ui_enabled() else None,
-    })
+    defaults = config.get_default_ui_config()
+    defaults['features'] = _get_feature_flags()
+    defaults['local_asr'] = (
+        {
+            'engine': 'sensevoice',
+            'incremental_asr': True,
+            'interim_interval': 2.0,
+        }
+        if is_local_asr_ui_enabled()
+        else None
+    )
+    return jsonify(defaults)
 
 
 @app.route('/api/check-api-key', methods=['POST'])
@@ -1436,8 +1424,7 @@ def check_api_key():
         if api_key == '<your-dashscope-api-key>':
             return jsonify({'valid': False, 'message_id': 'msg.replacePlaceholder', 'message': '请替换占位符为真实的 API Key'})
         
-        # 临时设置API Key到环境变量
-        os.environ['DASHSCOPE_API_KEY'] = api_key
+        config.DASHSCOPE_API_KEY = api_key
         
         return jsonify({'valid': True, 'message_id': 'msg.keyFormatValid', 'message': 'API Key 格式有效'})
     except Exception as e:

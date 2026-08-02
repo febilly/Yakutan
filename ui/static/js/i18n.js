@@ -190,8 +190,6 @@ const translations = {
         'label.deeplKey': 'DeepL API Key (可选，用于翻译)',
         'link.getApiKey': '获取API Key →',
         'label.openrouterKey': 'LLM API Key（可选）',
-        'hint.openrouterEnvLocked': '已从环境变量读取',
-        'placeholder.openrouterEnvConfigured': '已在环境变量配置',
         'label.doubaoKey': '豆包录音文件 API Key（可选）',
         'hint.doubaoKey': '用于豆包录音文件识别后端。',
 
@@ -561,8 +559,6 @@ const translations = {
         'label.deeplKey': 'DeepL API Key (optional, for translation)',
         'link.getApiKey': 'Get API Key →',
         'label.openrouterKey': 'LLM API Key (optional)',
-        'hint.openrouterEnvLocked': 'Loaded from environment variable',
-        'placeholder.openrouterEnvConfigured': 'Configured via environment variable',
         'label.doubaoKey': 'Doubao File API Key (optional)',
         'hint.doubaoKey': 'Used by Doubao file transcription backend.',
 
@@ -926,8 +922,6 @@ const translations = {
         'label.deeplKey': 'DeepL API Key（任意、翻訳用）',
         'link.getApiKey': 'API Key を取得 →',
         'label.openrouterKey': 'LLM API Key（任意）',
-        'hint.openrouterEnvLocked': '環境変数から読み込み済み',
-        'placeholder.openrouterEnvConfigured': '環境変数で設定済み',
         'label.doubaoKey': 'Doubao 録音ファイル API Key（任意）',
         'hint.doubaoKey': 'Doubao 録音ファイル認識バックエンド用。',
 
@@ -1285,8 +1279,6 @@ const translations = {
         'label.deeplKey': 'DeepL API Key (선택, 번역용)',
         'link.getApiKey': 'API Key 받기 →',
         'label.openrouterKey': 'LLM API Key (선택)',
-        'hint.openrouterEnvLocked': '환경 변수에서 로드됨',
-        'placeholder.openrouterEnvConfigured': '환경 변수로 설정됨',
         'label.doubaoKey': 'Doubao 파일 API Key (선택)',
         'hint.doubaoKey': 'Doubao 파일 음성 인식 백엔드용입니다.',
 

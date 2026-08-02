@@ -74,8 +74,8 @@ const LLM_TEMPLATE_PARALLEL_STORAGE_PREFIX = 'llm_template_parallel_';
 // 待显示的警告消息（用于自动切换翻译API）
 let pendingWarningMessage = null;
 
-// 环境变量状态（由后端提供）
-let envStatus = {
+// 后端进程内凭据状态
+let runtimeCredentialStatus = {
     llm: {
         api_key_set: false,
     },
@@ -643,7 +643,7 @@ function applyAutoLanguageDetectorIfNeeded() {
 }
 
 const LLM_PARALLEL_FASTEST_MODES = ['off', 'final_only', 'all'];
-const DEFAULT_LLM_TEMPLATE_NAME = 'custom1';
+const DEFAULT_LLM_TEMPLATE_NAME = 'deepseek-v4-flash';
 const SIMPLE_MODE_LLM_TEMPLATE_NAME = 'deepseek-v4-flash';
 const SIMPLE_MODE_LLM_BASE_URL = 'https://api.deepseek.com';
 const SIMPLE_MODE_LLM_EXTRA_BODY_JSON = '{"thinking": {"type": "disabled"}}';
@@ -805,7 +805,7 @@ function setSelectedLLMTemplateName(templateName, persist = true) {
     const targetTemplateName = isSimpleMode ? SIMPLE_MODE_LLM_TEMPLATE_NAME : templateName;
     const normalized = normalizeLLMTemplateName(targetTemplateName) || DEFAULT_LLM_TEMPLATE_NAME;
     activeLLMTemplate = normalized;
-    if (persist && !isSimpleMode) {
+    if (persist) {
         localStorage.setItem(LLM_SELECTED_TEMPLATE_STORAGE_KEY, normalized);
     }
     updateLLMTemplateButtonStates();
@@ -837,7 +837,7 @@ function hasAnyLLMConnectionFieldValue() {
 
 function ensureSelectedLLMTemplate(configTranslation = null) {
     if (document.body.classList.contains('mode-simple')) {
-        setSelectedLLMTemplateName(SIMPLE_MODE_LLM_TEMPLATE_NAME, false);
+        setSelectedLLMTemplateName(SIMPLE_MODE_LLM_TEMPLATE_NAME);
         return SIMPLE_MODE_LLM_TEMPLATE_NAME;
     }
     // Check if the template saved in backend config or localStorage is non-existent/invalid.
@@ -1076,7 +1076,7 @@ function syncSimpleModeLLMTemplateFields() {
     const extraInput = document.getElementById('openai-compat-extra-body-json');
     const storedKey = getStoredLLMTemplateKey(SIMPLE_MODE_LLM_TEMPLATE_NAME);
 
-    setSelectedLLMTemplateName(SIMPLE_MODE_LLM_TEMPLATE_NAME, false);
+    setSelectedLLMTemplateName(SIMPLE_MODE_LLM_TEMPLATE_NAME);
     if (baseUrlInput) baseUrlInput.value = SIMPLE_MODE_LLM_BASE_URL;
     if (modelInput) modelInput.value = SIMPLE_MODE_LLM_TEMPLATE_NAME;
     if (extraInput) extraInput.value = SIMPLE_MODE_LLM_EXTRA_BODY_JSON;
@@ -1209,7 +1209,7 @@ function shouldShowLLMSettings(apiType) {
 const VALID_LLM_TRANSLATION_FORMALITY = ['low', 'medium', 'high'];
 const VALID_LLM_TRANSLATION_STYLE = ['standard', 'light'];
 const DEFAULT_LLM_TRANSLATION_FORMALITY = 'medium';
-const DEFAULT_LLM_TRANSLATION_STYLE = 'light';
+const DEFAULT_LLM_TRANSLATION_STYLE = 'standard';
 
 function sanitizeLLMTranslationFormality(value) {
     const normalized = (value || DEFAULT_LLM_TRANSLATION_FORMALITY).trim().toLowerCase();
@@ -1233,7 +1233,7 @@ function isLLMConnectionFieldsComplete() {
     const base = simpleLLMFields?.baseUrl || (document.getElementById('llm-base-url')?.value || '').trim();
     const model = simpleLLMFields?.model || (document.getElementById('llm-model')?.value || '').trim();
     const llmKey = simpleLLMFields?.apiKey || (document.getElementById('llm-api-key')?.value || '').trim();
-    const hasKey = envStatus.llm.api_key_set || !!llmKey;
+    const hasKey = runtimeCredentialStatus.llm.api_key_set || !!llmKey;
     return !!(base && model && hasKey);
 }
 
@@ -1290,7 +1290,7 @@ function updateLLMStreamingPromoState() {
 function updateLLMSettingsVisibility(apiType = null, expandPanel = false) {
     const actualApiType = apiType || (document.getElementById('translation-api-type')
         ? document.getElementById('translation-api-type').value
-        : 'qwen_mt');
+        : 'openrouter');
     const wrapper = document.getElementById('llm-settings-wrapper');
     const formalityGroup = document.getElementById('llm-translation-formality-group');
     const styleGroup = document.getElementById('llm-translation-style-group');
@@ -1311,7 +1311,7 @@ function updateLLMSettingsVisibility(apiType = null, expandPanel = false) {
 function updateSensitiveWordsHint(apiType = null) {
     const actualApiType = apiType || (document.getElementById('translation-api-type')
         ? document.getElementById('translation-api-type').value
-        : 'qwen_mt');
+        : 'openrouter');
     const hint = document.getElementById('qwen-mt-sensitive-words-hint');
     if (!hint) return;
 
@@ -1559,29 +1559,29 @@ function populateLLMTemplateForm(templateName) {
     if (storedKey) {
         keyInput.value = storedKey;
         persistSecretInputValue('llm-api-key');
-        envStatus.llm.api_key_set = true;
+        runtimeCredentialStatus.llm.api_key_set = true;
     } else if (templateConfig.isCustom) {
         keyInput.value = '';
         persistSecretInputValue('llm-api-key');
-        envStatus.llm.api_key_set = false;
+        runtimeCredentialStatus.llm.api_key_set = false;
     } else if (templateConfig.copyDashscopeKey) {
         const dashscopeKey = dashscopeKeyInput ? dashscopeKeyInput.value.trim() : '';
         if (dashscopeKey) {
             keyInput.value = dashscopeKey;
             setStoredLLMTemplateKey(targetTemplate, dashscopeKey);
             persistSecretInputValue('llm-api-key');
-            envStatus.llm.api_key_set = true;
+            runtimeCredentialStatus.llm.api_key_set = true;
             showMessage('✅ ' + t('msg.llmTemplateDashscopeCopied'), 'success');
         } else {
             keyInput.value = '';
             persistSecretInputValue('llm-api-key');
-            envStatus.llm.api_key_set = false;
+            runtimeCredentialStatus.llm.api_key_set = false;
             showMessage('⚠️ ' + t('msg.llmTemplateDashscopeKeyMissing'), 'warning');
         }
     } else {
         keyInput.value = '';
         persistSecretInputValue('llm-api-key');
-        envStatus.llm.api_key_set = false;
+        runtimeCredentialStatus.llm.api_key_set = false;
     }
 
     updateLLMTemplateKeySourceHint(targetTemplate);
@@ -2023,18 +2023,18 @@ document.addEventListener('i18n:languageChanged', function () {
     updateLLMTemplateKeySourceHint();
 });
 
-// 从服务器加载环境变量状态
+// 从服务器加载进程内凭据状态
 async function loadEnvStatus() {
     try {
-        const response = await fetch(`${API_BASE}/env`);
+        const response = await fetch(`${API_BASE}/credentials/status`);
         if (!response.ok) return;
         const data = await response.json();
         if (data && data.llm) {
-            envStatus.llm.api_key_set = !!data.llm.api_key_set;
+            runtimeCredentialStatus.llm.api_key_set = !!data.llm.api_key_set;
         }
     } catch (e) {
         // 静默失败：不影响其它功能
-        console.warn('获取环境变量状态失败:', e);
+        console.warn('获取运行凭据状态失败:', e);
     }
 }
 
@@ -2351,7 +2351,7 @@ function saveAPIKey(event) {
 
     if (event.target.id === 'llm-api-key') {
         persistCurrentLLMTemplateKey();
-        envStatus.llm.api_key_set = !!event.target.value.trim();
+        runtimeCredentialStatus.llm.api_key_set = !!event.target.value.trim();
     }
 
     // 触发配置自动保存
@@ -2373,7 +2373,7 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('secondary-target-language').value = config.translation.secondary_target_language || '';
                 document.getElementById('fallback-language').value = config.translation.fallback_language || '';
                 // 处理 LLM 流式模式的特殊情况
-                const apiType = config.translation.api_type || 'qwen_mt';
+                const apiType = config.translation.api_type || 'openrouter_streaming';
                 if (apiType === 'openrouter_streaming') {
                     document.getElementById('translation-api-type').value = 'openrouter';
                     document.getElementById('openrouter-streaming-mode').checked = true;
@@ -2577,7 +2577,7 @@ function loadDefaultConfig() {
     document.getElementById('target-language').value = 'ja';
     document.getElementById('secondary-target-language').value = '';
     document.getElementById('fallback-language').value = 'en';
-    document.getElementById('translation-api-type').value = 'qwen_mt';
+    document.getElementById('translation-api-type').value = 'openrouter';
     applySourceLanguageInputFromStored('auto');
     document.getElementById('show-partial-results').checked = false;
     document.getElementById('enable-furigana').checked = false;
@@ -2588,15 +2588,15 @@ function loadDefaultConfig() {
     document.getElementById('enable-reverse-translation').checked = false;
     const streamingModeEl = document.getElementById('openrouter-streaming-mode');
     if (streamingModeEl) {
-        streamingModeEl.checked = false;
+        streamingModeEl.checked = true;
         streamingModeEl.disabled = false;
     }
     setLLMParallelFastestModeSelect('off');
-    document.getElementById('llm-base-url').value = '';
-    document.getElementById('llm-model').value = '';
+    document.getElementById('llm-base-url').value = SIMPLE_MODE_LLM_BASE_URL;
+    document.getElementById('llm-model').value = SIMPLE_MODE_LLM_TEMPLATE_NAME;
     document.getElementById('llm-translation-formality').value = DEFAULT_LLM_TRANSLATION_FORMALITY;
     document.getElementById('llm-translation-style').value = DEFAULT_LLM_TRANSLATION_STYLE;
-    document.getElementById('openai-compat-extra-body-json').value = '';
+    document.getElementById('openai-compat-extra-body-json').value = SIMPLE_MODE_LLM_EXTRA_BODY_JSON;
 
     const showTag = document.getElementById('show-original-and-lang-tag');
     if (showTag) showTag.checked = true;
@@ -3211,7 +3211,11 @@ async function saveConfig(autoSave = false) {
             },
             local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
             api_keys: {
+                dashscope: document.getElementById('dashscope-api-key')?.value.trim() || '',
+                deepl: document.getElementById('deepl-api-key')?.value.trim() || '',
                 llm: getEffectiveLLMApiKeyForCurrentMode(),
+                doubao: document.getElementById('doubao-api-key')?.value.trim() || '',
+                soniox: document.getElementById('soniox-api-key')?.value.trim() || '',
             }
         };
 
@@ -3404,7 +3408,7 @@ async function startService() {
         const llmModel = document.getElementById('llm-model').value.trim();
         const hasLLMKey = document.body.classList.contains('mode-simple')
             ? !!llmKey
-            : (envStatus.llm.api_key_set || !!llmKey);
+            : (runtimeCredentialStatus.llm.api_key_set || !!llmKey);
 
         const enableTranslation = document.getElementById('enable-translation').checked;
         const translationApiSelect = document.getElementById('translation-api-type');
@@ -3556,16 +3560,15 @@ async function startService() {
             }
         }
 
-        try {
-            await saveConfig(true); // autoSave = true，不显示成功消息
-            console.log('✓ 配置已同步到服务器');
-        } catch (error) {
-            console.error('同步配置失败:', error);
+        const configSaved = await saveConfig(true);
+        if (!configSaved) {
+            console.error('同步配置失败');
             showMessage('❌ ' + t('msg.syncConfigFailed'), 'error');
             startBtn.disabled = false;
             startBtn.textContent = t('btn.startService');
             return;
         }
+        console.log('✓ 配置已同步到服务器');
 
         const apiKeys = {
             dashscope: dashscopeKey,
@@ -3663,8 +3666,8 @@ async function stopService() {
 
 // 重启服务
 async function restartService() {
+    const tr = window.i18n ? window.i18n.t : (key) => key;
     try {
-        const tr = window.i18n ? window.i18n.t : (key) => key;
         const bypassOscRestart = shouldSkipOscUdpPortCheck();
         if (!bypassOscRestart) {
             try {
@@ -3700,13 +3703,66 @@ async function restartService() {
                 showMessage('⚠️ ' + vrchatOscWarning, 'warning');
             }
             setTimeout(updateStatus, 500);
+            return true;
         } else {
             const localizedMsg = localizeBackendMessage(result.message_id, result.message);
             showMessage('❌ ' + localizedMsg, 'error');
+            return false;
         }
     } catch (error) {
         console.error('重启服务失败:', error);
+        showMessage('❌ ' + tr('msg.restartFailed'), 'error');
+        return false;
     }
+}
+
+const RESET_MANAGED_STORAGE_KEYS = new Set([
+    CONFIG_STORAGE_KEY,
+    CONFIG_STORAGE_KEY + '_timestamp',
+    CONFIG_TOUCH_MAIN_MS_KEY,
+    LAST_SEEN_BOOT_MS_KEY,
+    VRCX_BRIDGE_BUTTON_VISIBLE_STORAGE_KEY,
+    PANEL_FLOATING_MODE_STORAGE_KEY,
+    LLM_SELECTED_TEMPLATE_STORAGE_KEY,
+    QUICK_LANG_STORAGE_KEY,
+    QUICK_LANG_BAR_ENABLED_KEY,
+]);
+
+function isResetManagedStorageKey(key) {
+    return RESET_MANAGED_STORAGE_KEYS.has(key)
+        || key.startsWith(LLM_TEMPLATE_KEY_STORAGE_PREFIX)
+        || key.startsWith(LLM_TEMPLATE_BASEURL_STORAGE_PREFIX)
+        || key.startsWith(LLM_TEMPLATE_MODEL_STORAGE_PREFIX)
+        || key.startsWith(LLM_TEMPLATE_EXTRABODY_STORAGE_PREFIX)
+        || key.startsWith(LLM_TEMPLATE_PARALLEL_STORAGE_PREFIX);
+}
+
+function snapshotResetManagedStorage() {
+    const snapshot = new Map();
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && isResetManagedStorageKey(key)) {
+            snapshot.set(key, localStorage.getItem(key));
+        }
+    }
+    return snapshot;
+}
+
+function restoreResetManagedStorage(snapshot) {
+    const currentKeys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && isResetManagedStorageKey(key)) {
+            currentKeys.push(key);
+        }
+    }
+    currentKeys.forEach((key) => localStorage.removeItem(key));
+    snapshot.forEach((value, key) => localStorage.setItem(key, value));
+
+    loadConfigFromLocalStorage();
+    loadPanelFloatingModeSetting();
+    loadQuickLanguageSettings();
+    updateVrcxBridgeControlsVisibility();
 }
 
 // 恢复默认设置
@@ -3717,12 +3773,18 @@ async function resetToDefaults() {
         return;
     }
 
-    try {
-        // 先把当前表单写回所属模板存储，避免丢失用户刚刚的改动
-        persistCurrentLLMTemplateState();
+    // 把当前表单完整保存为回滚点；重置只有在后端确认保存后才提交本地状态。
+    persistCurrentLLMTemplateState();
+    saveConfigToLocalStorage();
+    const storageSnapshot = snapshotResetManagedStorage();
 
-        // 使用前端默认配置（含将选中模板恢复为默认模板）
-        loadDefaultConfig();
+    try {
+        const defaultsResponse = await fetch(`${API_BASE}/config/defaults`);
+        if (!defaultsResponse.ok) {
+            throw new Error(`defaults HTTP ${defaultsResponse.status}`);
+        }
+        const defaults = await defaultsResponse.json();
+        applyServerConfigPayload(defaults);
         resetPanelFloatingModeSetting();
         resetQuickLanguageSettings();
         localStorage.setItem(VRCX_BRIDGE_BUTTON_VISIBLE_STORAGE_KEY, 'false');
@@ -3736,22 +3798,34 @@ async function resetToDefaults() {
         resetStoredLLMTemplateParametersToDefaults();
         populateLLMTemplateForm(getSelectedLLMTemplateName());
 
-        // 保存到本地浏览器
+        const saveSucceeded = await saveConfig(true);
+        if (!saveSucceeded) {
+            throw new Error('default configuration was rejected by backend');
+        }
+
+        // 后端保存成功后才提交浏览器持久化状态。
         saveConfigToLocalStorage();
-
-        // 再保存到服务器
-        await saveConfig();
         showMessage('✅ ' + t('msg.defaultsRestored'), 'success');
+    } catch (error) {
+        restoreResetManagedStorage(storageSnapshot);
+        console.error('恢复默认设置失败:', error);
+        showMessage(t('msg.restoreDefaultsFailed'), 'error');
+        return;
+    }
 
-        // 如果服务正在运行，重启
+    // 配置已经成功保存；后续状态检查或重启失败不会回滚配置。
+    try {
         const statusResponse = await fetch(`${API_BASE}/status`);
+        if (!statusResponse.ok) {
+            throw new Error(`status HTTP ${statusResponse.status}`);
+        }
         const status = await statusResponse.json();
         if (status.running) {
             await restartService();
         }
     } catch (error) {
-        console.error('恢复默认设置失败:', error);
-        showMessage(t('msg.restoreDefaultsFailed'), 'error');
+        console.error('默认设置已保存，但识别服务状态检查或重启失败:', error);
+        showMessage('❌ ' + t('msg.restartFailed'), 'error');
     }
 }
 
@@ -4057,9 +4131,13 @@ async function openMiniPanel() {
 
     try {
         // 先将当前配置同步到后端
-        await saveConfig(true);
+        const configSaved = await saveConfig(true);
+        if (!configSaved) {
+            showMessage('❌ ' + t('msg.syncConfigFailed'), 'error');
+            return;
+        }
 
-        // 收集 API Keys 一并发送给后端，让后端写入环境变量
+        // 收集 API Keys 一并发送给后端，写入进程内运行配置
         const apiKeys = {
             dashscope: document.getElementById('dashscope-api-key').value.trim(),
             deepl: document.getElementById('deepl-api-key').value.trim(),
