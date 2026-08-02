@@ -6,7 +6,6 @@ import asyncio
 import logging
 import time
 import threading
-import os
 from typing import Optional, Tuple
 from dataclasses import dataclass
 from pythonosc.dispatcher import Dispatcher
@@ -75,8 +74,13 @@ class OSCManager:
             self._initialized = True
             self._client = None
             self._mute_callback = None  # 静音状态变化的回调函数
-            self._oscquery_enabled = str(os.environ.get("OSC_QUERY_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
-            self._oscquery_app_name = str(os.environ.get("OSCQUERY_APP_NAME", "DeafaultAppName")).strip() or "DeafaultAppName"
+            self._oscquery_enabled = bool(
+                getattr(app_config, "OSC_QUERY_ENABLED", True)
+            )
+            self._oscquery_app_name = (
+                str(getattr(app_config, "OSCQUERY_APP_NAME", "DeafaultAppName")).strip()
+                or "DeafaultAppName"
+            )
             
             self._last_mute_value: Optional[bool] = None
             self._oscquery_lock = threading.Lock()

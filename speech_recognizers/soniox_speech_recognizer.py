@@ -67,7 +67,7 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
         self._session_id: Optional[str] = None
         
         # 配置参数
-        self._api_key = api_key or os.environ.get("SONIOX_API_KEY", "")
+        self._api_key = os.environ.get("SONIOX_API_KEY", "") if api_key is None else api_key
         self._model = model
         self._sample_rate = sample_rate
         self._num_channels = num_channels

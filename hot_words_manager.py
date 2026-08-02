@@ -49,10 +49,15 @@ class HotWordsManager:
         初始化热词管理器
         
         Args:
-            api_key: DashScope API Key（如果为 None，则从环境变量获取）
+            api_key: DashScope API Key。传入空字符串表示明确不使用环境凭据；
+                仅独立调用方省略参数时保留 DashScope SDK 的兼容行为。
         """
         self.api_key = api_key
-        self.vocabulary_service = VocabularyService(api_key=api_key) if api_key else VocabularyService()
+        self.vocabulary_service = (
+            VocabularyService()
+            if api_key is None
+            else VocabularyService(api_key=api_key)
+        )
         self.vocabulary_id = None
         self.hot_words = []
         

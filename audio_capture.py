@@ -3,7 +3,6 @@
 """
 import asyncio
 import logging
-import os
 import time
 from typing import Optional
 
@@ -328,12 +327,7 @@ async def audio_capture_task(state, recognizer):
     _vad_chunk_samples = 512
     _vad_chunk_count = 0
     _vad_last_diag_at = 0.0
-    _vad_verbose_raw = (
-        os.environ.get('ENABLE_VAD_GATING_VERBOSE')
-        or os.environ.get('ENABLE_LOCAL_VAD_GATING_VERBOSE')
-        or ''
-    )
-    _vad_verbose = _vad_verbose_raw.strip().lower() in ('1', 'true', 'yes', 'on')
+    _vad_verbose = bool(getattr(config, 'ENABLE_VAD_GATING_VERBOSE', False))
 
     # 一次性报告 VAD 状态
     if state.vad_enabled and state.vad_processor is not None:

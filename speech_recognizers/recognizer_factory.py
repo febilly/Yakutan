@@ -1,7 +1,6 @@
 """语音识别器工厂模块，负责创建和配置识别器实例"""
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, Optional
 
 import dashscope
@@ -102,14 +101,14 @@ def _to_doubao_language(source_language: Optional[str]) -> Optional[str]:
 
 
 def _resolve_doubao_credentials() -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """Resolve Doubao credentials from env vars.
+    """Resolve Doubao credentials from the process-local runtime config.
 
     优先读取 DOUBAO_API_KEY。
     同时兼容 DOUBAO_APP_ID + DOUBAO_ACCESS_KEY 组合方式。
     """
-    app_id = os.environ.get('DOUBAO_APP_ID', '').strip()
-    access_key = os.environ.get('DOUBAO_ACCESS_KEY', '').strip()
-    combined = os.environ.get('DOUBAO_API_KEY', '').strip()
+    app_id = str(getattr(config, 'DOUBAO_APP_ID', '') or '').strip()
+    access_key = str(getattr(config, 'DOUBAO_ACCESS_KEY', '') or '').strip()
+    combined = str(getattr(config, 'DOUBAO_API_KEY', '') or '').strip()
     api_key = ''
 
     if combined:
@@ -128,12 +127,12 @@ def _resolve_doubao_credentials() -> tuple[Optional[str], Optional[str], Optiona
 def init_dashscope_api_key() -> None:
     """
     初始化 DashScope API Key
-    从环境变量 DASHSCOPE_API_KEY 加载，如果未设置则使用占位符
+    从进程内运行配置加载，如果未设置则使用占位符
     """
-    if 'DASHSCOPE_API_KEY' in os.environ:
-        dashscope.api_key = os.environ['DASHSCOPE_API_KEY']
-    else:
-        dashscope.api_key = '<your-dashscope-api-key>'
+    dashscope.api_key = (
+        str(getattr(config, 'DASHSCOPE_API_KEY', '') or '').strip()
+        or '<your-dashscope-api-key>'
+    )
 
 
 def create_recognizer(
@@ -246,11 +245,9 @@ def create_recognizer(
         if SonioxSpeechRecognizer is None or not WEBSOCKETS_AVAILABLE:
             raise RuntimeError('SonioxSpeechRecognizer 不可用，请安装 websockets 库: pip install websockets')
         
-        # 从环境变量获取 API Key
-        import os
-        api_key = os.environ.get('SONIOX_API_KEY', '')
+        api_key = str(getattr(config, 'SONIOX_API_KEY', '') or '').strip()
         if not api_key:
-            raise RuntimeError('SONIOX_API_KEY 环境变量未设置')
+            raise RuntimeError('Soniox API Key 未设置')
         
         recognition_kwargs = {
             'api_key': api_key,
@@ -341,9 +338,8 @@ def is_backend_available(backend: str) -> bool:
         return not use_international
     elif backend == 'soniox':
         # Soniox 需要 websockets 库和 API Key
-        import os
         has_lib = SonioxSpeechRecognizer is not None and WEBSOCKETS_AVAILABLE
-        has_key = bool(os.environ.get('SONIOX_API_KEY', ''))
+        has_key = bool(str(getattr(config, 'SONIOX_API_KEY', '') or '').strip())
         return has_lib and has_key
     elif backend == 'doubao_file':
         api_key, app_id, access_key = _resolve_doubao_credentials()
