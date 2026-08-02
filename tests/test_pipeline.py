@@ -77,11 +77,11 @@ class TestAPIRegistry:
         assert _get_api_class("deepl") is DeepLAPI
 
     def test_get_api_class_fallback_to_default(self):
-        from streaming_translation.api.qwen_mt import QwenMTAPI
-        assert _get_api_class("nonexistent") is QwenMTAPI
+        from streaming_translation.api.openrouter import OpenRouterStreamingAPI
+        assert _get_api_class("nonexistent") is OpenRouterStreamingAPI
 
     def test_default_api_type(self):
-        assert DEFAULT_API_TYPE == "qwen_mt"
+        assert DEFAULT_API_TYPE == "openrouter_streaming"
 
 
 # ── Streaming mode helpers ────────────────────────────────────────────

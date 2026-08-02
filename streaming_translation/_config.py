@@ -8,8 +8,6 @@ importing a project-wide config module.
 
 from __future__ import annotations
 
-import os
-
 from dataclasses import dataclass
 from typing import Optional
 
@@ -46,10 +44,10 @@ class TranslationConfig:
     """Fallback target when source == primary target."""
 
     # ── Translation API selection ─────────────────────────────────────
-    translation_api_type: str = "qwen_mt"
+    translation_api_type: str = "openrouter_streaming"
     """Which API backend to use (key into the API class registry)."""
 
-    translate_partial_results: bool = False
+    translate_partial_results: bool = True
     """Whether to translate partial (streaming, mid-sentence) results."""
 
     # ── Context-aware translation ─────────────────────────────────────
@@ -74,19 +72,21 @@ class TranslationConfig:
     smart_target_manual_secondary: Optional[str] = None
 
     # ── LLM (OpenRouter / OpenAI-compatible) ──────────────────────────
-    llm_base_url: str = ""
+    llm_base_url: str = "https://api.deepseek.com"
     """Base URL for the OpenAI-compatible API."""
 
-    llm_model: str = ""
+    llm_model: str = "deepseek-v4-flash"
     """Model name for LLM translation."""
 
     llm_temperature: float = 0.2
     llm_timeout: int = 30
     llm_max_retries: int = 3
     llm_formality: str = "medium"
-    llm_style: str = "light"
-    llm_extra_body_json: str = ""
+    llm_style: str = "standard"
+    llm_extra_body_json: str = '{"thinking": {"type": "disabled"}}'
     llm_parallel_fastest_mode: str = "off"
+    llm_app_url: str = ""
+    llm_app_title: str = ""
 
     # ── Qwen-MT ───────────────────────────────────────────────────────
     use_international_endpoint: bool = False
@@ -97,9 +97,8 @@ class TranslationConfig:
     """Optional HTTP/HTTPS proxy URL applied to all API backends."""
 
     # ── API keys (injected externally) ────────────────────────────────
-    # These live in environment variables in the host application;
-    # the library does **not** read env vars — it expects the caller to
-    # pass them explicitly.
+    # The library does **not** read host configuration here. Callers inject
+    # credentials explicitly through the module/object passed below.
     deepl_api_key: Optional[str] = None
     dashscope_api_key: Optional[str] = None
     llm_api_key: Optional[str] = None
@@ -110,17 +109,6 @@ class TranslationConfig:
     """DeepL formality setting (``"default"``, ``"prefer_more"``, ``"prefer_less"``)."""
 
     terminology_enabled: bool = True
-
-
-def _get_module_attr_or_env(module: object, attr_name: str, *env_names: str) -> Optional[str]:
-    value = getattr(module, attr_name, None)
-    if value is not None:
-        return value
-    for env_name in env_names:
-        env_value = os.getenv(env_name)
-        if env_value:
-            return env_value
-    return None
 
 
 def config_from_module(module: object) -> TranslationConfig:
@@ -139,8 +127,8 @@ def config_from_module(module: object) -> TranslationConfig:
         target_language=getattr(module, "TARGET_LANGUAGE", "ja"),
         secondary_target_language=getattr(module, "SECONDARY_TARGET_LANGUAGE", None),
         fallback_language=getattr(module, "FALLBACK_LANGUAGE", "en"),
-        translation_api_type=getattr(module, "TRANSLATION_API_TYPE", "qwen_mt"),
-        translate_partial_results=getattr(module, "TRANSLATE_PARTIAL_RESULTS", False),
+        translation_api_type=getattr(module, "TRANSLATION_API_TYPE", "openrouter_streaming"),
+        translate_partial_results=getattr(module, "TRANSLATE_PARTIAL_RESULTS", True),
         context_prefix=getattr(module, "CONTEXT_PREFIX", ""),
         translation_context_size=getattr(module, "TRANSLATION_CONTEXT_SIZE", 6),
         translation_context_aware=getattr(module, "TRANSLATION_CONTEXT_AWARE", True),
@@ -153,21 +141,27 @@ def config_from_module(module: object) -> TranslationConfig:
         smart_target_min_samples=getattr(module, "SMART_TARGET_LANGUAGE_MIN_SAMPLES", 3),
         smart_target_count=getattr(module, "SMART_TARGET_LANGUAGE_COUNT", 2),
         smart_target_manual_secondary=getattr(module, "SMART_TARGET_LANGUAGE_MANUAL_SECONDARY", None),
-        llm_base_url=getattr(module, "LLM_BASE_URL", ""),
-        llm_model=getattr(module, "LLM_MODEL", ""),
+        llm_base_url=getattr(module, "LLM_BASE_URL", "https://api.deepseek.com"),
+        llm_model=getattr(module, "LLM_MODEL", "deepseek-v4-flash"),
         llm_temperature=getattr(module, "LLM_TRANSLATION_TEMPERATURE", 0.2),
         llm_timeout=getattr(module, "LLM_TRANSLATION_TIMEOUT", 30),
         llm_max_retries=getattr(module, "LLM_TRANSLATION_MAX_RETRIES", 3),
         llm_formality=getattr(module, "LLM_TRANSLATION_FORMALITY", "medium"),
-        llm_style=getattr(module, "LLM_TRANSLATION_STYLE", "light"),
-        llm_extra_body_json=getattr(module, "OPENAI_COMPAT_EXTRA_BODY_JSON", ""),
+        llm_style=getattr(module, "LLM_TRANSLATION_STYLE", "standard"),
+        llm_extra_body_json=getattr(
+            module,
+            "OPENAI_COMPAT_EXTRA_BODY_JSON",
+            '{"thinking": {"type": "disabled"}}',
+        ),
         llm_parallel_fastest_mode=getattr(module, "LLM_PARALLEL_FASTEST_MODE", "off"),
+        llm_app_url=getattr(module, "LLM_APP_URL", ""),
+        llm_app_title=getattr(module, "LLM_APP_TITLE", ""),
         use_international_endpoint=getattr(module, "USE_INTERNATIONAL_ENDPOINT", False),
         proxy_url=None,
-        deepl_api_key=_get_module_attr_or_env(module, "DEEPL_API_KEY", "DEEPL_API_KEY"),
-        dashscope_api_key=_get_module_attr_or_env(module, "DASHSCOPE_API_KEY", "DASHSCOPE_API_KEY"),
-        llm_api_key=_get_module_attr_or_env(module, "LLM_API_KEY", "LLM_API_KEY", "OPENROUTER_API_KEY"),
-        openai_api_key=_get_module_attr_or_env(module, "OPENAI_API_KEY", "OPENAI_API_KEY"),
+        deepl_api_key=getattr(module, "DEEPL_API_KEY", None),
+        dashscope_api_key=getattr(module, "DASHSCOPE_API_KEY", None),
+        llm_api_key=getattr(module, "LLM_API_KEY", None),
+        openai_api_key=getattr(module, "OPENAI_API_KEY", None),
         deepl_formality=getattr(module, "DEEPL_FORMALITY", "default"),
         terminology_enabled=getattr(module, "TERMINOLOGY_ENABLED", True),
     )

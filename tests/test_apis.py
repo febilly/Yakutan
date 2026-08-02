@@ -37,6 +37,12 @@ class TestDeepLAPI:
                 from streaming_translation.api.deepl import DeepLAPI
                 DeepLAPI(proxy_url=None)
 
+    def test_explicit_empty_key_does_not_fall_back_to_environment(self):
+        with patch.dict("os.environ", {"DEEPL_API_KEY": "inherited-key"}, clear=True):
+            with pytest.raises(ValueError, match="DeepL API key"):
+                from streaming_translation.api.deepl import DeepLAPI
+                DeepLAPI(api_key="", proxy_url=None)
+
     def test_construction_success(self):
         mock_client = MagicMock()
         mock_client.translate_text.return_value.text = "Hallo"
@@ -239,6 +245,12 @@ class TestQwenMTAPI:
                 from streaming_translation.api.qwen_mt import QwenMTAPI
                 QwenMTAPI(proxy_url=None)
 
+    def test_explicit_empty_key_does_not_fall_back_to_environment(self):
+        with patch.dict("os.environ", {"DASHSCOPE_API_KEY": "inherited-key"}, clear=True):
+            with pytest.raises(ValueError, match="DashScope API key"):
+                from streaming_translation.api.qwen_mt import QwenMTAPI
+                QwenMTAPI(api_key="", proxy_url=None)
+
     @patch("streaming_translation.api.qwen_mt.OpenAI")
     def test_translate_success(self, mock_openai):
         mock_completion = MagicMock()
@@ -336,6 +348,17 @@ class TestOpenRouterAPI:
                 from streaming_translation.api.openrouter import OpenRouterAPI
                 OpenRouterAPI(base_url="https://test.ai/v1", model="test",
                             api_key=None, proxy_url=None)
+
+    def test_explicit_empty_key_does_not_fall_back_to_environment(self):
+        with patch.dict("os.environ", {"LLM_API_KEY": "inherited-key"}, clear=True):
+            with pytest.raises(ValueError, match="LLM API Key"):
+                from streaming_translation.api.openrouter import OpenRouterAPI
+                OpenRouterAPI(
+                    base_url="https://test.ai/v1",
+                    model="test",
+                    api_key="",
+                    proxy_url=None,
+                )
 
     @patch("streaming_translation.api.openrouter.OpenAI")
     def test_construction_and_translate(self, mock_openai):

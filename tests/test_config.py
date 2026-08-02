@@ -14,8 +14,12 @@ class TestTranslationConfig:
         assert cfg.target_language == "ja"
         assert cfg.secondary_target_language is None
         assert cfg.fallback_language == "en"
-        assert cfg.translation_api_type == "qwen_mt"
-        assert cfg.translate_partial_results is False
+        assert cfg.translation_api_type == "openrouter_streaming"
+        assert cfg.translate_partial_results is True
+        assert cfg.llm_base_url == "https://api.deepseek.com"
+        assert cfg.llm_model == "deepseek-v4-flash"
+        assert cfg.llm_extra_body_json == '{"thinking": {"type": "disabled"}}'
+        assert cfg.llm_style == "standard"
         assert cfg.translation_context_size == 6
         assert cfg.translation_context_aware is True
         assert cfg.smart_target_primary_enabled is False
@@ -65,7 +69,7 @@ class TestConfigFromModule:
             pass
         cfg = config_from_module(Empty)
         assert cfg.target_language == "ja"  # default
-        assert cfg.translation_api_type == "qwen_mt"
+        assert cfg.translation_api_type == "openrouter_streaming"
         assert cfg.source_language == "auto"
 
     def test_partial_module(self):
@@ -131,7 +135,7 @@ class TestConfigFromModule:
         assert cfg.llm_parallel_fastest_mode == "final_only"
         assert cfg.use_international_endpoint is True
 
-    def test_reads_runtime_api_keys_from_environment(self, monkeypatch):
+    def test_does_not_read_runtime_api_keys_from_environment(self, monkeypatch):
         monkeypatch.setenv("LLM_API_KEY", "llm-key")
         monkeypatch.setenv("DEEPL_API_KEY", "deepl-key")
         monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
@@ -140,6 +144,18 @@ class TestConfigFromModule:
             pass
 
         cfg = config_from_module(Empty)
+
+        assert cfg.llm_api_key is None
+        assert cfg.deepl_api_key is None
+        assert cfg.dashscope_api_key is None
+
+    def test_reads_runtime_api_keys_from_module(self):
+        class RuntimeConfig:
+            LLM_API_KEY = "llm-key"
+            DEEPL_API_KEY = "deepl-key"
+            DASHSCOPE_API_KEY = "dashscope-key"
+
+        cfg = config_from_module(RuntimeConfig)
 
         assert cfg.llm_api_key == "llm-key"
         assert cfg.deepl_api_key == "deepl-key"

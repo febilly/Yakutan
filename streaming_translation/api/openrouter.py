@@ -187,7 +187,7 @@ class OpenRouterAPI(BaseTranslationAPI):
     }
 
     DEFAULT_FORMALITY = "medium"
-    DEFAULT_STYLE = "light"
+    DEFAULT_STYLE = "standard"
 
     JAPANESE_FORMALITY_STYLE_GUIDES = {
         "low": "For Japanese, use casual spoken Japanese in plain form.\nPrefer short, natural wording and avoid desu/masu unless needed.\nExamples: 「ちょっと待って。確認するね。わかった。」",
@@ -216,10 +216,12 @@ class OpenRouterAPI(BaseTranslationAPI):
         max_retries: int = 3,
         streaming_mode: bool = False,
         formality: str = "medium",
-        style: str = "light",
+        style: str = "standard",
         extra_body_json: str = "",
         parallel_fastest_mode: str = "off",
         proxy_url: Optional[str] = None,
+        app_url: Optional[str] = None,
+        app_title: Optional[str] = None,
     ):
         self.model = model
         self.temperature = temperature
@@ -231,7 +233,7 @@ class OpenRouterAPI(BaseTranslationAPI):
         self.extra_body_json = extra_body_json
         self.parallel_fastest_mode = parallel_fastest_mode
 
-        resolved_key = api_key or _resolve_raw_api_keys()
+        resolved_key = _resolve_raw_api_keys() if api_key is None else api_key
         if not resolved_key:
             raise ValueError(
                 "LLM API Key not set. Pass api_key or set LLM_API_KEY / "
@@ -244,8 +246,10 @@ class OpenRouterAPI(BaseTranslationAPI):
             proxy_url=proxy_url,
         )
 
-        app_url = os.environ.get("LLM_APP_URL", "") or os.environ.get("OPENROUTER_APP_URL", "")
-        app_title = os.environ.get("LLM_APP_TITLE", "") or os.environ.get("OPENROUTER_APP_TITLE", "")
+        if app_url is None:
+            app_url = os.environ.get("LLM_APP_URL", "") or os.environ.get("OPENROUTER_APP_URL", "")
+        if app_title is None:
+            app_title = os.environ.get("LLM_APP_TITLE", "") or os.environ.get("OPENROUTER_APP_TITLE", "")
         self._default_headers = {}
         if app_url:
             self._default_headers["HTTP-Referer"] = app_url
@@ -653,10 +657,12 @@ class OpenRouterStreamingAPI(OpenRouterAPI):
         timeout: int = 30,
         max_retries: int = 3,
         formality: str = "medium",
-        style: str = "light",
+        style: str = "standard",
         extra_body_json: str = "",
         parallel_fastest_mode: str = "off",
         proxy_url: Optional[str] = None,
+        app_url: Optional[str] = None,
+        app_title: Optional[str] = None,
     ):
         super().__init__(
             base_url=base_url,
@@ -671,4 +677,6 @@ class OpenRouterStreamingAPI(OpenRouterAPI):
             extra_body_json=extra_body_json,
             parallel_fastest_mode=parallel_fastest_mode,
             proxy_url=proxy_url,
+            app_url=app_url,
+            app_title=app_title,
         )

@@ -35,7 +35,7 @@ TRANSLATION_API_CLASS_REGISTRY: dict[str, type[BaseTranslationAPI]] = {
     "qwen_mt": QwenMTAPI,
 }
 
-DEFAULT_API_TYPE = "qwen_mt"
+DEFAULT_API_TYPE = "openrouter_streaming"
 
 TRANSLATOR_CONTEXT_ATTRS = (
     "translator",
@@ -176,6 +176,8 @@ def _build_api(api_class: type[BaseTranslationAPI], cfg: TranslationConfig) -> B
         kwargs["style"] = cfg.llm_style
         kwargs["extra_body_json"] = cfg.llm_extra_body_json
         kwargs["parallel_fastest_mode"] = cfg.llm_parallel_fastest_mode
+        kwargs["app_url"] = cfg.llm_app_url
+        kwargs["app_title"] = cfg.llm_app_title
 
     elif issubclass(api_class, QwenMTAPI):
         kwargs["api_key"] = cfg.dashscope_api_key

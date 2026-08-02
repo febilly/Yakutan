@@ -45,7 +45,7 @@ class QwenMTAPI(BaseTranslationAPI):
         use_international: bool = False,
         proxy_url: Optional[str] = None,
     ):
-        self.api_key = api_key or os.environ.get("DASHSCOPE_API_KEY")
+        self.api_key = os.environ.get("DASHSCOPE_API_KEY") if api_key is None else api_key
         if not self.api_key:
             raise ValueError(
                 "DashScope API key is required. Pass it or set DASHSCOPE_API_KEY."

@@ -23,7 +23,7 @@ class DeepLAPI(BaseTranslationAPI):
         proxy_url: Optional[str] = None,
         formality: str = "default",
     ):
-        auth_key = api_key or os.environ.get("DEEPL_API_KEY")
+        auth_key = os.environ.get("DEEPL_API_KEY") if api_key is None else api_key
         if not auth_key:
             raise ValueError(
                 "DeepL API key is required. Pass it explicitly or set DEEPL_API_KEY."
