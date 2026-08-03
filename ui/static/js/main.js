@@ -1318,12 +1318,12 @@ function updateSensitiveWordsHint(apiType = null) {
     hint.style.display = actualApiType === 'qwen_mt' ? 'block' : 'none';
 }
 
-/** Qwen ASR / Fun-ASR / Qwen-MT 依赖 DashScope Key，其余场景不校验 */
+/** Qwen ASR / Qwen-Audio-3.0 / Fun-ASR / Qwen-MT 依赖 DashScope Key，其余场景不校验 */
 function currentConfigRequiresDashscopeKey() {
     const asrBackend = document.getElementById('asr-backend')?.value;
     const enableTranslation = document.getElementById('enable-translation')?.checked ?? false;
     const translationApiType = document.getElementById('translation-api-type')?.value ?? '';
-    const byAsr = asrBackend === 'qwen' || asrBackend === 'dashscope';
+    const byAsr = asrBackend === 'qwen' || asrBackend === 'qwen_audio3' || asrBackend === 'dashscope';
     const byTranslation = enableTranslation && translationApiType === 'qwen_mt';
     return byAsr || byTranslation;
 }

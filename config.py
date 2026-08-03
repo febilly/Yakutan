@@ -43,11 +43,11 @@ def _read_first_env(*names: str, default: str = '') -> str:
 USE_INTERNATIONAL_ENDPOINT = False
 
 # 首选的语音识别后端
-PREFERRED_ASR_BACKEND = 'qwen'  # 可选: 'dashscope', 'qwen', 'soniox', 'doubao_file', 'local'
+PREFERRED_ASR_BACKEND = 'qwen'  # 可选: 'dashscope', 'qwen', 'qwen_audio3', 'soniox', 'doubao_file', 'local'
                                 # 注意: 'dashscope' (Fun-ASR) 仅支持中国大陆版
 
 # 有效的后端列表
-VALID_ASR_BACKENDS = {'dashscope', 'qwen', 'soniox', 'doubao_file', 'local'}
+VALID_ASR_BACKENDS = {'dashscope', 'qwen', 'qwen_audio3', 'soniox', 'doubao_file', 'local'}
 
 # ============================================================================
 # 语音识别模型配置
@@ -62,6 +62,13 @@ QWEN_ASR_MODEL = 'qwen3-asr-flash-realtime-2026-02-10'
 # Qwen WebSocket URL
 QWEN_ASR_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime'
 QWEN_ASR_URL_INTERNATIONAL = 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime'
+
+# Qwen-Audio-3.0 后端使用的模型（与 Fun-ASR 共用 Recognition run-task 协议）
+QWEN_AUDIO3_ASR_MODEL = 'qwen-audio-3.0-asr-flash-streaming'
+
+# Recognition（run-task）协议的 WebSocket URL；国际版需要切到 dashscope-intl
+DASHSCOPE_RECOGNITION_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference'
+DASHSCOPE_RECOGNITION_URL_INTERNATIONAL = 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference'
 
 # ============================================================================
 # Soniox 配置

@@ -6,7 +6,7 @@ import asyncio
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -288,12 +288,25 @@ class TestSessionLifecycle:
         assert cb.last_partial_translation is None
         assert cb._last_osc_typing_ongoing is False
 
-    def test_on_session_stopped(self):
+    def test_on_session_stopped_preserves_final_generation_and_invalidates_partial(self):
         cb = VRChatRecognitionCallback(MagicMock())
         old_gen = cb._get_session_generation()
+        old_output_version = cb._final_output_version
+        cb._latest_partial_request_id = 7
+        cb._finalized_seq = 3
         cb._last_osc_typing_ongoing = True
+
+        assert cb._is_latest_partial_request(
+            7, 3, old_output_version, old_gen,
+        ) is True
+
         cb.on_session_stopped()
-        assert cb._get_session_generation() > old_gen
+
+        assert cb._get_session_generation() == old_gen
+        assert cb._final_output_version == old_output_version + 1
+        assert cb._is_latest_partial_request(
+            7, 3, old_output_version, old_gen,
+        ) is False
         assert cb._last_osc_typing_ongoing is False
 
     def test_on_error_logs(self):
@@ -462,6 +475,85 @@ class TestASRNotBlockedByTranslation:
         )
 
         state.executor.shutdown(wait=True)
+
+    @patch("recognition_handler.osc_manager.send_text", new_callable=AsyncMock)
+    @patch("recognition_handler.config")
+    def test_final_translation_survives_session_stop(
+        self, mock_config, mock_send_text,
+    ):
+        """A final accepted before stop must still apply after its LLM response."""
+        mock_config.SOURCE_LANGUAGE = "auto"
+        mock_config.CONTEXT_PREFIX = ""
+        mock_config.ENABLE_REVERSE_TRANSLATION = False
+        mock_config.SHOW_ORIGINAL_AND_LANG_TAG = True
+        mock_config.get_effective_osc_text_max_length.return_value = None
+
+        executor = ThreadPoolExecutor(max_workers=1)
+        state = _make_mock_state(executor=executor)
+        state.update_subtitles = MagicMock()
+        state.translator.append_history_entry = MagicMock()
+        callback = VRChatRecognitionCallback(state)
+
+        translation_started = threading.Event()
+        translation_release = threading.Event()
+
+        def delayed_translation(*args, **kwargs):
+            translation_started.set()
+            assert translation_release.wait(timeout=2)
+            return "The final translation"
+
+        async def scenario():
+            generation = callback._get_session_generation()
+            with patch(
+                "recognition_handler.translate_with_backend",
+                side_effect=delayed_translation,
+            ):
+                task = asyncio.create_task(
+                    callback._translate_final_task(
+                        text="最终句",
+                        source_lang="zh-cn",
+                        normalized_source="zh-hans",
+                        actual_target="en",
+                        actual_secondary_target=None,
+                        primary_should_translate=True,
+                        secondary_should_translate=False,
+                        use_secondary_output=False,
+                        use_deepl_final=False,
+                        previous_translation=None,
+                        previous_translation_secondary=None,
+                        previous_source_segment=None,
+                        request_id=1,
+                        async_result_seq=1,
+                        session_generation=generation,
+                    )
+                )
+                for _ in range(100):
+                    if translation_started.is_set():
+                        break
+                    await asyncio.sleep(0.01)
+                assert translation_started.is_set()
+
+                callback.on_session_stopped()
+                assert callback._get_session_generation() == generation
+                translation_release.set()
+                await asyncio.wait_for(task, timeout=2)
+
+        try:
+            asyncio.run(scenario())
+        finally:
+            translation_release.set()
+            executor.shutdown(wait=True)
+
+        state.translator.append_history_entry.assert_called_once_with(
+            "最终句", "The final translation", "en",
+        )
+        assert any(
+            call.args[0] == "最终句"
+            and call.args[1] == "The final translation"
+            and call.args[2] is False
+            for call in state.update_subtitles.call_args_list
+        )
+        mock_send_text.assert_awaited_once()
 
     @patch("recognition_handler.asyncio.run_coroutine_threadsafe")
     @patch("recognition_handler.osc_manager")

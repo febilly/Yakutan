@@ -35,6 +35,7 @@ Yakutan 不是一个只会把语音识别结果丢给翻译 API 的小脚本。�
 ### 语音识别
 
 - **Qwen3 实时 ASR（默认推荐）**：适合中文、日语、英语等多语混合场景。
+- **Qwen-Audio-3.0 ASR**：阿里最新一代流式识别模型，热词直接随请求下发（无需预先创建热词表），并把 VRCX 上下文作为上下文增强注入；大陆版与国际版均可用。
 - **Fun-ASR**：大陆版 DashScope 可用，作为稳定备用选择。
 - **Soniox**：对多语混讲支持较好，需要 Soniox API Key。
 - **豆包录音文件识别**：关麦后返回整段识别结果，适合不追求即时中间结果的场景。
@@ -254,7 +255,7 @@ python run_ui.py
 
 - 中国大陆版请确认账号已实名并开通对应模型。
 - 国际版请确认使用国际端点，并满足账号绑定要求。
-- Qwen 和 Fun-ASR 都需要 DashScope API Key。
+- Qwen3 ASR、Qwen-Audio-3.0 ASR 和 Fun-ASR 都需要 DashScope API Key。
 
 ### 7. 为什么使用完要停止服务
 

@@ -329,6 +329,7 @@ async def main(
     state.ensure_audio_executor()
 
     corpus_text: Optional[str] = None
+    hot_word_entries: Optional[list] = None
 
     # 检测并应用系统代理设置
     system_proxies = refresh_system_proxy_env()
@@ -406,8 +407,9 @@ async def main(
     if config.ENABLE_TRANSLATION:
         reinitialize_translator(state, cfg)
 
-    # 初始化热词（在线：qwen 语料 / dashscope 热词表；本地：Qwen3-ASR 走与在线 Qwen 相同的语料注入）
-    if config.ENABLE_HOT_WORDS and backend in {'qwen', 'dashscope', 'local'}:
+    # 初始化热词（在线：qwen 语料 / qwen_audio3 即时热词 / dashscope 热词表；
+    # 本地：Qwen3-ASR 走与在线 Qwen 相同的语料注入）
+    if config.ENABLE_HOT_WORDS and backend in {'qwen', 'qwen_audio3', 'dashscope', 'local'}:
         print('\n[热词] 初始化热词资源...')
         try:
             hot_words_manager = HotWordsManager(
@@ -425,6 +427,17 @@ async def main(
                     print(f'[热词] 已生成 Qwen 语料文本，共 {len(words)} 条\n')
                 else:
                     print('[热词] 未加载到热词条目，跳过 Qwen 语料配置\n')
+            elif backend == 'qwen_audio3':
+                # Qwen-Audio-3.0 支持即时热词，直接下发词条与权重，无需创建热词表
+                hot_word_entries = [
+                    entry
+                    for entry in hot_words_manager.get_hot_words()
+                    if entry.get('text')
+                ]
+                if hot_word_entries:
+                    print(f'[热词] 已准备 Qwen-Audio-3.0 即时热词，共 {len(hot_word_entries)} 条\n')
+                else:
+                    print('[热词] 未加载到热词条目，跳过即时热词配置\n')
             elif backend == 'local':
                 words = [
                     entry.get('text')
@@ -452,6 +465,7 @@ async def main(
             print('[热词] 将继续运行但不使用热词\n')
             state.vocabulary_id = None
             corpus_text = None
+            hot_word_entries = None
 
     ipc_client = None
     if getattr(config, 'IPC_ENABLED', True):
@@ -483,6 +497,7 @@ async def main(
         source_language=config.SOURCE_LANGUAGE,
         vocabulary_id=state.vocabulary_id,
         corpus_text=corpus_text,
+        hot_words=hot_word_entries,
         enable_vad=config.ENABLE_VAD,
         vad_threshold=config.VAD_THRESHOLD,
         vad_silence_duration_ms=config.VAD_SILENCE_DURATION_MS,

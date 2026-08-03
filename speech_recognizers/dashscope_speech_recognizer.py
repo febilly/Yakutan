@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
+import threading
 from typing import Any, Optional
 
 from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
@@ -18,15 +19,32 @@ class _DashscopeCallbackAdapter(RecognitionCallback):
 
     def __init__(self, user_callback: SpeechRecognitionCallback) -> None:
         self._user_callback = user_callback
+        self._stop_notify_lock = threading.Lock()
+        self._stopped_notified = False
 
     def on_open(self) -> None:
+        with self._stop_notify_lock:
+            self._stopped_notified = False
         self._user_callback.on_session_started()
 
-    def on_close(self) -> None:
+    def _notify_stopped_once(self) -> None:
+        # DashScope normally invokes both on_complete and on_close for one stop.
+        # The application lifecycle must observe that transition only once.
+        with self._stop_notify_lock:
+            if self._stopped_notified:
+                duplicate = True
+            else:
+                duplicate = False
+                self._stopped_notified = True
+        if duplicate:
+            return
         self._user_callback.on_session_stopped()
 
+    def on_close(self) -> None:
+        self._notify_stopped_once()
+
     def on_complete(self) -> None:
-        self._user_callback.on_session_stopped()
+        self._notify_stopped_once()
 
     def on_error(self, message) -> None:  # type: ignore[override]
         description = getattr(message, "message", str(message))

@@ -678,7 +678,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self._cancel_partial_debounce()
         self._last_osc_typing_ongoing = False
         with self._translate_ordering_lock:
-            self._session_generation += 1
+            self._final_output_version += 1
         logger.info('Speech recognizer session closed.')
 
     def on_error(self, error: Exception) -> None:
@@ -776,7 +776,12 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             raw_translated_text = translated_text
             raw_secondary_translated_text = secondary_translated_text
 
-            if not self._is_session_generation_current(session_generation):
+            if not self._is_latest_partial_request(
+                request_id,
+                finalized_seq,
+                final_output_version,
+                session_generation,
+            ):
                 return
 
             if not self._try_adopt_async_result(async_result_seq, session_generation):
@@ -867,7 +872,12 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
             current_reverse_trans = s.subtitles_state.get("reverse_translated", "")
 
-            if not self._is_async_result_current(async_result_seq, session_generation):
+            if not self._is_latest_partial_request(
+                request_id,
+                finalized_seq,
+                final_output_version,
+                session_generation,
+            ) or not self._is_async_result_current(async_result_seq, session_generation):
                 return
 
             if use_secondary_output and actual_secondary_target is not None:
@@ -885,7 +895,12 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     current_reverse_trans,
                 )
 
-            if not self._is_async_result_current(async_result_seq, session_generation):
+            if not self._is_latest_partial_request(
+                request_id,
+                finalized_seq,
+                final_output_version,
+                session_generation,
+            ) or not self._is_async_result_current(async_result_seq, session_generation):
                 return
 
             if osc_text:

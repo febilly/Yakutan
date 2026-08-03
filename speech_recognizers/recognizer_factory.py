@@ -1,6 +1,7 @@
 """语音识别器工厂模块，负责创建和配置识别器实例"""
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, Optional
 
 import dashscope
@@ -22,6 +23,11 @@ try:
     from .qwen_speech_recognizer import QwenSpeechRecognizer
 except ImportError:  # pragma: no cover
     QwenSpeechRecognizer = None  # type: ignore[assignment]
+
+try:
+    from .qwen_audio3_speech_recognizer import QwenAudio3SpeechRecognizer
+except ImportError:  # pragma: no cover
+    QwenAudio3SpeechRecognizer = None  # type: ignore[assignment]
 
 try:
     from .soniox_speech_recognizer import SonioxSpeechRecognizer, WEBSOCKETS_AVAILABLE
@@ -124,6 +130,24 @@ def _resolve_doubao_credentials() -> tuple[Optional[str], Optional[str], Optiona
     return (api_key or None, app_id or None, access_key or None)
 
 
+def _apply_recognition_endpoint() -> None:
+    """按国际版开关设置 Recognition（run-task）协议的 WebSocket 地址。
+
+    DashScope SDK 只提供全局配置项，这里显式写入两种取值之一，避免在
+    国际版/大陆版之间切换时残留上一次的地址。用户显式设置了 SDK 自带的
+    环境变量时以环境变量为准。
+    """
+    if os.getenv('DASHSCOPE_WEBSOCKET_BASE_URL'):
+        return
+
+    use_international = getattr(config, 'USE_INTERNATIONAL_ENDPOINT', False)
+    dashscope.base_websocket_api_url = (
+        config.DASHSCOPE_RECOGNITION_URL_INTERNATIONAL
+        if use_international
+        else config.DASHSCOPE_RECOGNITION_URL
+    )
+
+
 def init_dashscope_api_key() -> None:
     """
     初始化 DashScope API Key
@@ -143,6 +167,7 @@ def create_recognizer(
     source_language: str = 'auto',
     vocabulary_id: Optional[str] = None,
     corpus_text: Optional[str] = None,
+    hot_words: Optional[list] = None,
     enable_vad: bool = True,
     vad_threshold: float = 0.2,
     vad_silence_duration_ms: int = 800,
@@ -153,13 +178,14 @@ def create_recognizer(
     创建语音识别器实例
     
     Args:
-        backend: 识别后端，'dashscope'、'qwen'、'soniox'、'doubao_file' 或 'local'
+        backend: 识别后端，'dashscope'、'qwen'、'qwen_audio3'、'soniox'、'doubao_file' 或 'local'
         callback: 识别回调实例
         sample_rate: 音频采样率
         audio_format: 音频格式
         source_language: 源语言，'auto' 表示自动检测
         vocabulary_id: DashScope 热词表 ID（仅 dashscope 后端使用）
         corpus_text: Qwen 语料文本（qwen 与 local 且 Qwen3-ASR 引擎使用）
+        hot_words: 热词条目列表 [{'text': ..., 'weight': ...}]（仅 qwen_audio3 后端使用）
         enable_vad: 是否启用VAD（仅 qwen 后端使用）
         vad_threshold: VAD阈值（仅 qwen 后端使用）
         vad_silence_duration_ms: VAD静音持续时间（仅 qwen 后端使用）
@@ -218,6 +244,32 @@ def create_recognizer(
         recognizer = QwenSpeechRecognizer(callback=callback, **recognition_kwargs)
         return MonoAudioSpeechRecognizer(recognizer, input_channels=input_channels)
     
+    elif backend == 'qwen_audio3':
+        if QwenAudio3SpeechRecognizer is None:
+            raise RuntimeError('QwenAudio3SpeechRecognizer 不可用，请安装相关依赖')
+
+        _apply_recognition_endpoint()
+
+        recognition_kwargs = {
+            'model': config.QWEN_AUDIO3_ASR_MODEL,
+            'format': audio_format,
+            'sample_rate': sample_rate,
+            'corpus_text': corpus_text,
+            'hot_words': hot_words,
+        }
+
+        # 该模型自带语种检测，官方参数表也未列出 language_hints；实测服务端会
+        # 静默忽略无法识别的参数，因此非 auto 时照常下发，能生效则生效。
+        lang_hint = _to_dashscope_language(source_language)
+        if lang_hint:
+            recognition_kwargs['language_hints'] = [lang_hint]
+
+        # 合并额外参数
+        recognition_kwargs.update(extra_kwargs)
+
+        recognizer = QwenAudio3SpeechRecognizer(callback=callback, **recognition_kwargs)
+        return MonoAudioSpeechRecognizer(recognizer, input_channels=input_channels)
+
     elif backend == 'dashscope':
         recognition_kwargs = {
             'model': config.DASHSCOPE_ASR_MODEL,
@@ -325,13 +377,16 @@ def is_backend_available(backend: str) -> bool:
     检查指定后端是否可用
     
     Args:
-        backend: 后端名称，'dashscope'、'qwen'、'soniox'、'doubao_file' 或 'local'
-    
+        backend: 后端名称，'dashscope'、'qwen'、'qwen_audio3'、'soniox'、'doubao_file' 或 'local'
+
     Returns:
         bool: True 表示可用，False 表示不可用
     """
     if backend == 'qwen':
         return QwenSpeechRecognizer is not None
+    elif backend == 'qwen_audio3':
+        # Qwen-Audio-3.0 在北京与新加坡地域均可用
+        return QwenAudio3SpeechRecognizer is not None
     elif backend == 'dashscope':
         # dashscope (Fun-ASR) 仅在中国大陆版可用
         use_international = getattr(config, 'USE_INTERNATIONAL_ENDPOINT', False)
@@ -377,7 +432,7 @@ def select_backend(preferred_backend: str, valid_backends: set) -> str:
     else:
         print(f'[ASR] 首选后端 {preferred_backend} 不可用，正在尝试自动回退...')
 
-    for candidate in ('qwen', 'dashscope', 'doubao_file', 'soniox', 'local'):
+    for candidate in ('qwen', 'qwen_audio3', 'dashscope', 'doubao_file', 'soniox', 'local'):
         if candidate == preferred_backend:
             continue
         if candidate not in valid_backends:
