@@ -13,7 +13,7 @@ class TestVrcxContextBridge:
         assert "__VRCX_CONTEXT_TOKEN__" not in script
         assert "http://127.0.0.1:5001/vrcx/context" in script
         assert bridge.get_token() in script
-        assert "1.5-compact-players" in script
+        assert "1.6-context-payload" in script
         assert "heartbeatIntervalMs: 30000" in script
         assert "printContextOnPush: true" in script
         assert "sent context #" in script

@@ -16,6 +16,7 @@ MAX_REQUEST_BODY_BYTES = 256 * 1024
 _token = secrets.token_urlsafe(24)
 _lock = threading.RLock()
 _latest_payload: Optional[dict[str, Any]] = None
+_latest_context: Optional[dict[str, Any]] = None
 _latest_context_text = ""
 _latest_received_at_ms = 0
 _latest_sequence = 0
@@ -485,6 +486,7 @@ VRCX_CONSOLE_SCRIPT_TEMPLATE = r"""
             sequence: ++sequence,
             reason: unchanged ? "heartbeat" : reason,
             hash: currentHash,
+            context: context,
             contextText: latestContextText
         };
 
@@ -535,7 +537,7 @@ VRCX_CONSOLE_SCRIPT_TEMPLATE = r"""
     }, CONFIG.checkIntervalMs);
 
     window.VRCXLocalContextBridge = {
-        version: "1.5-compact-players",
+        version: "1.6-context-payload",
         getContext: function () {
             latestContext = buildContext();
             latestContextText = renderContextText(latestContext);
@@ -556,7 +558,7 @@ VRCX_CONSOLE_SCRIPT_TEMPLATE = r"""
         },
         getStatus: function () {
             return {
-                version: "1.5-compact-players",
+                version: "1.6-context-payload",
                 stopped: stopped,
                 sequence: sequence,
                 lastPushAt: lastPushAt ? new Date(lastPushAt).toISOString() : "",
@@ -599,6 +601,10 @@ def store_payload(token: str, body: bytes) -> tuple[bool, str]:
     if not isinstance(payload, dict):
         return False, "payload must be an object"
 
+    context = payload.get("context")
+    if not isinstance(context, dict):
+        context = None
+
     context_text = str(payload.get("contextText") or "").strip()
     if len(context_text) > MAX_CONTEXT_TEXT_CHARS:
         context_text = context_text[:MAX_CONTEXT_TEXT_CHARS].rstrip() + "\n..."
@@ -615,9 +621,10 @@ def store_payload(token: str, body: bytes) -> tuple[bool, str]:
 
     now_ms = int(time.time() * 1000)
     with _lock:
-        global _latest_payload, _latest_context_text
+        global _latest_payload, _latest_context, _latest_context_text
         global _latest_received_at_ms, _latest_sequence, _latest_hash
         _latest_payload = payload
+        _latest_context = context
         _latest_context_text = context_text
         _latest_received_at_ms = now_ms
         _latest_sequence = sequence_int
@@ -647,7 +654,11 @@ def get_latest_context_text(max_age_ms: int = CONTEXT_STALE_MS) -> str:
 
 
 def get_latest_context(max_age_ms: int = CONTEXT_STALE_MS) -> Optional[dict[str, Any]]:
-    return None
+    age = _age_ms()
+    if age is None or age > max_age_ms:
+        return None
+    with _lock:
+        return _latest_context
 
 
 def _trim_text(text: str, max_chars: int) -> str:
@@ -678,7 +689,32 @@ def _append_term(terms: list[str], seen: set[str], value: Any) -> None:
 
 
 def get_asr_context_terms(max_terms: int = 80) -> list[str]:
-    return []
+    context = get_latest_context()
+    if not isinstance(context, dict):
+        return []
+
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    world = context.get("world")
+    if isinstance(world, dict):
+        _append_term(terms, seen, world.get("name"))
+
+    self_info = context.get("self")
+    if isinstance(self_info, dict):
+        _append_term(terms, seen, self_info.get("name"))
+
+    for key in ("friends", "players"):
+        entries = context.get(key)
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if isinstance(entry, dict):
+                _append_term(terms, seen, entry.get("name"))
+                if len(terms) >= max_terms:
+                    return terms
+
+    return terms[:max_terms]
 
 
 def build_translation_context_prefix(base_prefix: str = "") -> str:
@@ -713,4 +749,5 @@ def get_status() -> dict[str, Any]:
             "latestHash": _latest_hash,
             "contextTextChars": len(_latest_context_text),
             "latestContextText": _latest_context_text if not stale else "",
+            "latestContext": _latest_context if not stale else None,
         }
