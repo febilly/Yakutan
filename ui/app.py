@@ -401,6 +401,7 @@ def get_config_dict():
             'secondary_target_language': getattr(config, 'SECONDARY_TARGET_LANGUAGE', None),
             'fallback_language': config.FALLBACK_LANGUAGE,
             'api_type': config.TRANSLATION_API_TYPE,
+            'translate_partial_results': getattr(config, 'TRANSLATE_PARTIAL_RESULTS', True),
             'llm_template': getattr(
                 config, 'LLM_TEMPLATE', config.DEFAULT_LLM_TEMPLATE
             ),
@@ -424,6 +425,7 @@ def get_config_dict():
             'llm_parallel_fastest_mode': getattr(
                 config, 'LLM_PARALLEL_FASTEST_MODE', 'off'
             ),
+            'hymt2_websocket_url': getattr(config, 'HYMT2_WEBSOCKET_URL', ''),
             'enable_llm_parallel_fastest': (
                 getattr(config, 'LLM_PARALLEL_FASTEST_MODE', 'off')
                 not in ('off', None, '')
@@ -537,12 +539,18 @@ def update_config(config_data):
                 config.FALLBACK_LANGUAGE = trans['fallback_language'] if trans['fallback_language'] else None
             if 'api_type' in trans:
                 config.TRANSLATION_API_TYPE = trans['api_type']
-                # 前端的"流式翻译模式"开关会将 api_type 设为 'openrouter_streaming'
-                # 此时启用部分结果翻译（实时翻译未完成的句子）
-                config.TRANSLATE_PARTIAL_RESULTS = trans['api_type'] in (
-                    'openrouter_streaming',
-                    'openrouter_streaming_deepl_hybrid',
-                )
+                if 'translate_partial_results' in trans:
+                    config.TRANSLATE_PARTIAL_RESULTS = bool(trans['translate_partial_results'])
+                else:
+                    config.TRANSLATE_PARTIAL_RESULTS = trans['api_type'] in (
+                        'openrouter_streaming',
+                        'openrouter_streaming_deepl_hybrid',
+                        'hymt2',
+                    )
+            elif 'translate_partial_results' in trans:
+                config.TRANSLATE_PARTIAL_RESULTS = bool(trans['translate_partial_results'])
+            if 'hymt2_websocket_url' in trans:
+                config.HYMT2_WEBSOCKET_URL = (trans['hymt2_websocket_url'] or '').strip()
             if 'llm_template' in trans:
                 config.LLM_TEMPLATE = (
                     trans['llm_template'] or config.DEFAULT_LLM_TEMPLATE

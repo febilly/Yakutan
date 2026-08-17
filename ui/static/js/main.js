@@ -1237,36 +1237,71 @@ function isLLMConnectionFieldsComplete() {
     return !!(base && model && hasKey);
 }
 
-/** 同步「流式翻译模式」分组：仅普通 LLM 显示开关；混合模式固定流式（由 api_type），不显示开关且不改动开关状态，避免影响切回 LLM 时的偏好。 */
+/** 记录不同翻译模型各自的流式偏好（默认初始化时均为 true） */
+const modelStreamingPreferences = {
+    openrouter: true,
+    hymt2: true,
+};
+
+/** 同步「流式翻译模式」分组：普通 LLM 及 Hy-MT2 显示开关；混合模式固定流式，不显示开关。切换时恢复各自保存的流式偏好。 */
 function updateOpenRouterStreamingUi() {
     const apiSelect = document.getElementById('translation-api-type');
     const streamingModeGroup = document.getElementById('openrouter-streaming-mode-group');
     const streamingMode = document.getElementById('openrouter-streaming-mode');
+    const streamingHint = document.getElementById('streaming-mode-hint');
     if (!apiSelect || !streamingModeGroup || !streamingMode) return;
 
     const v = apiSelect.value;
+    const t = window.i18n ? window.i18n.t : (k) => k;
     if (v === 'openrouter_streaming_deepl_hybrid') {
         streamingModeGroup.style.display = 'none';
         streamingMode.disabled = false;
         updateLLMStreamingPromoState();
         return;
     }
+    if (v === 'hymt2') {
+        streamingModeGroup.style.display = 'block';
+        streamingMode.disabled = false;
+        streamingMode.checked = modelStreamingPreferences.hymt2 ?? true;
+        if (streamingHint) {
+            streamingHint.setAttribute('data-i18n', 'hint.streamingModeHymt');
+            streamingHint.textContent = t('hint.streamingModeHymt');
+        }
+        updateLLMStreamingPromoState();
+        return;
+    }
     if (v === 'openrouter') {
         streamingModeGroup.style.display = 'block';
         streamingMode.disabled = false;
+        streamingMode.checked = modelStreamingPreferences.openrouter ?? true;
+        if (streamingHint) {
+            streamingHint.setAttribute('data-i18n', 'hint.streamingMode');
+            streamingHint.textContent = t('hint.streamingMode');
+        }
         updateLLMStreamingPromoState();
         return;
     }
     streamingModeGroup.style.display = 'none';
-    streamingMode.checked = false;
     streamingMode.disabled = false;
     updateLLMStreamingPromoState();
+}
+
+/** 同步「Hy-MT2」设置分组（WebSocket 地址输入框）的显示。 */
+function updateHymt2SettingsVisibility(apiType = null) {
+    const actualApiType = apiType || (document.getElementById('translation-api-type')
+        ? document.getElementById('translation-api-type').value
+        : '');
+    const group = document.getElementById('hymt2-settings');
+    if (group) {
+        group.style.display = actualApiType === 'hymt2' ? 'block' : 'none';
+    }
 }
 
 function isUsingLLMStreamingTranslation() {
     const apiType = document.getElementById('translation-api-type')?.value ?? '';
     const streamingMode = document.getElementById('openrouter-streaming-mode');
     return apiType === 'openrouter_streaming_deepl_hybrid'
+        || (apiType === 'hymt2' && !!streamingMode?.checked)
         || (apiType === 'openrouter' && !!streamingMode?.checked);
 }
 
@@ -2329,6 +2364,7 @@ function applyAsrBackendLocks() {
         && (
             (apiTypeVal === 'openrouter' && streamingModeToggle.checked)
             || apiTypeVal === 'openrouter_streaming_deepl_hybrid'
+            || (apiTypeVal === 'hymt2' && streamingModeToggle.checked)
         );
 
     if (isDoubaoFile) {
@@ -2372,18 +2408,40 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('target-language').value = config.translation.target_language || 'ja';
                 document.getElementById('secondary-target-language').value = config.translation.secondary_target_language || '';
                 document.getElementById('fallback-language').value = config.translation.fallback_language || '';
-                // 处理 LLM 流式模式的特殊情况
-                const apiType = config.translation.api_type || 'openrouter_streaming';
+                // 加载各模型的流式翻译偏好
+                if (typeof config.translation.llm_streaming === 'boolean') {
+                    modelStreamingPreferences.openrouter = config.translation.llm_streaming;
+                } else if (apiType === 'openrouter_streaming') {
+                    modelStreamingPreferences.openrouter = true;
+                } else if (apiType === 'openrouter') {
+                    modelStreamingPreferences.openrouter = false;
+                }
+
+                if (typeof config.translation.hymt2_streaming === 'boolean') {
+                    modelStreamingPreferences.hymt2 = config.translation.hymt2_streaming;
+                } else if (apiType === 'hymt2') {
+                    modelStreamingPreferences.hymt2 = config.translation.translate_partial_results ?? true;
+                }
+
+                // 处理 LLM 流式模式及 Hy-MT2
                 if (apiType === 'openrouter_streaming') {
                     document.getElementById('translation-api-type').value = 'openrouter';
                     document.getElementById('openrouter-streaming-mode').checked = true;
                     document.getElementById('openrouter-streaming-mode').disabled = false;
                 } else if (apiType === 'openrouter_streaming_deepl_hybrid') {
                     document.getElementById('translation-api-type').value = 'openrouter_streaming_deepl_hybrid';
+                } else if (apiType === 'hymt2') {
+                    document.getElementById('translation-api-type').value = 'hymt2';
+                    document.getElementById('openrouter-streaming-mode').checked = modelStreamingPreferences.hymt2 ?? true;
+                    document.getElementById('openrouter-streaming-mode').disabled = false;
                 } else {
                     document.getElementById('translation-api-type').value = apiType;
-                    document.getElementById('openrouter-streaming-mode').checked = false;
+                    document.getElementById('openrouter-streaming-mode').checked = modelStreamingPreferences.openrouter ?? true;
                     document.getElementById('openrouter-streaming-mode').disabled = false;
+                }
+                const hymt2WsUrlEl = document.getElementById('hymt2-ws-url');
+                if (hymt2WsUrlEl) {
+                    hymt2WsUrlEl.value = config.translation.hymt2_websocket_url || '';
                 }
                 if (document.body.classList.contains('mode-simple')) {
                     document.getElementById('llm-base-url').value = SIMPLE_MODE_LLM_BASE_URL;
@@ -2542,6 +2600,7 @@ function loadConfigFromLocalStorage() {
         updateFuriganaVisibility();
         updateLLMSettingsVisibility();
         updateSensitiveWordsHint();
+        updateHymt2SettingsVisibility();
         applyAsrBackendLocks();
         updateOscCompatModeUi();
         ensureSelectedLLMTemplate();
@@ -2559,6 +2618,7 @@ function loadConfigFromLocalStorage() {
         updateFuriganaVisibility();
         updateLLMSettingsVisibility();
         updateSensitiveWordsHint();
+        updateHymt2SettingsVisibility();
         applyAsrBackendLocks();
         updateOscCompatModeUi();
         ensureSelectedLLMTemplate();
@@ -2586,10 +2646,16 @@ function loadDefaultConfig() {
     document.getElementById('remove-trailing-period').checked = false;
     document.getElementById('text-fancy-style').value = 'none';
     document.getElementById('enable-reverse-translation').checked = false;
+    modelStreamingPreferences.openrouter = true;
+    modelStreamingPreferences.hymt2 = true;
     const streamingModeEl = document.getElementById('openrouter-streaming-mode');
     if (streamingModeEl) {
         streamingModeEl.checked = true;
         streamingModeEl.disabled = false;
+    }
+    const hymt2WsUrlDefault = document.getElementById('hymt2-ws-url');
+    if (hymt2WsUrlDefault) {
+        hymt2WsUrlDefault.value = '';
     }
     setLLMParallelFastestModeSelect('off');
     document.getElementById('llm-base-url').value = SIMPLE_MODE_LLM_BASE_URL;
@@ -2667,6 +2733,7 @@ function loadDefaultConfig() {
     updateFuriganaVisibility();
     updateLLMSettingsVisibility();
     updateSensitiveWordsHint();
+    updateHymt2SettingsVisibility();
     applyAsrBackendLocks();
     updateOscCompatModeUi();
     syncLLMTemplateKeySourceHintFromInputs();
@@ -2681,6 +2748,7 @@ function refreshUiAfterServerConfigApply() {
     updateFuriganaVisibility();
     updateLLMSettingsVisibility();
     updateSensitiveWordsHint();
+    updateHymt2SettingsVisibility();
     applyAsrBackendLocks();
     updateOscCompatModeUi();
     syncLLMTemplateKeySourceHintFromInputs();
@@ -2703,16 +2771,39 @@ function applyServerConfigPayload(config) {
     document.getElementById('secondary-target-language').value = config.translation.secondary_target_language || '';
     document.getElementById('fallback-language').value = config.translation.fallback_language || '';
     const serverApiType = config.translation.api_type;
+    // 加载各模型的流式翻译偏好
+    if (typeof config.translation.llm_streaming === 'boolean') {
+        modelStreamingPreferences.openrouter = config.translation.llm_streaming;
+    } else if (serverApiType === 'openrouter_streaming') {
+        modelStreamingPreferences.openrouter = true;
+    } else if (serverApiType === 'openrouter') {
+        modelStreamingPreferences.openrouter = false;
+    }
+
+    if (typeof config.translation.hymt2_streaming === 'boolean') {
+        modelStreamingPreferences.hymt2 = config.translation.hymt2_streaming;
+    } else if (serverApiType === 'hymt2') {
+        modelStreamingPreferences.hymt2 = config.translation.translate_partial_results ?? true;
+    }
+
     if (serverApiType === 'openrouter_streaming') {
         document.getElementById('translation-api-type').value = 'openrouter';
         document.getElementById('openrouter-streaming-mode').checked = true;
         document.getElementById('openrouter-streaming-mode').disabled = false;
     } else if (serverApiType === 'openrouter_streaming_deepl_hybrid') {
         document.getElementById('translation-api-type').value = 'openrouter_streaming_deepl_hybrid';
+    } else if (serverApiType === 'hymt2') {
+        document.getElementById('translation-api-type').value = 'hymt2';
+        document.getElementById('openrouter-streaming-mode').checked = modelStreamingPreferences.hymt2 ?? true;
+        document.getElementById('openrouter-streaming-mode').disabled = false;
     } else {
         document.getElementById('translation-api-type').value = serverApiType;
-        document.getElementById('openrouter-streaming-mode').checked = false;
+        document.getElementById('openrouter-streaming-mode').checked = modelStreamingPreferences.openrouter ?? true;
         document.getElementById('openrouter-streaming-mode').disabled = false;
+    }
+    const hymt2WsUrlApply = document.getElementById('hymt2-ws-url');
+    if (hymt2WsUrlApply) {
+        hymt2WsUrlApply.value = config.translation.hymt2_websocket_url || '';
     }
     if (document.body.classList.contains('mode-simple')) {
         document.getElementById('llm-base-url').value = SIMPLE_MODE_LLM_BASE_URL;
@@ -2896,11 +2987,25 @@ function saveConfigToLocalStorage() {
 
         // 确定实际的 API 类型（LLM + 流式开关 -> openrouter_streaming；混合模式保持独立值）
         let actualApiType = document.getElementById('translation-api-type').value;
+        const isStreamingChecked = !!document.getElementById('openrouter-streaming-mode')?.checked;
+
+        if (actualApiType === 'openrouter' || actualApiType === 'openrouter_streaming') {
+            modelStreamingPreferences.openrouter = isStreamingChecked;
+        } else if (actualApiType === 'hymt2') {
+            modelStreamingPreferences.hymt2 = isStreamingChecked;
+        }
+
         if (actualApiType === 'openrouter_streaming_deepl_hybrid') {
             // 保持 hybrid
-        } else if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
+        } else if (actualApiType === 'openrouter' && isStreamingChecked) {
             actualApiType = 'openrouter_streaming';
         }
+
+        const isStreamingTranslation = actualApiType === 'openrouter_streaming_deepl_hybrid'
+            ? true
+            : (actualApiType === 'hymt2'
+                ? (modelStreamingPreferences.hymt2 ?? true)
+                : ((actualApiType === 'openrouter' || actualApiType === 'openrouter_streaming') ? (modelStreamingPreferences.openrouter ?? true) : false));
 
         const isSimpleMode = document.body.classList.contains('mode-simple');
         const simpleLLMFields = isSimpleMode ? syncSimpleModeLLMTemplateFields() : null;
@@ -2918,6 +3023,9 @@ function saveConfigToLocalStorage() {
                 secondary_target_language: document.getElementById('secondary-target-language').value || null,
                 fallback_language: document.getElementById('fallback-language').value || null,
                 api_type: actualApiType,
+                translate_partial_results: isStreamingTranslation,
+                llm_streaming: modelStreamingPreferences.openrouter ?? true,
+                hymt2_streaming: modelStreamingPreferences.hymt2 ?? true,
                 llm_template: llmTemplate,
                 llm_base_url: llmBaseUrl,
                 llm_model: llmModel,
@@ -2929,6 +3037,7 @@ function saveConfigToLocalStorage() {
                 ),
                 openai_compat_extra_body_json: openaiExtraBodyJson,
                 llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
+                hymt2_websocket_url: (document.getElementById('hymt2-ws-url')?.value || '').trim(),
                 source_language: getSourceLanguageEffective(),
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
@@ -3028,6 +3137,7 @@ function switchToLLMStreamingTranslation() {
     if (!select || !streaming) return;
 
     select.value = 'openrouter';
+    modelStreamingPreferences.openrouter = true;
     streaming.checked = true;
     select.dispatchEvent(new Event('change', { bubbles: true }));
 }
@@ -3041,6 +3151,7 @@ function handleTranslationApiChange(event) {
         && !isLLMConnectionFieldsComplete();
     updateLLMSettingsVisibility(newApi, expandLlmPanel);
     updateSensitiveWordsHint(newApi);
+    updateHymt2SettingsVisibility(newApi);
     updateLLMStreamingPromoState();
     applyAsrBackendLocks();
 
@@ -3063,6 +3174,7 @@ document.addEventListener('DOMContentLoaded', function () {
         updateOpenRouterStreamingUi();
         updateLLMSettingsVisibility(apiSelect.value);
         updateSensitiveWordsHint(apiSelect.value);
+        updateHymt2SettingsVisibility(apiSelect.value);
         updateLLMStreamingPromoState();
         syncLLMTemplateKeySourceHintFromInputs();
     }, 100);
@@ -3126,11 +3238,25 @@ async function saveConfig(autoSave = false) {
 
         // 确定实际的 API 类型（LLM + 流式开关 -> openrouter_streaming；混合模式保持独立值）
         let actualApiType = document.getElementById('translation-api-type').value;
+        const isStreamingChecked = !!document.getElementById('openrouter-streaming-mode')?.checked;
+
+        if (actualApiType === 'openrouter' || actualApiType === 'openrouter_streaming') {
+            modelStreamingPreferences.openrouter = isStreamingChecked;
+        } else if (actualApiType === 'hymt2') {
+            modelStreamingPreferences.hymt2 = isStreamingChecked;
+        }
+
         if (actualApiType === 'openrouter_streaming_deepl_hybrid') {
             // 保持 hybrid
-        } else if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
+        } else if (actualApiType === 'openrouter' && isStreamingChecked) {
             actualApiType = 'openrouter_streaming';
         }
+
+        const isStreamingTranslation = actualApiType === 'openrouter_streaming_deepl_hybrid'
+            ? true
+            : (actualApiType === 'hymt2'
+                ? (modelStreamingPreferences.hymt2 ?? true)
+                : ((actualApiType === 'openrouter' || actualApiType === 'openrouter_streaming') ? (modelStreamingPreferences.openrouter ?? true) : false));
 
         const isSimpleMode = document.body.classList.contains('mode-simple');
         const simpleLLMFields = isSimpleMode ? syncSimpleModeLLMTemplateFields() : null;
@@ -3148,6 +3274,9 @@ async function saveConfig(autoSave = false) {
                 secondary_target_language: document.getElementById('secondary-target-language').value || null,
                 fallback_language: document.getElementById('fallback-language').value || null,
                 api_type: actualApiType,
+                translate_partial_results: isStreamingTranslation,
+                llm_streaming: modelStreamingPreferences.openrouter ?? true,
+                hymt2_streaming: modelStreamingPreferences.hymt2 ?? true,
                 llm_template: llmTemplate,
                 llm_base_url: llmBaseUrl,
                 llm_model: llmModel,
@@ -3159,6 +3288,7 @@ async function saveConfig(autoSave = false) {
                 ),
                 openai_compat_extra_body_json: openaiExtraBodyJson,
                 llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
+                hymt2_websocket_url: (document.getElementById('hymt2-ws-url')?.value || '').trim(),
                 source_language: getSourceLanguageEffective(),
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
@@ -3542,6 +3672,22 @@ async function startService() {
                     startBtn.disabled = false;
                     startBtn.textContent = t('btn.startService');
                     expandLLMSettingsPanel(missingFields);
+                    return;
+                }
+            }
+
+            if (enableTranslation && translationApiType === 'hymt2') {
+                const hymt2Url = (document.getElementById('hymt2-ws-url')?.value || '').trim();
+                if (!hymt2Url) {
+                    showMessage('❌ ' + t('msg.hyMt2WsUrlRequired'), 'error');
+                    startBtn.disabled = false;
+                    startBtn.textContent = t('btn.startService');
+                    const hymt2Group = document.getElementById('hymt2-settings');
+                    if (hymt2Group) {
+                        hymt2Group.style.display = 'block';
+                        ensureCollapsibleExpanded('translation-api');
+                    }
+                    highlightInput('hymt2-ws-url');
                     return;
                 }
             }

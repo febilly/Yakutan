@@ -275,12 +275,22 @@
                                 <option value="google_web" data-i18n="api.googleWeb">Google Web（免费，备用，请注意网络连通性）</option>
                                 <option value="openrouter" data-i18n="api.openrouter" selected>LLM（自定义兼容接口）</option>
                                 <option value="openrouter_streaming_deepl_hybrid" data-i18n="api.openrouterStreamingDeeplHybrid">LLM 流式 + DeepL 终译（混合）</option>
+                                <option value="hymt2" data-i18n="api.hyMt2">Hy-MT2（WebSocket 流式修订翻译）</option>
                             </select>
                             <small id="translation-api-warning" class="form-text"
                                 style="color: #e74c3c; display: none;"></small>
                             <small id="qwen-mt-sensitive-words-hint" class="form-text"
                                 data-i18n="hint.sensitiveWordsRisk" style="display: none;">请注意敏感词问题，必要时请切换到 DeepL 或
                                 Google 翻译</small>
+                        </div>
+
+                        <div class="form-group" id="hymt2-settings" style="display: none;">
+                            <label for="hymt2-ws-url" data-i18n="label.hyMt2WsUrl">Hy-MT2 WebSocket 地址</label>
+                            <input type="text" id="hymt2-ws-url" class="form-control"
+                                placeholder="ws://127.0.0.1:18765"
+                                autocomplete="off"
+                                onblur="onSettingChange()">
+                            <small class="form-text" data-i18n="hint.hyMt2WsUrl">填写 Hy-MT2 流式修订翻译服务的 WebSocket 地址（例如 ws://127.0.0.1:18765）。该地址不会内置默认值，请自行填写（也支持 .env 中的 HYMT2_WEBSOCKET_URL）。</small>
                         </div>
 
                         <div class="form-group" id="openrouter-streaming-mode-group" style="display: none;">
@@ -291,7 +301,7 @@
                                     <span class="slider"></span>
                                 </label>
                             </label>
-                            <small class="form-text" data-i18n="hint.streamingMode">启用后会边说边翻译，不用等整句话说完才出结果。请注意这会大幅增加 token 用量。</small>
+                            <small class="form-text" id="streaming-mode-hint" data-i18n="hint.streamingMode">启用后会边说边翻译，不用等整句话说完才出结果。请注意这会大幅增加 token 用量。</small>
                         </div>
 
                         <div class="llm-tone-grid" id="llm-tone-grid" style="display: none;">

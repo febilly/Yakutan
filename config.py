@@ -203,7 +203,8 @@ def bump_config_applied_at_ms() -> int:
 
 # 翻译 API 类型
 # 可选: 'google_web', 'google_dictionary', 'deepl', 'openrouter',
-#      'openrouter_streaming', 'openrouter_streaming_deepl_hybrid', 'qwen_mt'
+#      'openrouter_streaming', 'openrouter_streaming_deepl_hybrid', 'qwen_mt',
+#      'hymt2'（Hy-MT2 WebSocket 流式修订翻译，需自行填写 HYMT2_WEBSOCKET_URL）
 # 注意:
 # - openrouter / openrouter_streaming 表示基于 OpenAI 兼容接口的 LLM 翻译
 # - openrouter_streaming 是 LLM 翻译的流式模式，支持翻译部分结果
@@ -244,6 +245,21 @@ OPENAI_COMPAT_EXTRA_BODY_JSON = DEFAULT_LLM_EXTRA_BODY_JSON
 # （流式时对中间断句不双发）；all 对每个请求都双发。会增加 token 用量
 LLM_PARALLEL_FASTEST_MODE = 'off'
 
+# ============================================================================
+# Hy-MT2 流式修订翻译配置（WebSocket 无状态协议，见 Hy-MT2 INTEGRATION.md）
+# ============================================================================
+
+# Hy-MT2 服务的 WebSocket 地址。该地址**不内置默认值**——服务属于用户自托管/
+# 内网部署，必须由用户自行填写（网页「翻译API设置」或 .env 的 HYMT2_WEBSOCKET_URL）。
+# 例如：ws://127.0.0.1:18765
+HYMT2_WEBSOCKET_URL = ''
+
+# 单次请求/建连超时（秒）
+HYMT2_TIMEOUT_SECONDS = 30
+
+# 建连失败重试次数
+HYMT2_MAX_RETRIES = 3
+
 # 运行期凭据。WebUI 只会通过页面请求更新这些进程内字段，不会读取或写入
 # os.environ；旧版 CLI 则由 ``apply_cli_env`` 从 .env 显式填充。
 DASHSCOPE_API_KEY = ''
@@ -266,8 +282,8 @@ ENABLE_TRANSLATION = True  # True: 识别后翻译文本
                            # False: 直接发送识别结果，不翻译
 
 # 是否启用流式翻译（翻译部分结果）
-# 当 TRANSLATION_API_TYPE 为 'openrouter_streaming' 或
-# 'openrouter_streaming_deepl_hybrid' 时自动启用
+# 当 TRANSLATION_API_TYPE 为 'openrouter_streaming'、'openrouter_streaming_deepl_hybrid'
+# 或 'hymt2'（且开启流式开关）时启用
 TRANSLATE_PARTIAL_RESULTS = True
 
 # 触发流式中间翻译所需的最小文本长度（字符数）
@@ -516,6 +532,7 @@ def apply_cli_env() -> None:
     global TRANSLATION_API_TYPE, LLM_BASE_URL, LLM_MODEL, LLM_TEMPLATE
     global LLM_TRANSLATION_FORMALITY, LLM_TRANSLATION_STYLE
     global OPENAI_COMPAT_EXTRA_BODY_JSON, TRANSLATE_PARTIAL_RESULTS
+    global HYMT2_WEBSOCKET_URL, HYMT2_TIMEOUT_SECONDS, HYMT2_MAX_RETRIES
     global DASHSCOPE_API_KEY, DEEPL_API_KEY, LLM_API_KEY, OPENAI_API_KEY
     global SONIOX_API_KEY, DOUBAO_API_KEY, DOUBAO_APP_ID, DOUBAO_ACCESS_KEY
     global LLM_APP_URL, LLM_APP_TITLE
@@ -576,7 +593,18 @@ def apply_cli_env() -> None:
         TRANSLATION_API_TYPE in (
             'openrouter_streaming',
             'openrouter_streaming_deepl_hybrid',
+            'hymt2',
         ),
+    )
+
+    HYMT2_WEBSOCKET_URL = _read_first_env(
+        'HYMT2_WEBSOCKET_URL', default=HYMT2_WEBSOCKET_URL
+    )
+    HYMT2_TIMEOUT_SECONDS = max(
+        1, _read_env_int('HYMT2_TIMEOUT_SECONDS', HYMT2_TIMEOUT_SECONDS, max_v=600)
+    )
+    HYMT2_MAX_RETRIES = max(
+        0, _read_env_int('HYMT2_MAX_RETRIES', HYMT2_MAX_RETRIES, max_v=20)
     )
 
     DASHSCOPE_API_KEY = _read_first_env('DASHSCOPE_API_KEY')
@@ -641,6 +669,7 @@ def get_default_ui_config() -> dict:
             'secondary_target_language': None,
             'fallback_language': 'en',
             'api_type': DEFAULT_TRANSLATION_API_TYPE,
+            'translate_partial_results': True,
             'llm_template': DEFAULT_LLM_TEMPLATE,
             'llm_base_url': DEFAULT_LLM_BASE_URL,
             'llm_model': DEFAULT_LLM_MODEL,
@@ -648,6 +677,7 @@ def get_default_ui_config() -> dict:
             'llm_translation_style': DEFAULT_LLM_TRANSLATION_STYLE,
             'openai_compat_extra_body_json': DEFAULT_LLM_EXTRA_BODY_JSON,
             'llm_parallel_fastest_mode': 'off',
+            'hymt2_websocket_url': '',
             'show_partial_results': False,
             'enable_furigana': False,
             'enable_pinyin': False,

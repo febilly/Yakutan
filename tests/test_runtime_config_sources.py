@@ -167,6 +167,40 @@ def test_defaults_endpoint_uses_canonical_deepseek_profile():
         translation["openai_compat_extra_body_json"]
         == config.DEFAULT_LLM_EXTRA_BODY_JSON
     )
+    assert translation["translate_partial_results"] is True
+
+
+def test_web_config_update_hymt2_streaming_toggle(monkeypatch):
+    from ui import app as ui_app
+
+    monkeypatch.setattr(config, "TRANSLATION_API_TYPE", "openrouter_streaming")
+    monkeypatch.setattr(config, "TRANSLATE_PARTIAL_RESULTS", True)
+
+    # 1. 切到 hymt2 并显式关闭流式
+    success, message_id, _ = ui_app.update_config(
+        {
+            "translation": {
+                "api_type": "hymt2",
+                "hymt2_websocket_url": "ws://127.0.0.1:18765",
+                "translate_partial_results": False,
+            }
+        }
+    )
+    assert success is True
+    assert config.TRANSLATION_API_TYPE == "hymt2"
+    assert config.TRANSLATE_PARTIAL_RESULTS is False
+
+    # 2. 重新开启流式
+    success, message_id, _ = ui_app.update_config(
+        {
+            "translation": {
+                "api_type": "hymt2",
+                "translate_partial_results": True,
+            }
+        }
+    )
+    assert success is True
+    assert config.TRANSLATE_PARTIAL_RESULTS is True
 
 
 def test_recognizer_credentials_ignore_inherited_environment(monkeypatch):
