@@ -16,6 +16,7 @@ from .api.base import BaseTranslationAPI
 from .api.deepl import DeepLAPI
 from .api.google_dictionary import GoogleDictionaryAPI
 from .api.google_web import GoogleWebAPI
+from .api.hymt2 import HyMT2API
 from .api.openrouter import OpenRouterAPI, OpenRouterStreamingAPI
 from .api.qwen_mt import QwenMTAPI
 from .core.context_aware import ContextAwareTranslator
@@ -33,6 +34,7 @@ TRANSLATION_API_CLASS_REGISTRY: dict[str, type[BaseTranslationAPI]] = {
     "openrouter_streaming_deepl_hybrid": OpenRouterStreamingAPI,
     "deepl": DeepLAPI,
     "qwen_mt": QwenMTAPI,
+    "hymt2": HyMT2API,
 }
 
 DEFAULT_API_TYPE = "openrouter_streaming"
@@ -56,7 +58,11 @@ def _normalize_optional_language_code(language: Optional[str]) -> Optional[str]:
 
 
 def is_streaming_translation_mode(api_type: str) -> bool:
-    return api_type in ("openrouter_streaming", "openrouter_streaming_deepl_hybrid")
+    return api_type in (
+        "openrouter_streaming",
+        "openrouter_streaming_deepl_hybrid",
+        "hymt2",
+    )
 
 
 def is_streaming_deepl_hybrid_mode(api_type: str) -> bool:
@@ -87,6 +93,7 @@ def _primary_config_signature(cfg: TranslationConfig) -> tuple:
         ("context_size", cfg.translation_context_size),
         ("context_aware", cfg.translation_context_aware),
         ("proxy_url", cfg.proxy_url),
+        ("translate_partial_results", cfg.translate_partial_results),
     ]
 
     if api_type in (
@@ -126,6 +133,15 @@ def _primary_config_signature(cfg: TranslationConfig) -> tuple:
             ]
         )
 
+    if api_type == "hymt2":
+        signature.extend(
+            [
+                ("hymt2_websocket_url", cfg.hymt2_websocket_url),
+                ("hymt2_timeout", cfg.hymt2_timeout),
+                ("hymt2_max_retries", cfg.hymt2_max_retries),
+            ]
+        )
+
     return tuple(signature)
 
 
@@ -147,6 +163,25 @@ def clear_translation_contexts(
         clear = getattr(translator, "clear_contexts", None)
         if callable(clear):
             clear()
+            cleared += 1
+
+    # 同时重置各翻译 API 实例的进行中句子修订链（如 Hy-MT2 的 WebSocket 会话）
+    seen_apis: set[int] = set()
+    for attr in TRANSLATOR_CONTEXT_ATTRS:
+        translator = getattr(state, attr, None)
+        api = getattr(translator, "translation_api", None)
+        if api is None:
+            continue
+        # 仅对真正实现了 reset_session 的 API 生效（避免误把 mock 的任意属性当方法）
+        if not hasattr(type(api), "reset_session"):
+            continue
+        api_id = id(api)
+        if api_id in seen_apis:
+            continue
+        seen_apis.add(api_id)
+        reset = getattr(api, "reset_session", None)
+        if callable(reset):
+            reset()
             cleared += 1
     return cleared
 
@@ -182,6 +217,11 @@ def _build_api(api_class: type[BaseTranslationAPI], cfg: TranslationConfig) -> B
     elif issubclass(api_class, QwenMTAPI):
         kwargs["api_key"] = cfg.dashscope_api_key
         kwargs["use_international"] = cfg.use_international_endpoint
+
+    elif issubclass(api_class, HyMT2API):
+        kwargs["websocket_url"] = cfg.hymt2_websocket_url
+        kwargs["timeout"] = cfg.hymt2_timeout
+        kwargs["max_retries"] = cfg.hymt2_max_retries
 
     elif issubclass(api_class, GoogleDictionaryAPI):
         kwargs["proxy_url"] = cfg.proxy_url
@@ -220,6 +260,7 @@ def _is_primary_config_changed(state, cfg: TranslationConfig) -> bool:
     return (
         cfg.translation_api_type != getattr(state, "translation_api_type", None)
         or cfg.target_language != getattr(state, "target_language", None)
+        or cfg.translate_partial_results != getattr(state, "_last_translate_partial_results", None)
         or cfg.translation_context_size != getattr(state, "_last_translation_context_size", None)
         or cfg.translation_context_aware != getattr(state, "_last_translation_context_aware", None)
         or cfg.llm_base_url != getattr(state, "_last_llm_base_url", None)
@@ -239,6 +280,9 @@ def _is_primary_config_changed(state, cfg: TranslationConfig) -> bool:
         or cfg.llm_parallel_fastest_mode != getattr(
             state, "_last_parallel_fastest_mode", None
         )
+        or getattr(state, "_last_hymt2_websocket_url", None) != cfg.hymt2_websocket_url
+        or getattr(state, "_last_hymt2_timeout", None) != cfg.hymt2_timeout
+        or getattr(state, "_last_hymt2_max_retries", None) != cfg.hymt2_max_retries
     )
 
 
@@ -298,7 +342,10 @@ def ensure_secondary_translator(
 
 def reinitialize_translator(state, cfg: TranslationConfig) -> None:
     """(Re)initialise all translator instances on *state* from *cfg*."""
-    if is_streaming_translation_mode(cfg.translation_api_type):
+    if cfg.translation_api_type in (
+        "openrouter_streaming",
+        "openrouter_streaming_deepl_hybrid",
+    ):
         cfg.translate_partial_results = True
 
     clear_translation_contexts(state)
@@ -351,6 +398,7 @@ def reinitialize_translator(state, cfg: TranslationConfig) -> None:
     state.secondary_target_language = secondary_target
     state._translation_config = cfg
     state._primary_translation_config_signature = _primary_config_signature(cfg)
+    state._last_translate_partial_results = cfg.translate_partial_results
     state._last_translation_context_size = cfg.translation_context_size
     state._last_translation_context_aware = cfg.translation_context_aware
     state._last_llm_base_url = cfg.llm_base_url
@@ -368,6 +416,9 @@ def reinitialize_translator(state, cfg: TranslationConfig) -> None:
     state._last_dashscope_api_key_fingerprint = _secret_fingerprint(cfg.dashscope_api_key)
     state._last_use_international_endpoint = cfg.use_international_endpoint
     state._last_parallel_fastest_mode = cfg.llm_parallel_fastest_mode
+    state._last_hymt2_websocket_url = cfg.hymt2_websocket_url
+    state._last_hymt2_timeout = cfg.hymt2_timeout
+    state._last_hymt2_max_retries = cfg.hymt2_max_retries
 
 
 def update_secondary_translator(state, cfg: TranslationConfig) -> None:

@@ -52,6 +52,7 @@ streaming_translation/
 │   ├── google_web.py       # Google Web
 │   ├── google_dictionary.py# Google Dictionary
 │   ├── qwen_mt.py          # Qwen-MT
+│   ├── hymt2.py            # Hy-MT2（WebSocket 流式修订翻译）
 │   └── openrouter.py       # LLM (OpenAI-compatible)
 ├── core/
 │   ├── context_aware.py    # ContextAwareTranslator
@@ -135,10 +136,18 @@ cfg = config_from_module(config)
 | `QwenMTAPI` | 阿里 Qwen-MT | ✅ | `openai` |
 | `OpenRouterAPI` | OpenAI 兼容接口 | ✅ | `openai` |
 | `OpenRouterStreamingAPI` | 同上（流式模式） | ✅ | `openai` |
+| `HyMT2API` | Hy-MT2 WebSocket 流式修订翻译 | ✅ | `websockets` |
 
 `OpenRouterAPI` 在流式模式下使用 v12 smart-hybrid 策略，
 `merge_with_draft(fresh, draft)` 是其公开的合并工具函数，
 用于保留 draft 的开头措辞同时用 fresh 保证内容完整性。
+
+`HyMT2API` 实现了 Hy-MT2-1.8B 的**无状态修订式流式翻译**协议（`init` /
+`update` → `translation`，UTF-8 JSON 文本帧）。服务端不保存会话状态，修订链
+（`previous_source` / `previous_translation` / `history`）由 API 实例按句维护：
+同一句的连续 `translate()` 调用（部分中间结果 `is_partial=True` 与最终 `False`）
+自动携带上一版源文/译文，最终确认后记入历史并开启下一句。**WebSocket 地址不内置
+默认值**：必须通过 `hymt2_websocket_url` 注入（宿主应用由用户填写）。
 
 ### ContextAwareTranslator
 

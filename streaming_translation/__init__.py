@@ -11,6 +11,7 @@ from .api.base import BaseTranslationAPI
 from .api.deepl import DeepLAPI
 from .api.google_dictionary import GoogleDictionaryAPI
 from .api.google_web import GoogleWebAPI
+from .api.hymt2 import HyMT2API
 from .api.openrouter import OpenRouterAPI, OpenRouterStreamingAPI, merge_with_draft
 from .api.qwen_mt import QwenMTAPI
 from .core.context_aware import ContextAwareTranslator, TranslationHistoryEntry
@@ -35,6 +36,7 @@ __all__ = [
     "DEFAULT_API_TYPE",
     "GoogleDictionaryAPI",
     "GoogleWebAPI",
+    "HyMT2API",
     "OpenRouterAPI",
     "OpenRouterStreamingAPI",
     "QwenMTAPI",

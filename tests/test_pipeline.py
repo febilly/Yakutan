@@ -68,13 +68,17 @@ class TestAPIRegistry:
         expected = {
             "google_web", "google_dictionary", "openrouter",
             "openrouter_streaming", "openrouter_streaming_deepl_hybrid",
-            "deepl", "qwen_mt",
+            "deepl", "qwen_mt", "hymt2",
         }
         assert set(TRANSLATION_API_CLASS_REGISTRY.keys()) == expected
 
     def test_get_api_class_exists(self):
         from streaming_translation.api.deepl import DeepLAPI
         assert _get_api_class("deepl") is DeepLAPI
+
+    def test_get_api_class_hymt2(self):
+        from streaming_translation.api.hymt2 import HyMT2API
+        assert _get_api_class("hymt2") is HyMT2API
 
     def test_get_api_class_fallback_to_default(self):
         from streaming_translation.api.openrouter import OpenRouterStreamingAPI
@@ -90,6 +94,7 @@ class TestStreamingModeHelpers:
     def test_is_streaming_true(self):
         assert is_streaming_translation_mode("openrouter_streaming") is True
         assert is_streaming_translation_mode("openrouter_streaming_deepl_hybrid") is True
+        assert is_streaming_translation_mode("hymt2") is True
 
     def test_is_streaming_false(self):
         assert is_streaming_translation_mode("deepl") is False
@@ -180,6 +185,26 @@ class TestReinitializeTranslator:
             reinitialize_translator(state, cfg)
         assert cfg.translate_partial_results is True
 
+    def test_hymt2_preserves_streaming_state(self):
+        state = MockState()
+        cfg_streaming = TranslationConfig(
+            target_language="zh-CN",
+            translation_api_type="hymt2",
+            hymt2_websocket_url="ws://127.0.0.1:18765",
+            translate_partial_results=True,
+        )
+        reinitialize_translator(state, cfg_streaming)
+        assert cfg_streaming.translate_partial_results is True
+
+        cfg_non_streaming = TranslationConfig(
+            target_language="zh-CN",
+            translation_api_type="hymt2",
+            hymt2_websocket_url="ws://127.0.0.1:18765",
+            translate_partial_results=False,
+        )
+        reinitialize_translator(state, cfg_non_streaming)
+        assert cfg_non_streaming.translate_partial_results is False
+
     def test_reinitialize_clears_existing_contexts_before_switch(self):
         state = MockState()
         old_primary = MagicMock()
@@ -261,6 +286,24 @@ class TestPrimaryConfigChanged:
                 llm_extra_body_json='{"provider": "b"}',
             ),
         ) is True
+
+    def test_detects_translate_partial_results_change(self):
+        state = MockState()
+        cfg = TranslationConfig(
+            target_language="zh-CN",
+            translation_api_type="hymt2",
+            hymt2_websocket_url="ws://127.0.0.1:18765",
+            translate_partial_results=True,
+        )
+        reinitialize_translator(state, cfg)
+
+        changed_cfg = TranslationConfig(
+            target_language="zh-CN",
+            translation_api_type="hymt2",
+            hymt2_websocket_url="ws://127.0.0.1:18765",
+            translate_partial_results=False,
+        )
+        assert _is_primary_config_changed(state, changed_cfg) is True
 
     def test_ignores_inactive_llm_config_changes(self):
         state = MockState()

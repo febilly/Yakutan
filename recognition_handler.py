@@ -673,6 +673,22 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self._last_osc_typing_ongoing = False
         with self._translate_ordering_lock:
             self._session_generation += 1
+        # 重置翻译 API 的进行中句子修订链（如 Hy-MT2 的 WebSocket 会话），
+        # 避免上一句未完成的链被当作下一句的 previous_* 携带发送
+        s = self.state
+        if s is not None:
+            for api in (
+                getattr(s, 'translation_api', None),
+                getattr(s, 'secondary_translation_api', None),
+                getattr(s, 'deepl_fallback_translation_api', None),
+                getattr(s, 'secondary_deepl_fallback_translation_api', None),
+            ):
+                reset = getattr(api, 'reset_session', None)
+                if callable(reset):
+                    try:
+                        reset()
+                    except Exception:
+                        pass
 
     def on_session_stopped(self) -> None:
         self._cancel_partial_debounce()
@@ -749,6 +765,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         is_partial=True,
                         record_history=False,
                         previous_translation=self.last_partial_translation,
+                        detected_source_language=detected_lang,
                     ),
                 )
 
@@ -764,6 +781,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         is_partial=True,
                         record_history=False,
                         previous_translation=self.last_partial_translation_secondary,
+                        detected_source_language=detected_lang,
                     ),
                 )
 

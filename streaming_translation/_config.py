@@ -92,6 +92,20 @@ class TranslationConfig:
     use_international_endpoint: bool = False
     """Use DashScope international endpoint instead of domestic."""
 
+    # ── Hy-MT2 (WebSocket streaming revision translation) ─────────────
+    hymt2_websocket_url: str = ""
+    """Hy-MT2 WebSocket address (e.g. ``ws://127.0.0.1:18765``).
+
+    Not pre-filled on purpose: the user must supply it (Web UI setting or
+    ``HYMT2_WEBSOCKET_URL``), since this is a private/local service.
+    """
+
+    hymt2_timeout: float = 30.0
+    """Per-request / connect timeout in seconds for the Hy-MT2 WebSocket."""
+
+    hymt2_max_retries: int = 3
+    """Connection retry count when the Hy-MT2 WebSocket cannot be opened."""
+
     # ── Proxy ─────────────────────────────────────────────────────────
     proxy_url: Optional[str] = None
     """Optional HTTP/HTTPS proxy URL applied to all API backends."""
@@ -157,6 +171,9 @@ def config_from_module(module: object) -> TranslationConfig:
         llm_app_url=getattr(module, "LLM_APP_URL", ""),
         llm_app_title=getattr(module, "LLM_APP_TITLE", ""),
         use_international_endpoint=getattr(module, "USE_INTERNATIONAL_ENDPOINT", False),
+        hymt2_websocket_url=str(getattr(module, "HYMT2_WEBSOCKET_URL", "") or "").strip(),
+        hymt2_timeout=float(getattr(module, "HYMT2_TIMEOUT_SECONDS", 30.0) or 30.0),
+        hymt2_max_retries=int(getattr(module, "HYMT2_MAX_RETRIES", 3) or 3),
         proxy_url=None,
         deepl_api_key=getattr(module, "DEEPL_API_KEY", None),
         dashscope_api_key=getattr(module, "DASHSCOPE_API_KEY", None),
