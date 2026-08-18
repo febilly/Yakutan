@@ -7,7 +7,16 @@ Yakutan 的 VAD 设置现在统一由 `VAD_ENABLED` 和一组 `LOCAL_VAD_*` 参�
 - 在线 API 后端（Qwen/DashScope/Soniox/Doubao）：客户端使用 Silero VAD 做发送门控，静音时不向 ASR 发送音频帧以减少无效计费。
 - 本地 ASR 后端：采集侧不做发送门控，继续把连续音频交给本地识别器，由本地识别器内部 VAD 做自动分段。
 
-Web UI 中的入口为「高级设置 -> VAD」。本地音频识别卡片只保留引擎、增量识别和中间结果间隔；VAD 参数统一移到高级设置。
+Web UI 中的入口为「高级设置 -> VAD」。本地音频识别卡片只保留引擎与增量识别参数；VAD 参数统一移到高级设置。
+
+## 本地增量识别（中间结果）
+
+本地识别开启「启用增量识别」时，中间结果不再按固定间隔轮询，而是由 VAD 状态驱动：
+
+- **短停顿触发**：说话中连续静音达到 `LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS`（默认 100ms）时，视为一个分句位置（如逗号），立即对当前累积音频做一次完整本地识别；同一次停顿只触发一次，重新开口后再次武装。
+- **限流**：`LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL`（默认 1s）是两次增量更新的最小间隔。
+- **保底**：`LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL`（默认 4s）内没有任何增量更新时，强制刷新一次中间结果。
+- 静音时长继续由 `LOCAL_VAD_SILENCE_DURATION` 控制整句提交（断句），与增量触发互相独立。
 
 ## 设计目标
 
@@ -42,6 +51,11 @@ LOCAL_VAD_MIN_SPEECH_DURATION = 1.0
 LOCAL_VAD_MAX_SPEECH_DURATION = 30.0
 LOCAL_VAD_SILENCE_DURATION = 0.8
 LOCAL_VAD_PRE_SPEECH_DURATION = 0.2
+
+LOCAL_INCREMENTAL_ASR = True
+LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 100
+LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = 1.0
+LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 4.0
 ```
 
 环境变量：

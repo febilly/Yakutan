@@ -253,7 +253,12 @@ function getLocalAsrConfigFromForm() {
         engine: document.getElementById('local-asr-engine')?.value || 'sensevoice',
         device: getDeviceSelectValue('local-asr-device'),
         incremental_asr: document.getElementById('local-incremental-asr')?.checked ?? true,
-        interim_interval: parseFloat(document.getElementById('local-interim-interval')?.value || '2'),
+        incremental_trigger_silence_ms:
+            parseInt(document.getElementById('local-incremental-trigger-silence')?.value || '100', 10),
+        incremental_min_interval:
+            parseFloat(document.getElementById('local-incremental-min-interval')?.value || '1'),
+        incremental_fallback_interval:
+            parseFloat(document.getElementById('local-incremental-fallback-interval')?.value || '4'),
     };
 }
 
@@ -266,8 +271,17 @@ function applyLocalAsrConfig(config) {
     if (document.getElementById('local-incremental-asr')) {
         document.getElementById('local-incremental-asr').checked = config.incremental_asr ?? true;
     }
-    if (document.getElementById('local-interim-interval')) {
-        document.getElementById('local-interim-interval').value = config.interim_interval ?? 2.0;
+    if (document.getElementById('local-incremental-trigger-silence')) {
+        document.getElementById('local-incremental-trigger-silence').value =
+            config.incremental_trigger_silence_ms ?? 100;
+    }
+    if (document.getElementById('local-incremental-min-interval')) {
+        document.getElementById('local-incremental-min-interval').value =
+            config.incremental_min_interval ?? 1.0;
+    }
+    if (document.getElementById('local-incremental-fallback-interval')) {
+        document.getElementById('local-incremental-fallback-interval').value =
+            config.incremental_fallback_interval ?? 4.0;
     }
     updateLocalAsrEngineHint();
     updateLocalAsrDeviceState();
@@ -2955,7 +2969,9 @@ function loadDefaultConfig() {
             engine: 'sensevoice',
             device: getDefaultDeviceValue(),
             incremental_asr: true,
-            interim_interval: 2.0,
+            incremental_trigger_silence_ms: 100,
+            incremental_min_interval: 1.0,
+            incremental_fallback_interval: 4.0,
         });
     }
 

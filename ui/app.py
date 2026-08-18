@@ -213,7 +213,15 @@ def _local_asr_config_dict() -> dict:
         'engine': getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice'),
         'device': config.sanitize_local_device(getattr(config, 'LOCAL_ASR_DEVICE', 'auto')),
         'incremental_asr': getattr(config, 'LOCAL_INCREMENTAL_ASR', True),
-        'interim_interval': getattr(config, 'LOCAL_INTERIM_INTERVAL', 2.0),
+        'incremental_trigger_silence_ms': getattr(
+            config, 'LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS', 100,
+        ),
+        'incremental_min_interval': getattr(
+            config, 'LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL', 1.0,
+        ),
+        'incremental_fallback_interval': getattr(
+            config, 'LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL', 4.0,
+        ),
     }
 
 
@@ -734,8 +742,18 @@ def update_config(config_data):
                 config.LOCAL_ASR_DEVICE = config.sanitize_local_device(local_asr['device'])
             if 'incremental_asr' in local_asr:
                 config.LOCAL_INCREMENTAL_ASR = bool(local_asr['incremental_asr'])
-            if 'interim_interval' in local_asr:
-                config.LOCAL_INTERIM_INTERVAL = float(local_asr['interim_interval'])
+            if 'incremental_trigger_silence_ms' in local_asr:
+                config.LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = max(
+                    0, int(local_asr['incremental_trigger_silence_ms']),
+                )
+            if 'incremental_min_interval' in local_asr:
+                config.LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = max(
+                    0.0, float(local_asr['incremental_min_interval']),
+                )
+            if 'incremental_fallback_interval' in local_asr:
+                config.LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = max(
+                    0.0, float(local_asr['incremental_fallback_interval']),
+                )
         
         config.bump_config_applied_at_ms()
         return True, 'msg.configUpdated', '配置已更新'
@@ -1458,7 +1476,9 @@ def get_defaults():
         {
             'engine': 'sensevoice',
             'incremental_asr': True,
-            'interim_interval': 2.0,
+            'incremental_trigger_silence_ms': 100,
+            'incremental_min_interval': 1.0,
+            'incremental_fallback_interval': 4.0,
         }
         if is_local_asr_ui_enabled()
         else None

@@ -129,8 +129,16 @@ LOCAL_VAD_PRE_SPEECH_DURATION = 0.2
 LOCAL_ASR_DEVICE = 'auto'
 
 # 本地增量识别（中间结果）
+# 触发方式基于 VAD：说话中检测到短停顿（如逗号/分句位置）立即做一次全量本地识别，
+# 并配有限流（最小间隔）与保底（最长间隔）机制；不再使用固定间隔轮询。
 LOCAL_INCREMENTAL_ASR = True
-LOCAL_INTERIM_INTERVAL = 2.0
+# 短停顿触发：说话中出现该时长（毫秒）的连续静音时，视为一个分句位置，
+# 立即对当前累积音频做一次完整本地识别并产出中间结果。
+LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 100
+# 限流：两次增量更新之间的最小间隔（秒），短停顿触发至少间隔该时长一次。
+LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = 1.0
+# 保底：连续该时长（秒）没有任何增量更新时，强制刷新一次中间结果。
+LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 4.0
 
 # Qwen3-ASR：GGUF 解码器 KV 上下文长度（token）；增大占显存/内存。
 LOCAL_QWEN_ASR_N_CTX = 2048

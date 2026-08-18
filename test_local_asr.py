@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 import time
 import unittest
 import wave
@@ -107,7 +106,9 @@ class LocalAsrTests(unittest.TestCase):
         self._original_values = {
             "LOCAL_ASR_ENGINE": config.LOCAL_ASR_ENGINE,
             "LOCAL_INCREMENTAL_ASR": config.LOCAL_INCREMENTAL_ASR,
-            "LOCAL_INTERIM_INTERVAL": config.LOCAL_INTERIM_INTERVAL,
+            "LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS": config.LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS,
+            "LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL": config.LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL,
+            "LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL": config.LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL,
             "LOCAL_VAD_MODE": config.LOCAL_VAD_MODE,
             "LOCAL_VAD_THRESHOLD": config.LOCAL_VAD_THRESHOLD,
             "LOCAL_VAD_MIN_SPEECH_DURATION": config.LOCAL_VAD_MIN_SPEECH_DURATION,
@@ -116,7 +117,9 @@ class LocalAsrTests(unittest.TestCase):
         }
         config.LOCAL_ASR_ENGINE = "sensevoice"
         config.LOCAL_INCREMENTAL_ASR = True
-        config.LOCAL_INTERIM_INTERVAL = 1.5
+        config.LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 100
+        config.LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = 0.1
+        config.LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 1.0
         config.LOCAL_VAD_MODE = "silero"
         config.LOCAL_VAD_THRESHOLD = 0.50
         config.LOCAL_VAD_MIN_SPEECH_DURATION = 1.0
@@ -177,24 +180,120 @@ class LocalAsrTests(unittest.TestCase):
         if sample_rate != 16000:
             self.skipTest("测试音频采样率不是 16kHz")
 
+        sr = 16000
+        silence_400ms = np.zeros(sr // 100 * 4, dtype=np.float32)
+        silence_1200ms = np.zeros(sr // 100 * 12, dtype=np.float32)
+
         callback = CollectingCallback()
         recognizer = LocalSpeechRecognizer(callback=callback, sample_rate=16000, source_language="auto")
         recognizer._engine = _StubEngine()
         recognizer._ensure_engine = lambda: recognizer._engine  # type: ignore[assignment]
         recognizer.start()
         try:
-            for chunk in chunk_pcm16(audio[: 16000 * 6]):
+            # 阶段一：喂入真实语音，直到当前 VAD 段内累积了足够的说话内容
+            head_end = min(6 * sr, len(audio))
+            offset = 0
+            peek = None
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                if offset < head_end:
+                    end = min(offset + sr, head_end)
+                    for chunk in chunk_pcm16(audio[offset:end]):
+                        recognizer.send_audio_frame(chunk)
+                        time.sleep(0.005)
+                    offset = end
+                with recognizer._lock:
+                    peek = recognizer._vad.peek_buffer()
+                if peek is not None and peek[1] >= 1.2:
+                    break
+                time.sleep(0.05)
+            self.assertIsNotNone(peek, "样本音频前 6 秒内未出现足够长的连续语音段")
+
+            # 阶段二：400ms 短静音（小于断句阈值）→ 应触发一次增量更新（逗号位置）
+            for chunk in chunk_pcm16(silence_400ms):
                 recognizer.send_audio_frame(chunk)
-                time.sleep(0.002)
-            time.sleep(1.0)
-            recognizer.pause()
-            recognizer.resume()
+                time.sleep(0.01)
+
+            # 阶段三：继续说话，再以 1.2s 尾静音结束整句 → 应提交最终结果
+            more = audio[: 3 * sr]
+            for chunk in chunk_pcm16(more):
+                recognizer.send_audio_frame(chunk)
+                time.sleep(0.005)
+            for chunk in chunk_pcm16(silence_1200ms):
+                recognizer.send_audio_frame(chunk)
+                time.sleep(0.01)
+
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                has_partial = any(not event.is_final for event in callback.events)
+                has_final = any(event.is_final for event in callback.events)
+                if has_partial and has_final:
+                    break
+                time.sleep(0.05)
         finally:
             recognizer.stop()
 
         self.assertFalse(callback.errors)
         self.assertTrue(any(not event.is_final for event in callback.events))
         self.assertTrue(any(event.is_final for event in callback.events))
+
+    def test_fallback_not_triggered_by_stale_timer_before_speech(self) -> None:
+        """回归：开口前的长静音不应算作"连续说话"，保底计时应从开口时刻锚定。"""
+        audio, sample_rate = load_audio_file(SAMPLE_WAV)
+        if sample_rate != 16000:
+            self.skipTest("测试音频采样率不是 16kHz")
+
+        sr = 16000
+        # 本测试只观察保底路径：关闭短停顿触发，并把保底间隔调大到 5 秒
+        config.LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 0
+        config.LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 5.0
+
+        callback = CollectingCallback()
+        recognizer = LocalSpeechRecognizer(callback=callback, sample_rate=16000, source_language="auto")
+        recognizer._engine = _StubEngine()
+        recognizer._ensure_engine = lambda: recognizer._engine  # type: ignore[assignment]
+        recognizer.start()
+        try:
+            audio = audio.astype(np.float32)
+            # 阶段一：制造"启动已久、一直沉默"的陈旧计时（回拨 10 秒 > 5 秒保底间隔）
+            recognizer._last_partial_time = time.monotonic() - 10.0
+
+            offset = 0
+            end_limit = min(6 * sr, len(audio))
+            while offset < end_limit and not recognizer._vad._is_speaking:
+                end = min(offset + sr // 10, end_limit)
+                with recognizer._lock:
+                    recognizer._feed_samples(audio[offset:end])
+                offset = end
+            self.assertTrue(recognizer._vad._is_speaking, "样本音频前 6 秒内未检测到语音，无法测试开口瞬间行为")
+
+            # 阶段二：开口后继续说 1.2 秒（缓冲越过 1 秒门槛，但距开口不到保底间隔）→ 不应触发
+            end = min(offset + 12 * sr // 10, end_limit)
+            with recognizer._lock:
+                recognizer._feed_samples(audio[offset:end])
+            offset = end
+            self.assertIsNone(
+                recognizer._active_transcribe_future,
+                "开口不应被开口的陈旧计时误判为'连续说话很久'而立即保底触发",
+            )
+            self.assertFalse(
+                any(not event.is_final for event in callback.events),
+                "开口前的长静音不应计入保底时间",
+            )
+
+            # 阶段三：保底机制本身仍要有效——把锚点回拨 6 秒（> 5 秒保底间隔）后继续说话 → 应触发增量更新
+            while offset < end_limit and not any(not event.is_final for event in callback.events):
+                with recognizer._lock:
+                    recognizer._last_partial_time = time.monotonic() - 6.0
+                    end = min(offset + sr // 10, end_limit)
+                    recognizer._feed_samples(audio[offset:end])
+                offset = end
+            self.assertTrue(
+                any(not event.is_final for event in callback.events),
+                "锚点超过保底间隔后应触发保底增量更新",
+            )
+        finally:
+            recognizer.stop()
 
     def test_long_audio_excerpt_vad_or_recognizer_smoke(self) -> None:
         if not LONG_AUDIO.exists():

@@ -216,6 +216,16 @@ class VADProcessor:
         """当前是否正在说话（供外部 gating 逻辑读取）。"""
         return self._is_speaking
 
+    @property
+    def current_silence_duration(self) -> float:
+        """当前语音段内已连续静音的时长（秒）；非说话状态返回 0.0。
+
+        供增量识别的短停顿触发等逻辑判断"说话中出现了多长的停顿"。
+        """
+        if not self._is_speaking:
+            return 0.0
+        return self._silence_counter * self._chunk_duration
+
     def _flush_segment(self) -> np.ndarray | None:
         if not self._speech_buffer:
             return None

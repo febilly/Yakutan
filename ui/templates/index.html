@@ -686,9 +686,22 @@
                                         <small class="form-text" id="local-asr-device-hint" data-i18n="hint.localAsrDevice">仅对 Qwen3-ASR 生效；SenseVoice 固定在 CPU 上运行。</small>
                                     </div>
                                     <div class="form-group">
-                                        <label for="local-interim-interval" data-i18n="label.localInterimInterval">中间结果间隔（秒）</label>
-                                        <input type="number" id="local-interim-interval" class="form-control" min="0.5" max="20"
+                                        <label for="local-incremental-trigger-silence" data-i18n="label.localIncrementalTriggerSilence">增量更新静音（毫秒）</label>
+                                        <input type="number" id="local-incremental-trigger-silence" class="form-control" min="100" max="1000"
+                                            step="50" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                                        <small class="form-text" data-i18n="hint.localIncrementalTriggerSilence">说话中出现该时长的短停顿即视为一个分句（逗号位置），立即触发一次增量识别。</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="local-incremental-min-interval" data-i18n="label.localIncrementalMinInterval">增量更新最小间隔（秒）</label>
+                                        <input type="number" id="local-incremental-min-interval" class="form-control" min="0.2" max="10"
+                                            step="0.1" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                                        <small class="form-text" data-i18n="hint.localIncrementalMinInterval">限流：两次增量更新之间的最小间隔。</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="local-incremental-fallback-interval" data-i18n="label.localIncrementalFallbackInterval">增量更新最长间隔（秒）</label>
+                                        <input type="number" id="local-incremental-fallback-interval" class="form-control" min="1" max="30"
                                             step="0.5" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                                        <small class="form-text" data-i18n="hint.localIncrementalFallbackInterval">兜底：连续该时长没有任何更新时，强制刷新一次中间结果。</small>
                                     </div>
                                     <div class="form-group" style="grid-column: 1 / -1;">
                                         <label class="switch-label">
@@ -935,9 +948,10 @@
                             </div>
 
                             <div class="form-group">
-                                <label for="vad-silence-duration" data-i18n="label.localSilenceDuration">静音持续时间（秒）</label>
+                                <label for="vad-silence-duration" data-i18n="label.localSilenceDuration">句子结束静音（秒）</label>
                                 <input type="number" id="vad-silence-duration" class="form-control" min="0.1" max="5"
                                     step="0.1" onchange="onSettingChange()" data-restart-required="true">
+                                <small class="form-text" data-i18n="hint.localSilenceDuration">连续静音达到该时长时，判定整句话说完，提交最终识别结果（本地识别断句）。</small>
                             </div>
 
                             <div class="form-group">

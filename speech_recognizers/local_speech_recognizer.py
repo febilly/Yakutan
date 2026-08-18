@@ -52,6 +52,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         self._pending_samples = np.array([], dtype=np.float32)
         self._last_partial_text = ""
         self._last_partial_time = 0.0
+        self._silence_trigger_armed = True
         self._last_request_id = f"local-{self._engine_name}"
         self._stream_id = 0
         self._corpus_text = (corpus_text or "").strip()
@@ -217,26 +218,64 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             return
         if self._audio_queue.qsize() >= 8:
             return
-        peek = self._vad.peek_buffer()
+        vad = self._vad
+        silence_sec = vad.current_silence_duration
+        if silence_sec <= 0.0:
+            # 正在说话（无停顿）：确保下一次停顿可以触发；继续走保底判定。
+            self._silence_trigger_armed = True
+        peek = vad.peek_buffer()
         if peek is None:
             return
         audio, duration = peek
-        if duration < 1.5:
+        if duration < 1.0:
             return
         now = time.monotonic()
-        if now - self._last_partial_time < float(getattr(config, "LOCAL_INTERIM_INTERVAL", 2.0)):
+        elapsed = now - self._last_partial_time
+        min_interval = max(0.0, float(
+            getattr(config, "LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL", 1.0),
+        ))
+        fallback_interval = max(min_interval, float(
+            getattr(config, "LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL", 4.0),
+        ))
+        trigger_silence = max(
+            0.0, float(getattr(config, "LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS", 100)),
+        ) / 1000.0
+
+        # 短停顿触发：说话中出现达到阈值的短静音视为一个分句（逗号位置），
+        # 同一次停顿只触发一次（重新开口后才会再次武装）。
+        silence_triggered = (
+            trigger_silence > 0.0
+            and self._silence_trigger_armed
+            and silence_sec >= trigger_silence
+        )
+        # 保底：连续很久没有任何增量更新时强制刷新一次（含完全无停顿的连续说话）。
+        fallback_triggered = elapsed >= fallback_interval
+        if not silence_triggered and not fallback_triggered:
             return
-        self._last_partial_time = time.monotonic()
+        # 限流：短停顿触发至少间隔 min_interval 一次。
+        if silence_triggered and elapsed < min_interval:
+            return
+        if silence_triggered:
+            self._silence_trigger_armed = False
+        self._last_partial_time = now
         self._enqueue_transcribe(audio, is_final=False)
 
     def _process_chunk(self, chunk: np.ndarray) -> None:
         if self._vad._is_speaking and self._vad._speech_samples >= self._input_cap_samples():
             chunk = np.zeros_like(chunk)
+        was_speaking = self._vad._is_speaking
         speech_segment = self._vad.process_chunk(chunk)
         if speech_segment is not None:
+            # 整句提交（断句）：下一句的保底计时与短停顿触发从此处重新计。
+            self._last_partial_time = time.monotonic()
+            self._silence_trigger_armed = True
             self._enqueue_transcribe(speech_segment, is_final=True)
             return
         if self._vad._is_speaking:
+            if not was_speaking:
+                # 新段刚进入说话状态：保底计时从"开口时刻"重新锚定，
+                # 否则开口前的长静音（> 保底间隔）会让开口瞬间被误判为"连续说话很久未更新"而立即触发。
+                self._last_partial_time = time.monotonic()
             self._maybe_emit_partial()
 
     def _feed_samples(self, samples: np.ndarray) -> None:
@@ -275,7 +314,9 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         if segment is not None:
             self._enqueue_transcribe(segment, is_final=True)
         self._last_partial_text = ""
-        self._last_partial_time = 0.0
+        # 新句子从此刻重新计时：保底间隔从新句子开始计而不是从进程启动计。
+        self._last_partial_time = time.monotonic()
+        self._silence_trigger_armed = True
 
     @staticmethod
     def _pcm_to_float32(data: bytes) -> np.ndarray:
@@ -310,6 +351,8 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             self._running = True
             self._stream_id = 0
             self._last_partial_text = ""
+            self._last_partial_time = time.monotonic()
+            self._silence_trigger_armed = True
             self._waiting_partial_audio = None
             self._waiting_final_audio = None
             self._active_transcribe_future = None
