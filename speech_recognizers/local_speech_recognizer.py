@@ -257,13 +257,13 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         now = time.monotonic()
         elapsed = now - self._last_partial_time
         min_interval = max(0.0, float(
-            getattr(config, "LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL", 1.0),
+            getattr(config, "LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL", 3.0),
         ))
         fallback_interval = max(min_interval, float(
             getattr(config, "LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL", 4.0),
         ))
         trigger_silence = max(
-            0.0, float(getattr(config, "LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS", 100)),
+            0.0, float(getattr(config, "LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS", 10)),
         ) / 1000.0
 
         # 短停顿触发：说话中出现达到阈值的短静音视为一个分句（逗号位置），

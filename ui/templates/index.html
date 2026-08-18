@@ -687,8 +687,8 @@
                                     </div>
                                     <div class="form-group">
                                         <label for="local-incremental-trigger-silence" data-i18n="label.localIncrementalTriggerSilence">增量更新静音（毫秒）</label>
-                                        <input type="number" id="local-incremental-trigger-silence" class="form-control" min="100" max="1000"
-                                            step="50" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+<input type="number" id="local-incremental-trigger-silence" class="form-control" min="10" max="1000"
+                                             step="10" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
                                         <small class="form-text" data-i18n="hint.localIncrementalTriggerSilence">说话中出现该时长的短停顿即视为一个分句（逗号位置），立即触发一次增量识别。</small>
                                     </div>
                                     <div class="form-group">

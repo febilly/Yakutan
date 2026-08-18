@@ -215,9 +215,9 @@ def _local_asr_config_dict() -> dict:
         'incremental_asr': getattr(config, 'LOCAL_INCREMENTAL_ASR', True),
         # 对外接口用秒（内部配置 LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS 为毫秒）
         'incremental_trigger_silence': int(getattr(
-            config, 'LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS', 100)) / 1000,
+            config, 'LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS', 10)) / 1000,
         'incremental_min_interval': getattr(
-            config, 'LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL', 1.0,
+            config, 'LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL', 3.0,
         ),
         'incremental_fallback_interval': getattr(
             config, 'LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL', 4.0,
@@ -1476,8 +1476,8 @@ def get_defaults():
         {
             'engine': 'sensevoice',
             'incremental_asr': True,
-            'incremental_trigger_silence': 0.1,
-            'incremental_min_interval': 1.0,
+            'incremental_trigger_silence': 0.01,
+            'incremental_min_interval': 3.0,
             'incremental_fallback_interval': 4.0,
         }
         if is_local_asr_ui_enabled()

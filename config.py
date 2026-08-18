@@ -135,9 +135,9 @@ LOCAL_ASR_DEVICE = 'auto'
 LOCAL_INCREMENTAL_ASR = True
 # 短停顿触发：说话中出现该时长（毫秒）的连续静音时，视为一个分句位置，
 # 立即对当前累积音频做一次完整本地识别并产出中间结果。
-LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 100
+LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 10
 # 限流：两次增量更新之间的最小间隔（秒），短停顿触发至少间隔该时长一次。
-LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = 1.0
+LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = 3.0
 # 保底：连续该时长（秒）没有任何增量更新时，强制刷新一次中间结果。
 LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 4.0
 
