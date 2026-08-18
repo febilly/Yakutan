@@ -202,7 +202,7 @@ def probe_gpu_devices(*, refresh: bool = False, timeout: float = 30.0) -> list[d
     repo_root = Path(__file__).resolve().parent.parent
     try:
         completed = subprocess.run(
-            [sys.executable, "-m", "local_asr.gpu_devices"],
+            [sys.executable, "-m", "local_inference.gpu_devices"],
             cwd=str(repo_root),
             capture_output=True,
             text=True,

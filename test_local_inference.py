@@ -8,8 +8,8 @@ from pathlib import Path
 import numpy as np
 
 import config
-from local_asr.model_manager import prepare_engine
-from local_asr.vad_processor import VADProcessor
+from local_inference.model_manager import prepare_engine
+from local_inference.vad_processor import VADProcessor
 from speech_recognizers.base_speech_recognizer import SpeechRecognitionCallback
 from speech_recognizers.local_speech_recognizer import (
     LOCAL_VAD_CHUNK_SAMPLES,
@@ -112,7 +112,7 @@ class _CountingStubEngine:
         return {"text": f"复用测试句{self.calls}", "language": "zh", "language_name": "zh"}
 
 
-class LocalAsrTests(unittest.TestCase):
+class LocalInferenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         if not SAMPLE_WAV.exists():
@@ -121,7 +121,7 @@ class LocalAsrTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self._original_values = {
-            "LOCAL_ASR_ENGINE": config.LOCAL_ASR_ENGINE,
+            "LOCAL_INFERENCE_ENGINE": config.LOCAL_INFERENCE_ENGINE,
             "LOCAL_INCREMENTAL_ASR": config.LOCAL_INCREMENTAL_ASR,
             "LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS": config.LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS,
             "LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL": config.LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL,
@@ -132,7 +132,7 @@ class LocalAsrTests(unittest.TestCase):
             "LOCAL_VAD_MAX_SPEECH_DURATION": config.LOCAL_VAD_MAX_SPEECH_DURATION,
             "LOCAL_VAD_SILENCE_DURATION": config.LOCAL_VAD_SILENCE_DURATION,
         }
-        config.LOCAL_ASR_ENGINE = "sensevoice"
+        config.LOCAL_INFERENCE_ENGINE = "sensevoice"
         config.LOCAL_INCREMENTAL_ASR = True
         config.LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 100
         config.LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = 0.1

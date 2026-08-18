@@ -71,8 +71,8 @@ class HyMT2LocalEngine:
     """本地 Hy-MT2 GGUF 推理引擎（基于 llama.cpp / LlamaModel）。"""
 
     def __init__(self, model_path: Optional[str] = None, device: str = "auto"):
-        from local_asr.gpu_devices import describe_device, resolve_device
-        from local_asr.model_manager import (
+        from local_inference.gpu_devices import describe_device, resolve_device
+        from local_inference.model_manager import (
             get_hymt2_model_path,
             prepare_qwen_llama_runtime_env,
         )
@@ -82,7 +82,7 @@ class HyMT2LocalEngine:
         if not path or not Path(path).is_file():
             raise FileNotFoundError(f"Hy-MT2 本地模型文件未找到: {path}")
 
-        from local_asr.vendor.qwen_asr_gguf.inference.llama import (
+        from local_inference.vendor.qwen_asr_gguf.inference.llama import (
             LlamaBatch,
             LlamaContext,
             LlamaModel,
@@ -181,7 +181,7 @@ def _local_engine_key(
     path = model_path
     if not path:
         try:
-            from local_asr.model_manager import get_hymt2_model_path
+            from local_inference.model_manager import get_hymt2_model_path
 
             path = get_hymt2_model_path()
         except Exception:  # pragma: no cover - 非本地构建

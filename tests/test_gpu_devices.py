@@ -4,7 +4,7 @@
 """
 
 import config
-from local_asr.gpu_devices import (
+from local_inference.gpu_devices import (
     GPU_ALL_LAYERS,
     describe_device,
     is_discrete_like,
@@ -107,7 +107,7 @@ class TestLoaderNeverSplits:
         """核显+独显的机器上，llama.cpp 默认会把层切分到两张卡，必须显式关掉。"""
         import inspect
 
-        from local_asr.vendor.qwen_asr_gguf.inference import llama as llama_mod
+        from local_inference.vendor.qwen_asr_gguf.inference import llama as llama_mod
 
         source = inspect.getsource(llama_mod.load_model)
         assert "split_mode = LLAMA_SPLIT_MODE_NONE" in source

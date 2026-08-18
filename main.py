@@ -394,8 +394,8 @@ async def main(
 
     if _vad_gating_enabled:
         try:
-            from local_asr.model_manager import is_silero_cached, download_silero
-            from local_asr.vad_processor import VADProcessor
+            from local_inference.model_manager import is_silero_cached, download_silero
+            from local_inference.vad_processor import VADProcessor
 
             if not is_silero_cached():
                 print('[VAD] Silero ONNX 模型未下载，正在自动下载...')
@@ -481,7 +481,7 @@ async def main(
                     for entry in hot_words_manager.get_hot_words()
                     if entry.get('text')
                 ]
-                local_engine = getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice')
+                local_engine = getattr(config, 'LOCAL_INFERENCE_ENGINE', 'sensevoice')
                 if words and local_engine == 'qwen3-asr':
                     corpus_text = "\n".join(words)
                     print(f'[热词] 已生成本地 Qwen3-ASR 语料文本，共 {len(words)} 条\n')

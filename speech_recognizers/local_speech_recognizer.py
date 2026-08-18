@@ -10,9 +10,9 @@ from typing import Optional
 import numpy as np
 
 import config
-from local_asr import get_engine_runtime_issues
-from local_asr.model_manager import is_asr_cached, is_asr_models_ready, is_silero_cached
-from local_asr.vad_processor import VADProcessor
+from local_inference import get_engine_runtime_issues
+from local_inference.model_manager import is_asr_cached, is_asr_models_ready, is_silero_cached
+from local_inference.vad_processor import VADProcessor
 from vrcx_context_bridge import build_asr_context_text
 
 from .base_speech_recognizer import RecognitionEvent, SpeechRecognitionCallback, SpeechRecognizer
@@ -37,7 +37,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         self._callback = callback
         self._sample_rate = sample_rate
         self._source_language = source_language
-        self._engine_name = getattr(config, "LOCAL_ASR_ENGINE", "sensevoice")
+        self._engine_name = getattr(config, "LOCAL_INFERENCE_ENGINE", "sensevoice")
         self._audio_queue: queue.Queue[bytes] = queue.Queue(maxsize=128)
         self._worker: threading.Thread | None = None
         self._asr_executor: ThreadPoolExecutor | None = None
@@ -98,25 +98,25 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         if not is_asr_cached(self._engine_name):
             if not is_silero_cached():
                 raise RuntimeError(
-                    "本地 VAD（Silero ONNX）未就绪。请在「本地音频识别」中点击下载，或检查 local_asr/models 下是否有 silero_vad。"
+                    "本地 VAD（Silero ONNX）未就绪。请在「本地音频识别」中点击下载，或检查 local_inference/models 下是否有 silero_vad。"
                 )
             if is_asr_models_ready(self._engine_name) and get_engine_runtime_issues(
                 self._engine_name
             ):
                 missing = ", ".join(get_engine_runtime_issues(self._engine_name))
                 raise RuntimeError(
-                    f"模型文件已在本地，但缺少 Python 依赖: {missing}。请安装: pip install -r requirements-local-asr.txt"
+                    f"模型文件已在本地，但缺少 Python 依赖: {missing}。请安装: pip install -r requirements-local-inference.txt"
                 )
             raise RuntimeError(
                 f"本地识别主模型未就绪。请在「本地音频识别」中点击下载 {self._engine_name} 所需资源。"
             )
 
         if self._engine_name == "sensevoice":
-            from local_asr.asr_sensevoice import SenseVoiceEngine
+            from local_inference.asr_sensevoice import SenseVoiceEngine
 
             engine = SenseVoiceEngine()
         elif self._engine_name == "qwen3-asr":
-            from local_asr.asr_qwen3 import Qwen3ASREngine
+            from local_inference.asr_qwen3 import Qwen3ASREngine
 
             engine = Qwen3ASREngine(corpus_text=build_asr_context_text(self._corpus_text) or None)
         else:
@@ -228,7 +228,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             if self._asr_executor is None:
                 self._asr_executor = ThreadPoolExecutor(
                     max_workers=1,
-                    thread_name_prefix="yakutan-local-asr",
+                    thread_name_prefix="yakutan-local-inference",
                 )
             if is_final:
                 self._waiting_final_audio = copy
@@ -419,7 +419,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             if self._asr_executor is None:
                 self._asr_executor = ThreadPoolExecutor(
                     max_workers=1,
-                    thread_name_prefix="yakutan-local-asr",
+                    thread_name_prefix="yakutan-local-inference",
                 )
             self._worker = threading.Thread(target=self._worker_loop, daemon=True)
             self._worker.start()

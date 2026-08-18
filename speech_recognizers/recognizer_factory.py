@@ -11,13 +11,13 @@ from .base_speech_recognizer import MonoAudioSpeechRecognizer, SpeechRecognition
 from .dashscope_speech_recognizer import DashscopeSpeechRecognizer
 from .doubao_file_speech_recognizer import DoubaoFileSpeechRecognizer
 try:
-    from local_asr import is_local_asr_build_enabled
-    from local_asr.model_manager import is_asr_cached as is_local_asr_cached
+    from local_inference import is_local_inference_build_enabled
+    from local_inference.model_manager import is_asr_cached as is_local_inference_cached
     from .local_speech_recognizer import LocalSpeechRecognizer
 except ImportError:  # pragma: no cover
     LocalSpeechRecognizer = None  # type: ignore[assignment]
-    is_local_asr_build_enabled = lambda: False  # type: ignore[assignment]
-    is_local_asr_cached = lambda *args, **kwargs: False  # type: ignore[assignment]
+    is_local_inference_build_enabled = lambda: False  # type: ignore[assignment]
+    is_local_inference_cached = lambda *args, **kwargs: False  # type: ignore[assignment]
 
 try:
     from .qwen_speech_recognizer import QwenSpeechRecognizer
@@ -36,7 +36,7 @@ except ImportError:  # pragma: no cover
     WEBSOCKETS_AVAILABLE = False
 
 
-def _normalize_local_asr_language(source_language: Optional[str]) -> str:
+def _normalize_local_inference_language(source_language: Optional[str]) -> str:
     """本地 ASR 与全局 SOURCE_LANGUAGE 一致；空或 auto 表示自动检测。"""
     if not source_language:
         return 'auto'
@@ -363,7 +363,7 @@ def create_recognizer(
         recognizer = LocalSpeechRecognizer(
             callback=callback,
             sample_rate=sample_rate,
-            source_language=_normalize_local_asr_language(source_language),
+            source_language=_normalize_local_inference_language(source_language),
             corpus_text=corpus_text,
         )
         return MonoAudioSpeechRecognizer(recognizer, input_channels=input_channels)
@@ -400,10 +400,10 @@ def is_backend_available(backend: str) -> bool:
         api_key, app_id, access_key = _resolve_doubao_credentials()
         return bool(api_key or (app_id and access_key))
     elif backend == 'local':
-        if LocalSpeechRecognizer is None or not is_local_asr_build_enabled():
+        if LocalSpeechRecognizer is None or not is_local_inference_build_enabled():
             return False
-        engine = getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice')
-        return bool(is_local_asr_cached(engine))
+        engine = getattr(config, 'LOCAL_INFERENCE_ENGINE', 'sensevoice')
+        return bool(is_local_inference_cached(engine))
     else:
         return False
 

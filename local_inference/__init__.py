@@ -8,12 +8,12 @@ from typing import Dict, List
 # Allow PyTorch and DirectML/ONNX stacks to coexist in one process.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
-LOCAL_ASR_UI_ENV = "YAKUTAN_LOCAL_ASR_UI"
+LOCAL_INFERENCE_UI_ENV = "YAKUTAN_LOCAL_INFERENCE_UI"
 
-LOCAL_ASR_ENGINES = ("sensevoice", "qwen3-asr")
+LOCAL_INFERENCE_ENGINES = ("sensevoice", "qwen3-asr")
 LOCAL_MT_ENGINES = ("hymt2",)
 
-LOCAL_ASR_DISPLAY_NAMES: Dict[str, str] = {
+LOCAL_INFERENCE_DISPLAY_NAMES: Dict[str, str] = {
     "sensevoice": "SenseVoice Small",
     "qwen3-asr": "Qwen3-ASR 1.7B",
     "hymt2": "Hy-MT2 1.8B",
@@ -37,30 +37,30 @@ def _env_to_bool(value: str) -> bool:
     return value.strip().lower() not in {"", "0", "false", "no", "off"}
 
 
-def _frozen_local_asr_marker_present() -> bool:
+def _frozen_local_inference_marker_present() -> bool:
     if not getattr(sys, "frozen", False) or not hasattr(sys, "_MEIPASS"):
         return False
-    marker = os.path.join(sys._MEIPASS, "YAKUTAN_LOCAL_ASR_BUILD")
+    marker = os.path.join(sys._MEIPASS, "YAKUTAN_LOCAL_INFERENCE_BUILD")
     return os.path.isfile(marker)
 
 
-def is_local_asr_build_enabled() -> bool:
-    raw = os.getenv(LOCAL_ASR_UI_ENV)
+def is_local_inference_build_enabled() -> bool:
+    raw = os.getenv(LOCAL_INFERENCE_UI_ENV)
     if raw is not None:
         return _env_to_bool(raw)
     if getattr(sys, "frozen", False):
-        if _frozen_local_asr_marker_present():
+        if _frozen_local_inference_marker_present():
             return True
         try:
-            return importlib.util.find_spec("local_asr") is not None
+            return importlib.util.find_spec("local_inference") is not None
         except Exception:
             return False
     return True
 
 
-def is_local_asr_ui_enabled() -> bool:
-    """与构建开关一致：Local ASR 构建始终展示面板；引擎级问题见 engines[].runtime_issues。"""
-    return is_local_asr_build_enabled()
+def is_local_inference_ui_enabled() -> bool:
+    """与构建开关一致：Local Inference 构建始终展示面板；引擎级问题见 engines[].runtime_issues。"""
+    return is_local_inference_build_enabled()
 
 
 def _missing_modules(modules: tuple[str, ...]) -> List[str]:
@@ -85,17 +85,17 @@ def is_engine_runtime_available(engine: str) -> bool:
     return not get_engine_runtime_issues(engine)
 
 
-def get_local_asr_features() -> dict:
+def get_local_inference_features() -> dict:
     return {
-        "local_asr_build_enabled": is_local_asr_build_enabled(),
-        "local_asr_ui_enabled": is_local_asr_ui_enabled(),
+        "local_inference_build_enabled": is_local_inference_build_enabled(),
+        "local_inference_ui_enabled": is_local_inference_ui_enabled(),
         "engines": {
             engine: {
-                "display_name": LOCAL_ASR_DISPLAY_NAMES.get(engine, engine),
+                "display_name": LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine),
                 "runtime_available": is_engine_runtime_available(engine),
                 "runtime_issues": get_engine_runtime_issues(engine),
             }
-            for engine in LOCAL_ASR_ENGINES
+            for engine in LOCAL_INFERENCE_ENGINES
         },
     }
 

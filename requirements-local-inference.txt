@@ -1,7 +1,7 @@
-# Local ASR extra dependencies
+# Local Inference extra dependencies
 # Install after requirements.txt:
 #   pip install -r requirements.txt
-#   pip install -r requirements-local-asr.txt
+#   pip install -r requirements-local-inference.txt
 
 numpy>=1.24.0
 kaldi_native_fbank

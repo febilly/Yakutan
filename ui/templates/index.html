@@ -652,77 +652,77 @@
                 </section>
 
                 <!-- 本地模型管理 -->
-                <section class="card" id="local-asr-card" style="display: none;">
-                    <div class="collapsible-header" onclick="toggleCollapsible('local-asr-settings')">
+                <section class="card" id="local-inference-card" style="display: none;">
+                    <div class="collapsible-header" onclick="toggleCollapsible('local-inference-settings')">
                         <h2 data-i18n="section.localModels">本地模型</h2>
-                        <span class="collapse-icon collapsed" id="local-asr-settings-icon">▶</span>
+                        <span class="collapse-icon collapsed" id="local-inference-settings-icon">▶</span>
                     </div>
-                    <div class="collapsible-content collapsed" id="local-asr-settings">
+                    <div class="collapsible-content collapsed" id="local-inference-settings">
                         <!-- 语音识别模型 -->
                         <div class="local-models-group">
-                            <h3 class="subsection-title" style="margin-top: 0; font-size: 15px;" data-i18n="label.localAsrModels">🎙️ 语音识别模型（ASR）</h3>
+                            <h3 class="subsection-title" style="margin-top: 0; font-size: 15px;" data-i18n="label.localInferenceModels">🎙️ 语音识别模型（ASR）</h3>
                             <div class="local-model-card">
                                 <div class="local-model-card-head">
-                                    <strong class="local-model-card-title" id="local-asr-engine-name" data-i18n="localAsr.engine.sensevoiceName">SenseVoice Small</strong>
-                                    <span id="local-asr-badge" class="local-model-badge" data-i18n="status.localModelChecking">检测中...</span>
+                                    <strong class="local-model-card-title" id="local-inference-engine-name" data-i18n="localInference.engine.sensevoiceName">SenseVoice Small</strong>
+                                    <span id="local-inference-badge" class="local-model-badge" data-i18n="status.localModelChecking">检测中...</span>
                                 </div>
-                                <p class="local-model-desc" id="local-asr-engine-hint"></p>
-                                <div class="local-asr-grid">
+                                <p class="local-model-desc" id="local-inference-engine-hint"></p>
+                                <div class="local-inference-grid">
                                     <div class="form-group">
-                                        <label for="local-asr-engine" data-i18n="label.localAsrEngine">本地识别引擎</label>
-                                        <select id="local-asr-engine" class="form-control" onchange="onLocalAsrSettingChange(this)"
+                                        <label for="local-inference-engine" data-i18n="label.localInferenceEngine">本地识别引擎</label>
+                                        <select id="local-inference-engine" class="form-control" onchange="onLocalInferenceSettingChange(this)"
                                             data-restart-required="true">
-                                            <option value="sensevoice" data-i18n="localAsr.engine.sensevoice">SenseVoice Small（快速、CPU）</option>
-                                            <option value="qwen3-asr" data-i18n="localAsr.engine.qwen3">Qwen3-ASR（准确、GPU）</option>
+                                            <option value="sensevoice" data-i18n="localInference.engine.sensevoice">SenseVoice Small（快速、CPU）</option>
+                                            <option value="qwen3-asr" data-i18n="localInference.engine.qwen3">Qwen3-ASR（准确、GPU）</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
-                                        <label for="local-asr-device" data-i18n="label.localDevice">运行位置</label>
-                                        <select id="local-asr-device" class="form-control"
-                                            onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                                        <label for="local-inference-device" data-i18n="label.localDevice">运行位置</label>
+                                        <select id="local-inference-device" class="form-control"
+                                            onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
                                             <option value="auto" data-i18n="option.deviceAuto">自动（独显优先）</option>
                                             <option value="cpu" data-i18n="option.deviceCpu">CPU</option>
                                         </select>
-                                        <small class="form-text" id="local-asr-device-hint" data-i18n="hint.localAsrDevice">仅对 Qwen3-ASR 生效；SenseVoice 固定在 CPU 上运行。</small>
+                                        <small class="form-text" id="local-inference-device-hint" data-i18n="hint.localInferenceDevice">仅对 Qwen3-ASR 生效；SenseVoice 固定在 CPU 上运行。</small>
                                     </div>
                                     <div class="form-group">
                                         <label for="local-incremental-trigger-silence" data-i18n="label.localIncrementalTriggerSilence">增量更新静音（毫秒）</label>
 <input type="number" id="local-incremental-trigger-silence" class="form-control" min="10" max="1000"
-                                             step="10" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                                             step="10" onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
                                         <small class="form-text" data-i18n="hint.localIncrementalTriggerSilence">说话中出现该时长的短停顿即视为一个分句（逗号位置），立即触发一次增量识别。</small>
                                     </div>
                                     <div class="form-group">
                                         <label for="local-incremental-min-interval" data-i18n="label.localIncrementalMinInterval">增量更新最小间隔（毫秒）</label>
                                         <input type="number" id="local-incremental-min-interval" class="form-control" min="200" max="10000"
-                                            step="100" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                                            step="100" onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
                                         <small class="form-text" data-i18n="hint.localIncrementalMinInterval">限流：两次增量更新之间的最小间隔。</small>
                                     </div>
                                     <div class="form-group">
                                         <label for="local-incremental-fallback-interval" data-i18n="label.localIncrementalFallbackInterval">增量更新最长间隔（毫秒）</label>
                                         <input type="number" id="local-incremental-fallback-interval" class="form-control" min="1000" max="30000"
-                                            step="500" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                                            step="500" onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
                                         <small class="form-text" data-i18n="hint.localIncrementalFallbackInterval">兜底：连续该时长没有任何更新时，强制刷新一次中间结果。</small>
                                     </div>
                                     <div class="form-group" style="grid-column: 1 / -1;">
                                         <label class="switch-label">
                                             <span data-i18n="label.localIncrementalAsr">启用增量识别</span>
                                             <label class="switch">
-                                                <input type="checkbox" id="local-incremental-asr" onchange="onLocalAsrSettingChange(this)"
+                                                <input type="checkbox" id="local-incremental-asr" onchange="onLocalInferenceSettingChange(this)"
                                                     data-restart-required="true">
                                                 <span class="slider"></span>
                                             </label>
                                         </label>
                                     </div>
                                     <div class="form-group" style="grid-column: 1 / -1;">
-                                        <div id="local-asr-status" class="local-asr-status-box" data-i18n="hint.localAsrNotChecked">
+                                        <div id="local-inference-status" class="local-inference-status-box" data-i18n="hint.localInferenceNotChecked">
                                             尚未检查本地模型状态
                                         </div>
-                                        <small class="form-text" data-i18n="hint.localAsrStatus">首次使用前请先下载对应引擎模型和运行时。</small>
+                                        <small class="form-text" data-i18n="hint.localInferenceStatus">首次使用前请先下载对应引擎模型和运行时。</small>
                                     </div>
                                 </div>
                                 <div class="local-model-card-actions">
-                                    <button type="button" class="btn btn-secondary" id="local-asr-download-btn"
-                                        onclick="downloadLocalAsrModels()" data-i18n="btn.downloadLocalAsr">下载本地识别模型</button>
+                                    <button type="button" class="btn btn-secondary" id="local-inference-download-btn"
+                                        onclick="downloadLocalInferenceModels()" data-i18n="btn.downloadLocalInference">下载本地识别模型</button>
                                 </div>
                             </div>
                         </div>
@@ -740,7 +740,7 @@
                                 <p class="local-model-desc" data-i18n="localModels.hymt2Desc">
                                     基于混元 1.8B 多语言流式修订架构，支持在说话过程中根据上下文自动修正流式译文。
                                 </p>
-                                <div class="local-asr-grid">
+                                <div class="local-inference-grid">
                                     <div class="form-group">
                                         <label for="hymt2-local-device" data-i18n="label.localDevice">运行位置</label>
                                         <select id="hymt2-local-device" class="form-control"
@@ -751,7 +751,7 @@
                                         <small class="form-text" data-i18n="hint.hymt2LocalDevice">仅影响本地 Hy-MT2 模型；切换后下一次翻译会用新设置重新加载模型。</small>
                                     </div>
                                 </div>
-                                <div id="local-hymt2-status-box" class="local-asr-status-box">
+                                <div id="local-hymt2-status-box" class="local-inference-status-box">
                                     检测本地 Hy-MT2 模型状态...
                                 </div>
                                 <div class="local-model-card-actions">

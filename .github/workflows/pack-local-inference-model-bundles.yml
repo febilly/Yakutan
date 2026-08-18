@@ -1,4 +1,4 @@
-name: Pack Local ASR model bundles
+name: Pack Local Inference model bundles
 
 # 仅手动运行：生成 SenseVoice ONNX 与 Qwen3-ASR（ONNX+GGUF+Vulkan DLL）两个资源 zip，
 # 上传到指定 GitHub Release。**不上传** Actions artifact。
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: '发布所用的 Git tag；留空则自动生成为 yakutan-local-asr-models-<日期>-<短SHA>（将在当前 commit 上创建）'
+        description: '发布所用的 Git tag；留空则自动生成为 yakutan-local-inference-models-<日期>-<短SHA>（将在当前 commit 上创建）'
         required: false
         default: ''
       draft_release:
@@ -34,7 +34,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install -r requirements-local-asr.txt
+          pip install -r requirements-local-inference.txt
 
       - name: Compute bundle names and release tag
         id: meta
@@ -46,7 +46,7 @@ jobs:
           $qwenZip = "Yakutan-Qwen3-ASR-bundle-$commitDate.zip"
           $in = "${{ inputs.release_tag }}".Trim()
           if ($in -eq "") {
-            $relTag = "yakutan-local-asr-models-$commitDate-$commitSha"
+            $relTag = "yakutan-local-inference-models-$commitDate-$commitSha"
           } else {
             $relTag = $in
           }
@@ -58,13 +58,13 @@ jobs:
 
       - name: Download SenseVoice ONNX, Qwen weights, llama.cpp Vulkan, Qwen vendor
         run: |
-          python -c "from local_asr.model_manager import apply_cache_env, download_qwen3_asr, ensure_vendor_sources, prefetch_llama_cpp_vulkan_for_pyinstaller_bundle, prefetch_sensevoice_for_pyinstaller_bundle; apply_cache_env(); ensure_vendor_sources('qwen3-asr'); prefetch_sensevoice_for_pyinstaller_bundle(); prefetch_llama_cpp_vulkan_for_pyinstaller_bundle(); download_qwen3_asr()"
+          python -c "from local_inference.model_manager import apply_cache_env, download_qwen3_asr, ensure_vendor_sources, prefetch_llama_cpp_vulkan_for_pyinstaller_bundle, prefetch_sensevoice_for_pyinstaller_bundle; apply_cache_env(); ensure_vendor_sources('qwen3-asr'); prefetch_sensevoice_for_pyinstaller_bundle(); prefetch_llama_cpp_vulkan_for_pyinstaller_bundle(); download_qwen3_asr()"
 
       - name: Build SenseVoice bundle zip
         shell: pwsh
         run: |
           $senseSrc = $null
-          foreach ($rel in @("local_asr/models/sensevoice-onnx", "local_asr_models/sensevoice-onnx")) {
+          foreach ($rel in @("local_inference/models/sensevoice-onnx", "local_asr_models/sensevoice-onnx")) {
             $candidate = Join-Path "." $rel
             if (Test-Path $candidate) {
               $senseSrc = $candidate
@@ -72,7 +72,7 @@ jobs:
             }
           }
           if (-not $senseSrc) {
-            throw "缺少 SenseVoice 目录（已检查 local_asr/models/sensevoice-onnx 与 local_asr_models/sensevoice-onnx）"
+            throw "缺少 SenseVoice 目录（已检查 local_inference/models/sensevoice-onnx 与 local_asr_models/sensevoice-onnx）"
           }
           foreach ($f in @(
             "embedding.npy",
@@ -100,7 +100,7 @@ jobs:
         shell: pwsh
         run: |
           $qwenSrc = $null
-          foreach ($rel in @("local_asr_models/qwen3-asr", "local_asr/models/qwen3-asr")) {
+          foreach ($rel in @("local_asr_models/qwen3-asr", "local_inference/models/qwen3-asr")) {
             $candidate = Join-Path "." $rel
             if (Test-Path $candidate) {
               $qwenSrc = $candidate
@@ -108,7 +108,7 @@ jobs:
             }
           }
           if (-not $qwenSrc) {
-            throw "缺少 Qwen3-ASR 模型目录（已检查 local_asr_models/qwen3-asr 与 local_asr/models/qwen3-asr）"
+            throw "缺少 Qwen3-ASR 模型目录（已检查 local_asr_models/qwen3-asr 与 local_inference/models/qwen3-asr）"
           }
           foreach ($f in @(
             "qwen3_asr_encoder_frontend.int4.onnx",
@@ -118,7 +118,7 @@ jobs:
             if (-not (Test-Path (Join-Path $qwenSrc $f))) { throw "缺少 Qwen 模型文件: $f" }
           }
           $qwenBinSrc = $null
-          foreach ($rel in @("local_asr_models/qwen_llama_vulkan_bin", "local_asr/models/qwen_llama_vulkan_bin")) {
+          foreach ($rel in @("local_asr_models/qwen_llama_vulkan_bin", "local_inference/models/qwen_llama_vulkan_bin")) {
             $candidate = Join-Path "." $rel
             if (Test-Path $candidate) {
               $qwenBinSrc = $candidate
@@ -126,7 +126,7 @@ jobs:
             }
           }
           if (-not $qwenBinSrc) {
-            throw "缺少 Qwen Vulkan DLL 目录（已检查 local_asr_models/qwen_llama_vulkan_bin 与 local_asr/models/qwen_llama_vulkan_bin）"
+            throw "缺少 Qwen Vulkan DLL 目录（已检查 local_asr_models/qwen_llama_vulkan_bin 与 local_inference/models/qwen_llama_vulkan_bin）"
           }
           foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll", "libomp140.x86_64.dll")) {
             if (-not (Test-Path (Join-Path $qwenBinSrc $f))) { throw "缺少 llama Vulkan DLL: $f" }
@@ -151,16 +151,16 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.meta.outputs.release_tag }}
-          name: Local ASR model bundles ${{ steps.meta.outputs.release_tag }}
+          name: Local Inference model bundles ${{ steps.meta.outputs.release_tag }}
           draft: ${{ inputs.draft_release }}
           prerelease: false
           body: |
-            ## Local ASR 离线资源（手动打包）
+            ## Local Inference 离线资源（手动打包）
 
             **提交日期**: ${{ steps.meta.outputs.commit_date }}
             **提交 SHA**: ${{ steps.meta.outputs.sha }}
 
-            将任一 zip 内的 **`local_asr_models`** 文件夹解压到 **`Yakutan-LocalASR.exe` 所在目录**（与 exe 同级）。
+            将任一 zip 内的 **`local_asr_models`** 文件夹解压到 **`Yakutan-LocalInference.exe` 所在目录**（与 exe 同级）。
 
             - `${{ steps.meta.outputs.sense_zip }}`：**SenseVoice** INT8 ONNX
             - `${{ steps.meta.outputs.qwen_zip }}`：**Qwen3-ASR** ONNX×2 + GGUF + llama.cpp Vulkan DLL

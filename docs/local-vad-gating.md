@@ -74,6 +74,6 @@ LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 4.0
 | `main.py` | 在线 API VAD 门控初始化、停止识别时重置 VAD |
 | `audio_capture.py` | 采集侧 VAD 侧路分析与在线门控发送 |
 | `speech_recognizers/local_speech_recognizer.py` | 本地 ASR 内部 VAD 分段 |
-| `local_asr/vad_processor.py` | VAD 状态机、`is_speaking` 与 `reset()` |
+| `local_inference/vad_processor.py` | VAD 状态机、`is_speaking` 与 `reset()` |
 | `ui/app.py` | `/api/config` 顶层 `vad` 对象 |
 | `ui/` | 高级设置中的统一 VAD 表单 |

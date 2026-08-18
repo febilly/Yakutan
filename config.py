@@ -105,10 +105,10 @@ DOUBAO_ASR_MAX_BUFFER_SECONDS = 60
 # sensevoice：INT8 ONNX，固定 CPU（约 1.5–2.5GB 内存；发布版可内置模型）
 # qwen3-asr：GGUF 解码跟随"运行位置"（GPU→走 Vulkan；CPU→CPU）；ONNX 音频编码固定在 CPU。
 # 约需显存视配置而定
-LOCAL_ASR_ENGINE = 'sensevoice'
-_VALID_LOCAL_ASR_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
-if LOCAL_ASR_ENGINE not in _VALID_LOCAL_ASR_ENGINES:
-    LOCAL_ASR_ENGINE = 'sensevoice'
+LOCAL_INFERENCE_ENGINE = 'sensevoice'
+_VALID_LOCAL_INFERENCE_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
+if LOCAL_INFERENCE_ENGINE not in _VALID_LOCAL_INFERENCE_ENGINES:
+    LOCAL_INFERENCE_ENGINE = 'sensevoice'
 
 # ============================================================================
 # 统一 VAD 配置（同时控制在线 API 与本地 ASR）
@@ -127,7 +127,7 @@ LOCAL_VAD_PRE_SPEECH_DURATION = 0.2
 
 # 本地识别的运行位置：'auto'（自动挑一张 GPU，独显优先）、'cpu' 或 'vulkan:N'。
 # 只对 Qwen3-ASR 的 GGUF 解码器生效——SenseVoice 是 INT8 ONNX，固定跑 CPU。
-LOCAL_ASR_DEVICE = 'auto'
+LOCAL_INFERENCE_DEVICE = 'auto'
 
 # 本地增量识别（中间结果）
 # 触发方式基于 VAD：说话中检测到短停顿（如逗号/分句位置）立即做一次全量本地识别，
@@ -281,11 +281,11 @@ HYMT2_MAX_RETRIES = 3
 def sanitize_local_device(value) -> str:
     """把本地推理设备设置收敛成 'auto' / 'cpu' / 'vulkan:N'。
 
-    实现在 local_asr.gpu_devices；这里做一层薄封装，好让 config 的调用方
-    （网页后端等）不必关心 local_asr 是否可用（精简构建里可能被裁掉）。
+    实现在 local_inference.gpu_devices；这里做一层薄封装，好让 config 的调用方
+    （网页后端等）不必关心 local_inference 是否可用（精简构建里可能被裁掉）。
     """
     try:
-        from local_asr.gpu_devices import sanitize_device
+        from local_inference.gpu_devices import sanitize_device
     except Exception:
         normalized = str(value or '').strip().lower()
         if normalized == 'cpu':
@@ -568,7 +568,7 @@ def apply_cli_env() -> None:
     """
     global VAD_ENABLED
     global LOCAL_QWEN_LOG_PIPELINE_TIMING
-    global LOCAL_ASR_DEVICE
+    global LOCAL_INFERENCE_DEVICE
     global SAVE_POST_RESAMPLE_AUDIO, SAVE_PRE_RESAMPLE_AUDIO
     global DEBUG_AUDIO_OUTPUT_DIR, ENABLE_VAD_GATING_VERBOSE
     global TRANSLATION_API_TYPE, LLM_BASE_URL, LLM_MODEL, LLM_TEMPLATE
@@ -589,8 +589,8 @@ def apply_cli_env() -> None:
     LOCAL_QWEN_LOG_PIPELINE_TIMING = _read_env_bool(
         'LOCAL_QWEN_LOG_PIPELINE_TIMING', LOCAL_QWEN_LOG_PIPELINE_TIMING
     )
-    LOCAL_ASR_DEVICE = sanitize_local_device(
-        _read_first_env('LOCAL_ASR_DEVICE', default=LOCAL_ASR_DEVICE)
+    LOCAL_INFERENCE_DEVICE = sanitize_local_device(
+        _read_first_env('LOCAL_INFERENCE_DEVICE', default=LOCAL_INFERENCE_DEVICE)
     )
     SAVE_POST_RESAMPLE_AUDIO = _read_env_bool(
         'SAVE_POST_RESAMPLE_AUDIO', SAVE_POST_RESAMPLE_AUDIO

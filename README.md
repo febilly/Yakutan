@@ -22,7 +22,7 @@ Yakutan 不是一个只会把语音识别结果丢给翻译 API 的小脚本。�
 
 1. 在 [Releases](https://github.com/febilly/Yakutan/releases/latest) 下载最新版：
    - `Yakutan-*.exe`：标准版，适合大多数在线 ASR / 在线翻译用户。
-   - `Yakutan-LocalASR-*.exe`：本地识别版，适合想试 SenseVoice / Qwen3-ASR 本地模型的用户。
+    - `Yakutan-LocalInference-*.exe`：本地推理版，适合想试 SenseVoice / Qwen3-ASR 本地识别与 Hy-MT2 本地翻译模型的用户。
 2. 把 exe 放进一个空文件夹后运行，WebUI 会自动打开。
 3. 在 `API Keys 配置` 里填入 DashScope Key；如果要用 DeepL、LLM、Soniox、豆包等后端，再填对应 Key。
 4. 在 VRChat 的圆盘菜单中进入 `Options -> OSC`，打开 OSC。
@@ -39,7 +39,7 @@ Yakutan 不是一个只会把语音识别结果丢给翻译 API 的小脚本。�
 - **Fun-ASR**：大陆版 DashScope 可用，作为稳定备用选择。
 - **Soniox**：对多语混讲支持较好，需要 Soniox API Key。
 - **豆包录音文件识别**：关麦后返回整段识别结果，适合不追求即时中间结果的场景。
-- **本地识别**：支持 SenseVoice Small 和 Qwen3-ASR，本地模型可在 WebUI 中检查/下载；标准版可能禁用本地 ASR，请使用 LocalASR 版本或源码安装相关依赖。
+- **本地识别**：支持 SenseVoice Small 和 Qwen3-ASR，本地模型可在 WebUI 中检查/下载；标准版可能禁用本地模型，请使用 LocalInference 版本或源码安装相关依赖。
 - **统一 VAD**：同一组 VAD 设置同时服务于在线 API 省流门控和本地识别分段；在线后端静音时可停止发送无效音频帧，本地后端仍保持连续音频分段。
 - **热词词库**：内置公共热词，并支持 `hot_words_private/` 私人热词目录，适合 VRChat 人名、世界名、梗词和专业术语。
 
@@ -201,7 +201,7 @@ pip install -r requirements.txt
 如果要使用本地识别：
 
 ```bash
-pip install -r requirements-local-asr.txt
+pip install -r requirements-local-inference.txt
 ```
 
 ### 4. 运行
@@ -246,9 +246,9 @@ python run_ui.py
 
 ### 5. 本地识别不可用
 
-- 标准版可能禁用本地 ASR，请使用 `Yakutan-LocalASR` 版本。
+- 标准版可能禁用本地模型，请使用 `Yakutan-LocalInference` 版本。
 - 首次使用本地 ASR 前，需要在 WebUI 下载对应模型和运行时。
-- 源码运行时请安装 `requirements-local-asr.txt`。
+- 源码运行时请安装 `requirements-local-inference.txt`。
 - Qwen3-ASR 本地模式对显存/驱动有要求，SenseVoice Small 更适合先跑通。
 
 ### 6. 阿里语音识别报错

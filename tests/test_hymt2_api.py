@@ -607,7 +607,7 @@ class TestLocalBackend:
         assert api._history[-1] == ["こんにちは", "你好"]
 
     def test_model_manager_hymt2_helpers(self):
-        from local_asr.model_manager import (
+        from local_inference.model_manager import (
             get_all_local_models_status,
             get_hymt2_model_path,
             get_hymt2_status,

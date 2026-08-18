@@ -82,39 +82,39 @@ let runtimeCredentialStatus = {
 };
 
 let featureFlags = {
-    local_asr_build_enabled: false,
-    local_asr_ui_enabled: false,
+    local_inference_build_enabled: false,
+    local_inference_ui_enabled: false,
     engines: {},
 };
 
-let localAsrStatus = {
+let localInferenceStatus = {
     running: false,
     engine: null,
     status: '',
     error: null,
 };
 
-function updateLocalAsrEngineHint() {
-    const el = document.getElementById('local-asr-engine-hint');
-    const nameEl = document.getElementById('local-asr-engine-name');
-    const engine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
+function updateLocalInferenceEngineHint() {
+    const el = document.getElementById('local-inference-engine-hint');
+    const nameEl = document.getElementById('local-inference-engine-name');
+    const engine = document.getElementById('local-inference-engine')?.value || 'sensevoice';
     if (!el) return;
-    if (!isLocalAsrUiEnabled()) {
+    if (!isLocalInferenceUiEnabled()) {
         el.textContent = '';
         return;
     }
     const t = window.i18n ? window.i18n.t : (key) => key;
     const suffix = engine === 'qwen3-asr' ? 'qwen3' : 'sensevoice';
-    el.textContent = t(`localAsr.engine.${suffix}Hint`);
-    el.setAttribute('data-i18n', `localAsr.engine.${suffix}Hint`);
+    el.textContent = t(`localInference.engine.${suffix}Hint`);
+    el.setAttribute('data-i18n', `localInference.engine.${suffix}Hint`);
     if (nameEl) {
-        nameEl.textContent = t(`localAsr.engine.${suffix}Name`);
-        nameEl.setAttribute('data-i18n', `localAsr.engine.${suffix}Name`);
+        nameEl.textContent = t(`localInference.engine.${suffix}Name`);
+        nameEl.setAttribute('data-i18n', `localInference.engine.${suffix}Name`);
     }
 }
 
-function isLocalAsrUiEnabled() {
-    return !!featureFlags.local_asr_ui_enabled;
+function isLocalInferenceUiEnabled() {
+    return !!featureFlags.local_inference_ui_enabled;
 }
 
 // ===================== 本地推理设备（GPU/CPU） =====================
@@ -122,7 +122,7 @@ function isLocalAsrUiEnabled() {
 // 设备值是扁平字符串：'auto' | 'cpu' | 'vulkan:N'，与后端 / .env 共用。
 // 列表由 /api/local-models/devices 枚举得到（后端跑在子进程里）。
 
-const DEVICE_SELECT_IDS = ['local-asr-device', 'hymt2-local-device'];
+const DEVICE_SELECT_IDS = ['local-inference-device', 'hymt2-local-device'];
 let localModelDevices = [];
 let localModelAutoDeviceIndex = null;
 
@@ -221,19 +221,19 @@ function renderDeviceOptions() {
 
         setDeviceSelectValue(select, resolveStoredDevice(previous));
     }
-    updateLocalAsrDeviceState();
+    updateLocalInferenceDeviceState();
 }
 
 /** SenseVoice 固定 CPU，选它时禁用 ASR 的设备下拉框。 */
-function updateLocalAsrDeviceState() {
-    const select = document.getElementById('local-asr-device');
+function updateLocalInferenceDeviceState() {
+    const select = document.getElementById('local-inference-device');
     if (!select) return;
-    const engine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
+    const engine = document.getElementById('local-inference-engine')?.value || 'sensevoice';
     select.disabled = engine !== 'qwen3-asr';
 }
 
 async function loadLocalModelDevices() {
-    if (!isLocalAsrUiEnabled()) return;
+    if (!isLocalInferenceUiEnabled()) return;
     try {
         const response = await fetch(`${API_BASE}/local-models/devices`);
         if (!response.ok) return;
@@ -248,10 +248,10 @@ async function loadLocalModelDevices() {
     renderDeviceOptions();
 }
 
-function getLocalAsrConfigFromForm() {
+function getLocalInferenceConfigFromForm() {
     return {
-        engine: document.getElementById('local-asr-engine')?.value || 'sensevoice',
-        device: getDeviceSelectValue('local-asr-device'),
+        engine: document.getElementById('local-inference-engine')?.value || 'sensevoice',
+        device: getDeviceSelectValue('local-inference-device'),
         incremental_asr: document.getElementById('local-incremental-asr')?.checked ?? true,
         incremental_trigger_silence:
             parseInt(document.getElementById('local-incremental-trigger-silence')?.value || '10', 10) / 1000,
@@ -263,12 +263,12 @@ function getLocalAsrConfigFromForm() {
     };
 }
 
-function applyLocalAsrConfig(config) {
+function applyLocalInferenceConfig(config) {
     if (!config) return;
-    if (document.getElementById('local-asr-engine')) {
-        document.getElementById('local-asr-engine').value = config.engine || 'sensevoice';
+    if (document.getElementById('local-inference-engine')) {
+        document.getElementById('local-inference-engine').value = config.engine || 'sensevoice';
     }
-    setDeviceSelectValue(document.getElementById('local-asr-device'), config.device);
+    setDeviceSelectValue(document.getElementById('local-inference-device'), config.device);
     if (document.getElementById('local-incremental-asr')) {
         document.getElementById('local-incremental-asr').checked = config.incremental_asr ?? true;
     }
@@ -288,8 +288,8 @@ function applyLocalAsrConfig(config) {
         document.getElementById('local-incremental-fallback-interval').value =
             (config.incremental_fallback_interval ?? 4.0) * 1000;
     }
-    updateLocalAsrEngineHint();
-    updateLocalAsrDeviceState();
+    updateLocalInferenceEngineHint();
+    updateLocalInferenceDeviceState();
 }
 
 function getVadConfigFromForm() {
@@ -309,7 +309,7 @@ function getVadConfigFromForm() {
 
 function resolveVadConfig(config = {}) {
     const legacyAsr = config.asr || {};
-    const legacyLocalAsr = config.local_asr || {};
+    const legacyLocalInference = config.local_asr || {};
     const legacyMic = config.mic_control || {};
     const vad = config.vad || {};
     const hasUnifiedVadEnabled = Object.prototype.hasOwnProperty.call(vad, 'enabled');
@@ -318,27 +318,27 @@ function resolveVadConfig(config = {}) {
             (hasUnifiedVadEnabled ? vad.enabled : undefined) ??
             (legacyMic.enable_vad_gating === true ? true : undefined) ??
             true,
-        mode: vad.mode || legacyLocalAsr.vad_mode || 'silero',
+        mode: vad.mode || legacyLocalInference.vad_mode || 'silero',
         threshold:
             vad.threshold ??
-            legacyLocalAsr.vad_threshold ??
+            legacyLocalInference.vad_threshold ??
             legacyAsr.vad_threshold ??
             0.5,
         min_speech_duration:
             vad.min_speech_duration ??
-            legacyLocalAsr.min_speech_duration ??
+            legacyLocalInference.min_speech_duration ??
             1.0,
         max_speech_duration:
             vad.max_speech_duration ??
-            legacyLocalAsr.max_speech_duration ??
+            legacyLocalInference.max_speech_duration ??
             30.0,
         silence_duration:
             vad.silence_duration ??
-            legacyLocalAsr.silence_duration ??
+            legacyLocalInference.silence_duration ??
             ((legacyAsr.vad_silence_duration_ms ?? 800) / 1000),
         pre_speech_duration:
             vad.pre_speech_duration ??
-            legacyLocalAsr.pre_speech_duration ??
+            legacyLocalInference.pre_speech_duration ??
             0.2,
     };
 }
@@ -369,12 +369,12 @@ function applyVadConfig(config) {
     }
 }
 
-function ensureLocalAsrBackendOption() {
+function ensureLocalInferenceBackendOption() {
     const select = document.getElementById('asr-backend');
     if (!select) return;
     const t = window.i18n ? window.i18n.t : (key) => key;
     let option = select.querySelector('option[value="local"]');
-    if (isLocalAsrUiEnabled()) {
+    if (isLocalInferenceUiEnabled()) {
         if (!option) {
             option = document.createElement('option');
             option.value = 'local';
@@ -392,7 +392,7 @@ function ensureLocalAsrBackendOption() {
 
 function sanitizeAsrBackendValue(value) {
     const normalized = value || 'qwen';
-    if (normalized === 'local' && !isLocalAsrUiEnabled()) {
+    if (normalized === 'local' && !isLocalInferenceUiEnabled()) {
         return 'qwen';
     }
     return normalized;
@@ -413,26 +413,26 @@ function setLocalModelBadge(badge, state) {
     badge.classList.toggle('is-missing', state === 'missing');
 }
 
-function renderLocalAsrStatus(payload) {
-    const box = document.getElementById('local-asr-status');
-    const button = document.getElementById('local-asr-download-btn');
-    const badge = document.getElementById('local-asr-badge');
+function renderLocalInferenceStatus(payload) {
+    const box = document.getElementById('local-inference-status');
+    const button = document.getElementById('local-inference-download-btn');
+    const badge = document.getElementById('local-inference-badge');
     const t = window.i18n ? window.i18n.t : (key) => key;
-    const engine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
+    const engine = document.getElementById('local-inference-engine')?.value || 'sensevoice';
     const engineStatus = payload?.engines?.[engine] || payload?.models?.asr?.[engine];
-    localAsrStatus = payload?.download || localAsrStatus;
+    localInferenceStatus = payload?.download || localInferenceStatus;
 
     if (box && button) {
         if (!payload || !engineStatus) {
-            box.textContent = t('hint.localAsrNotChecked');
+            box.textContent = t('hint.localInferenceNotChecked');
             setLocalModelBadge(badge, 'unknown');
             button.disabled = false;
-        } else if (localAsrStatus.running) {
-            box.textContent = `${t('status.downloading')}: ${localAsrStatus.status || ''}`;
+        } else if (localInferenceStatus.running) {
+            box.textContent = `${t('status.downloading')}: ${localInferenceStatus.status || ''}`;
             setLocalModelBadge(badge, 'downloading');
             button.disabled = true;
         } else if (engineStatus.ready) {
-            box.textContent = t('status.localAsrReady', { engine: engineStatus.display_name || engine });
+            box.textContent = t('status.localInferenceReady', { engine: engineStatus.display_name || engine });
             setLocalModelBadge(badge, 'ready');
             button.disabled = false;
         } else {
@@ -444,11 +444,11 @@ function renderLocalAsrStatus(payload) {
                 issues.push(engineStatus.error);
             }
             if (Array.isArray(engineStatus.missing) && engineStatus.missing.length) {
-                issues.push(t('hint.localAsrNeedsDownload'));
+                issues.push(t('hint.localInferenceNeedsDownload'));
             }
             box.textContent = issues.length
                 ? issues.join(' | ')
-                : t('hint.localAsrNeedsDownload');
+                : t('hint.localInferenceNeedsDownload');
             setLocalModelBadge(badge, 'missing');
             button.disabled = false;
         }
@@ -487,11 +487,11 @@ function renderLocalAsrStatus(payload) {
 }
 
 function focusLocalModelsCard() {
-    const card = document.getElementById('local-asr-card');
-    const content = document.getElementById('local-asr-settings');
+    const card = document.getElementById('local-inference-card');
+    const content = document.getElementById('local-inference-settings');
     if (!card) return;
     if (content && content.classList.contains('collapsed')) {
-        toggleCollapsible('local-asr-settings');
+        toggleCollapsible('local-inference-settings');
     }
     card.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -514,11 +514,11 @@ async function downloadHymt2Model() {
         if (!response.ok || !result.success) {
             throw new Error(result.message || 'download failed');
         }
-        showMessage(t('msg.localAsrDownloadStarted'), 'success');
-        await refreshLocalAsrStatus();
+        showMessage(t('msg.localInferenceDownloadStarted'), 'success');
+        await refreshLocalInferenceStatus();
     } catch (error) {
         console.error('下载本地 Hy-MT2 失败:', error);
-        showMessage(t('msg.localAsrDownloadFailed') + ': ' + error.message, 'error');
+        showMessage(t('msg.localInferenceDownloadFailed') + ': ' + error.message, 'error');
     } finally {
         if (button) button.disabled = false;
     }
@@ -537,34 +537,34 @@ function onHymt2BackendModeChange(persist = true) {
     if (apiSubgroup) apiSubgroup.style.display = mode === 'api' ? 'block' : 'none';
     if (localSubgroup) localSubgroup.style.display = mode === 'local' ? 'block' : 'none';
     if (mode === 'local') {
-        void refreshLocalAsrStatus();
+        void refreshLocalInferenceStatus();
     }
     if (persist) {
         onSettingChange();
     }
 }
 
-async function refreshLocalAsrStatus() {
+async function refreshLocalInferenceStatus() {
     try {
         const response = await fetch(`${API_BASE}/local-models/status`);
         if (!response.ok) return;
         const payload = await response.json();
-        renderLocalAsrStatus(payload);
+        renderLocalInferenceStatus(payload);
     } catch (error) {
         console.warn('获取本地模型状态失败:', error);
     }
 }
 
-async function downloadLocalAsrModels() {
+async function downloadLocalInferenceModels() {
     const t = window.i18n ? window.i18n.t : (key) => key;
-    if (!isLocalAsrUiEnabled()) return;
-    const localConfig = getLocalAsrConfigFromForm();
-    const button = document.getElementById('local-asr-download-btn');
+    if (!isLocalInferenceUiEnabled()) return;
+    const localConfig = getLocalInferenceConfigFromForm();
+    const button = document.getElementById('local-inference-download-btn');
     if (button) {
         button.disabled = true;
     }
     try {
-        const response = await fetch(`${API_BASE}/local-asr/download`, {
+        const response = await fetch(`${API_BASE}/local-inference/download`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -577,37 +577,37 @@ async function downloadLocalAsrModels() {
         if (!response.ok || !result.success) {
             throw new Error(result.message || 'download failed');
         }
-        showMessage(t('msg.localAsrDownloadStarted'), 'success');
-        await refreshLocalAsrStatus();
+        showMessage(t('msg.localInferenceDownloadStarted'), 'success');
+        await refreshLocalInferenceStatus();
     } catch (error) {
         console.error('下载本地 ASR 失败:', error);
-        showMessage(t('msg.localAsrDownloadFailed') + ': ' + error.message, 'error');
+        showMessage(t('msg.localInferenceDownloadFailed') + ': ' + error.message, 'error');
         if (button) {
             button.disabled = false;
         }
     }
 }
 
-function updateLocalAsrUiVisibility() {
-    const card = document.getElementById('local-asr-card');
+function updateLocalInferenceUiVisibility() {
+    const card = document.getElementById('local-inference-card');
     if (!card) return;
-    ensureLocalAsrBackendOption();
-    if (isLocalAsrUiEnabled()) {
+    ensureLocalInferenceBackendOption();
+    if (isLocalInferenceUiEnabled()) {
         card.style.display = 'block';
-        updateLocalAsrEngineHint();
+        updateLocalInferenceEngineHint();
         void loadLocalModelDevices();
-        void refreshLocalAsrStatus();
+        void refreshLocalInferenceStatus();
     } else {
         card.style.display = 'none';
     }
 }
 
-function onLocalAsrSettingChange(changedElement = null) {
-    if (!isLocalAsrUiEnabled()) return;
-    if (changedElement && changedElement.id === 'local-asr-engine') {
-        updateLocalAsrEngineHint();
-        updateLocalAsrDeviceState();
-        void refreshLocalAsrStatus();
+function onLocalInferenceSettingChange(changedElement = null) {
+    if (!isLocalInferenceUiEnabled()) return;
+    if (changedElement && changedElement.id === 'local-inference-engine') {
+        updateLocalInferenceEngineHint();
+        updateLocalInferenceDeviceState();
+        void refreshLocalInferenceStatus();
     }
     onSettingChange(changedElement);
 }
@@ -617,7 +617,7 @@ async function loadServerFeatures() {
         const response = await fetch(`${API_BASE}/features`);
         if (!response.ok) return;
         featureFlags = await response.json();
-        updateLocalAsrUiVisibility();
+        updateLocalInferenceUiVisibility();
     } catch (error) {
         console.warn('加载功能开关失败:', error);
     }
@@ -2301,8 +2301,8 @@ document.addEventListener('DOMContentLoaded', async function () {
     setInterval(updateIpcStatus, 2500);
     setInterval(refreshVrcxBridgeStatus, 5000);
     setInterval(() => {
-        if (isLocalAsrUiEnabled()) {
-            void refreshLocalAsrStatus();
+        if (isLocalInferenceUiEnabled()) {
+            void refreshLocalInferenceStatus();
         }
     }, 3000);
 
@@ -2318,9 +2318,9 @@ document.addEventListener('DOMContentLoaded', async function () {
 document.addEventListener('i18n:languageChanged', function () {
     const useInternational = document.getElementById('use-international-endpoint')?.checked ?? false;
     updateAsrOptionsForInternational(useInternational);
-    updateLocalAsrEngineHint();
+    updateLocalInferenceEngineHint();
     renderDeviceOptions();
-    updateLocalAsrUiVisibility();
+    updateLocalInferenceUiVisibility();
     renderLanguageComboMenus();
     refreshLanguageComboClearLabels();
     refreshMicDevices(true);
@@ -2805,8 +2805,8 @@ function loadConfigFromLocalStorage() {
 
             applyVadConfig(resolveVadConfig(config));
 
-            if (isLocalAsrUiEnabled()) {
-                applyLocalAsrConfig(config.local_asr || {});
+            if (isLocalInferenceUiEnabled()) {
+                applyLocalInferenceConfig(config.local_inference || {});
             }
 
             if (config.language_detector) {
@@ -2890,7 +2890,7 @@ function loadConfigFromLocalStorage() {
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
         applyStoredExtraBodyForActiveLLMTemplate();
-        updateLocalAsrUiVisibility();
+        updateLocalInferenceUiVisibility();
 
     } catch (error) {
         console.error('加载本地配置失败:', error);
@@ -2908,7 +2908,7 @@ function loadConfigFromLocalStorage() {
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
         applyStoredExtraBodyForActiveLLMTemplate();
-        updateLocalAsrUiVisibility();
+        updateLocalInferenceUiVisibility();
     }
 }
 
@@ -2981,8 +2981,8 @@ function loadDefaultConfig() {
         pre_speech_duration: 0.2,
     });
 
-    if (isLocalAsrUiEnabled()) {
-        applyLocalAsrConfig({
+    if (isLocalInferenceUiEnabled()) {
+        applyLocalInferenceConfig({
             engine: 'sensevoice',
             device: getDefaultDeviceValue(),
             incremental_asr: true,
@@ -3032,7 +3032,7 @@ function loadDefaultConfig() {
     syncLLMTemplateKeySourceHintFromInputs();
     syncAllLanguageComboClearButtons();
     updateDashscopeKeyFieldState();
-    updateLocalAsrUiVisibility();
+    updateLocalInferenceUiVisibility();
 }
 
 function refreshUiAfterServerConfigApply() {
@@ -3048,7 +3048,7 @@ function refreshUiAfterServerConfigApply() {
     syncAllLanguageComboClearButtons();
     updateDashscopeKeyFieldState();
     applyStoredExtraBodyForActiveLLMTemplate();
-    updateLocalAsrUiVisibility();
+    updateLocalInferenceUiVisibility();
     renderLanguageComboMenus();
 }
 
@@ -3057,7 +3057,7 @@ function applyServerConfigPayload(config) {
     if (config.features) {
         featureFlags = config.features;
     }
-    updateLocalAsrUiVisibility();
+    updateLocalInferenceUiVisibility();
 
     document.getElementById('enable-translation').checked = config.translation.enable_translation;
     document.getElementById('target-language').value = config.translation.target_language;
@@ -3188,8 +3188,8 @@ function applyServerConfigPayload(config) {
                 : Math.max(1, Math.min(65535, parseInt(stp, 10) || 9000));
         oscPortApply.value = String(p);
     }
-    if (isLocalAsrUiEnabled()) {
-        applyLocalAsrConfig(config.local_asr || {});
+    if (isLocalInferenceUiEnabled()) {
+        applyLocalInferenceConfig(config.local_inference || {});
     }
 
     if (config.smart_target_language) {
@@ -3392,7 +3392,7 @@ function saveConfigToLocalStorage() {
                 exclude_self_language: document.getElementById('smart-target-exclude-self')?.checked ?? true,
                 min_samples: parseInt(document.getElementById('smart-target-min-samples')?.value || '3'),
             },
-            local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
+            local_inference: isLocalInferenceUiEnabled() ? getLocalInferenceConfigFromForm() : null,
         };
 
         localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
@@ -3645,7 +3645,7 @@ async function saveConfig(autoSave = false) {
                 send_error_messages:
                     document.getElementById('osc-send-error-messages')?.checked === true,
             },
-            local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
+            local_inference: isLocalInferenceUiEnabled() ? getLocalInferenceConfigFromForm() : null,
             api_keys: {
                 dashscope: document.getElementById('dashscope-api-key')?.value.trim() || '',
                 deepl: document.getElementById('deepl-api-key')?.value.trim() || '',
@@ -3853,30 +3853,30 @@ async function startService() {
         const requiresDashscopeKey = currentConfigRequiresDashscopeKey();
 
         if (asrBackend === 'local') {
-            if (!isLocalAsrUiEnabled()) {
-                showMessage('❌ ' + t('msg.localAsrDisabledInBuild'), 'error');
+            if (!isLocalInferenceUiEnabled()) {
+                showMessage('❌ ' + t('msg.localInferenceDisabledInBuild'), 'error');
                 startBtn.disabled = false;
                 startBtn.textContent = t('btn.startService');
                 return;
             }
-            const localResponse = await fetch(`${API_BASE}/local-asr/status`);
+            const localResponse = await fetch(`${API_BASE}/local-inference/status`);
             const localPayload = await localResponse.json();
-            const localEngine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
+            const localEngine = document.getElementById('local-inference-engine')?.value || 'sensevoice';
             const engineStatus = localPayload?.engines?.[localEngine];
             if (!engineStatus || !engineStatus.ready) {
                 if (!engineStatus) {
-                    showMessage('❌ ' + t('msg.localAsrNotReady'), 'error');
+                    showMessage('❌ ' + t('msg.localInferenceNotReady'), 'error');
                 } else if (engineStatus.model_cached && Array.isArray(engineStatus.runtime_issues) && engineStatus.runtime_issues.length) {
                     showMessage(
-                        '❌ ' + t('msg.localAsrNeedPythonDeps', { deps: engineStatus.runtime_issues.join(', ') }),
+                        '❌ ' + t('msg.localInferenceNeedPythonDeps', { deps: engineStatus.runtime_issues.join(', ') }),
                         'error',
                     );
                 } else if (engineStatus.model_cached === false) {
-                    showMessage('❌ ' + t('msg.localAsrNotReady'), 'error');
+                    showMessage('❌ ' + t('msg.localInferenceNotReady'), 'error');
                 } else {
-                    showMessage('❌ ' + t('msg.localAsrNeedSilero'), 'error');
+                    showMessage('❌ ' + t('msg.localInferenceNeedSilero'), 'error');
                 }
-                ensureCollapsibleExpanded('local-asr-settings');
+                ensureCollapsibleExpanded('local-inference-settings');
                 startBtn.disabled = false;
                 startBtn.textContent = t('btn.startService');
                 return;

@@ -8,8 +8,8 @@ from pathlib import Path
 from urllib.request import Request, urlopen, urlretrieve
 
 from . import (
-    LOCAL_ASR_DISPLAY_NAMES,
-    LOCAL_ASR_ENGINES,
+    LOCAL_INFERENCE_DISPLAY_NAMES,
+    LOCAL_INFERENCE_ENGINES,
     get_common_runtime_issues,
     get_engine_runtime_issues,
 )
@@ -94,7 +94,7 @@ QWEN3_ASR_FILES = [
 
 QWEN3_ASR_DIR_NAME = "qwen3-asr"
 
-# HaujetZhao/Qwen3-ASR-GGUF zip 内仅有 Encoder ONNX×2 + Decoder GGUF；llama.cpp Vulkan DLL 由 download_qwen3_asr() / prefetch_llama_cpp_vulkan_for_pyinstaller_bundle() 从 ggml-org 拉取，不进 Git（手动 workflow「Pack Local ASR model bundles」或本机运行同上函数下载）。
+# HaujetZhao/Qwen3-ASR-GGUF zip 内仅有 Encoder ONNX×2 + Decoder GGUF；llama.cpp Vulkan DLL 由 download_qwen3_asr() / prefetch_llama_cpp_vulkan_for_pyinstaller_bundle() 从 ggml-org 拉取，不进 Git（手动 workflow「Pack Local Inference model bundles」或本机运行同上函数下载）。
 QWEN3_ASR_MODEL_URL = (
     "https://github.com/HaujetZhao/Qwen3-ASR-GGUF/releases/download/models/"
     "Qwen3-ASR-1.7B-gguf.zip"
@@ -185,7 +185,7 @@ def _silero_onnx_user_path() -> Path:
     if getattr(sys, "frozen", False):
         from resource_path import get_user_data_path
 
-        return Path(get_user_data_path(os.path.join("local_asr", "models", SILERO_VAD_DIR_NAME, SILERO_VAD_ONNX_NAME)))
+        return Path(get_user_data_path(os.path.join("local_inference", "models", SILERO_VAD_DIR_NAME, SILERO_VAD_ONNX_NAME)))
     return PACKAGE_DIR / "models" / SILERO_VAD_DIR_NAME / SILERO_VAD_ONNX_NAME
 
 
@@ -261,14 +261,14 @@ def _ensure_llama_cpp_vulkan_to(bin_dir: Path) -> None:
 
 
 def prefetch_llama_cpp_vulkan_for_pyinstaller_bundle() -> None:
-    """将 llama.cpp Vulkan DLL 写入 local_asr/models/qwen_llama_vulkan_bin，供 Qwen3 资源 zip（手动 workflow）或本机缓存。"""
+    """将 llama.cpp Vulkan DLL 写入 local_inference/models/qwen_llama_vulkan_bin，供 Qwen3 资源 zip（手动 workflow）或本机缓存。"""
     apply_cache_env()
     ensure_vendor_sources("qwen3-asr")
     _ensure_llama_cpp_vulkan_to(_qwen_llama_vulkan_user_bin())
 
 
 def prefetch_sensevoice_for_pyinstaller_bundle() -> None:
-    """将 SenseVoice INT8 ONNX 下载到 local_asr/models/sensevoice-onnx，供 SenseVoice 资源 zip（手动 workflow）或本机开发打包。"""
+    """将 SenseVoice INT8 ONNX 下载到 local_inference/models/sensevoice-onnx，供 SenseVoice 资源 zip（手动 workflow）或本机开发打包。"""
     apply_cache_env()
     dest = _sensevoice_onnx_bundle_dir()
     if _sensevoice_onnx_ready(dest):
@@ -303,7 +303,7 @@ def _download_text_file(url: str, dest: Path) -> None:
 def _ensure_qwen_vendor_scaffold(base_dir: Path) -> None:
     _write_text_if_missing(
         base_dir / "__init__.py",
-        "import logging\n\nlogger = logging.getLogger('Yakutan.LocalASR.Qwen3')\n",
+        "import logging\n\nlogger = logging.getLogger('Yakutan.LocalInference.Qwen3')\n",
     )
     _write_text_if_missing(
         base_dir / "inference" / "__init__.py",
@@ -453,7 +453,7 @@ def get_missing_models(engine: str) -> list[dict]:
     if not is_asr_cached(engine):
         missing.append(
             {
-                "name": LOCAL_ASR_DISPLAY_NAMES.get(engine, engine),
+                "name": LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine),
                 "type": engine,
                 "estimated_bytes": _MODEL_SIZE_BYTES.get(engine, 0),
             }
@@ -589,7 +589,7 @@ def get_engine_status(engine: str) -> dict:
         return get_hymt2_status()
     return {
         "engine": engine,
-        "display_name": LOCAL_ASR_DISPLAY_NAMES.get(engine, engine),
+        "display_name": LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine),
         "runtime_issues": get_engine_runtime_issues(engine),
         "vendor_ready": _vendor_ready(engine),
         "model_cached": bool(get_local_model_path(engine)) if engine != "qwen3-asr" else is_qwen3_asr_ready(),
@@ -600,13 +600,13 @@ def get_engine_status(engine: str) -> dict:
 
 def get_all_local_models_status() -> dict:
     asr_engines = {}
-    for engine in LOCAL_ASR_ENGINES:
+    for engine in LOCAL_INFERENCE_ENGINES:
         try:
             asr_engines[engine] = get_engine_status(engine)
         except Exception as e:
             asr_engines[engine] = {
                 "engine": engine,
-                "display_name": LOCAL_ASR_DISPLAY_NAMES.get(engine, engine),
+                "display_name": LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine),
                 "ready": False,
                 "error": str(e),
             }

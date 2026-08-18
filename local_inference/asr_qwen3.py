@@ -76,7 +76,7 @@ class Qwen3ASREngine:
         resolved_model_dir = model_dir or get_local_model_path("qwen3-asr") or str(MODELS_DIR / "qwen3-asr")
 
         # GGUF 解码器的运行位置（SenseVoice 固定 CPU，只有 Qwen3-ASR 用得上 GPU）
-        requested_device = getattr(config, "LOCAL_ASR_DEVICE", "auto")
+        requested_device = getattr(config, "LOCAL_INFERENCE_DEVICE", "auto")
         n_gpu_layers, main_gpu, effective_device = resolve_device(requested_device)
         # ONNX 音频编码（前后端）固定在 CPU（不用 DirectML）；GGUF 大模型按"运行位置"走 GPU/CPU。
         if use_dml is None:
