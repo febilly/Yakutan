@@ -19,6 +19,7 @@ filled in by the user.
 """
 from __future__ import annotations
 
+import gc
 import json
 import logging
 from pathlib import Path
@@ -164,6 +165,160 @@ class HyMT2LocalEngine:
             return clean
 
 
+# ── 进程内共享本地引擎注册表（引用计数） ─────────────────────────────────
+# 主/次翻译器等同一进程内的多个翻译器共享同一本地模型实例，避免重复加载
+# 同一份 GGUF 占用数倍内存；引用计数归零时才真正释放模型与显存/内存。
+# 加载与释放均线程安全（推理跑在 executor 线程，配置热重载/停止跑在事件循环线程）。
+
+_local_engine_registry: Dict[tuple, Dict] = {}
+_local_engine_registry_lock = threading.Lock()
+
+
+def _local_engine_key(
+    model_path: Optional[str], device: str
+) -> tuple:
+    """按 (模型文件, 运行位置) 归并共享实例：同一路径同一设备只加载一次。"""
+    path = model_path
+    if not path:
+        try:
+            from local_asr.model_manager import get_hymt2_model_path
+
+            path = get_hymt2_model_path()
+        except Exception:  # pragma: no cover - 非本地构建
+            path = None
+    return (str(path) if path else "", _sanitize_local_device(device))
+
+
+def _new_engine_entry() -> Dict:
+    return {
+        "engine": None,
+        "refcount": 0,
+        "loading": False,
+        "load_error": None,
+        "load_event": threading.Event(),
+    }
+
+
+def acquire_local_engine(
+    model_path: Optional[str] = None, device: str = "auto"
+) -> HyMT2LocalEngine:
+    """获取一个本地引擎引用；尚无实例时负责加载（同参数并发调用只会加载一次）。
+
+    调用成功即持有 1 个引用，必须配对的 :func:`release_local_engine`。
+    等待中的调用方会按 key 重新检查最新状态（等待期间实例可能被释放后重建）。
+    """
+    key = _local_engine_key(model_path, device)
+    while True:
+        with _local_engine_registry_lock:
+            entry = _local_engine_registry.get(key)
+            if entry is None:
+                entry = _new_engine_entry()
+                _local_engine_registry[key] = entry
+            if entry["engine"] is not None:
+                entry["refcount"] += 1
+                return entry["engine"]
+            if entry["loading"]:
+                # 有加载在进行：等它结束后回到循环顶部重新按 key 检查
+                # （加载完成前实例可能被全部引用释放，需继续等新实例）
+                event = entry["load_event"]
+                wait_inflight = True
+            else:
+                event = None
+                wait_inflight = False
+                # 首个请求（或上次失败后的重试）：由本调用方负责加载
+                entry["loading"] = True
+                entry["load_error"] = None
+                entry["load_event"].clear()
+                entry["refcount"] += 1
+
+        if wait_inflight:
+            event.wait()
+            continue
+
+        try:
+            engine = HyMT2LocalEngine(model_path, device=device)
+        except Exception as exc:
+            with _local_engine_registry_lock:
+                entry["engine"] = None
+                entry["load_error"] = exc
+                entry["loading"] = False
+                entry["refcount"] -= 1
+                entry["load_event"].set()
+            raise
+        with _local_engine_registry_lock:
+            entry["engine"] = engine
+            entry["load_event"].set()
+            entry["loading"] = False
+            refcount = entry["refcount"]
+        logger.info(
+            "Hy-MT2 本地引擎已加载（进程内共享实例，引用计数 %d）: %s",
+            refcount,
+            key,
+        )
+        return engine
+
+
+def release_local_engine(engine: Optional[HyMT2LocalEngine]) -> bool:
+    """释放一个本地引擎引用；引用计数归零时真正卸载模型（释放内存/显存）。"""
+    if engine is None:
+        return False
+    with _local_engine_registry_lock:
+        disposed = False
+        for key, entry in _local_engine_registry.items():
+            if entry["engine"] is engine:
+                entry["refcount"] -= 1
+                if entry["refcount"] <= 0:
+                    entry["refcount"] = 0
+                    # 先从注册表摘除并置空，避免等待中的 acquire 拿到已卸载实例
+                    entry["engine"] = None
+                    del _local_engine_registry[key]
+                    disposed = True
+                break
+        if not disposed:
+            return False
+    _dispose_local_engine(engine)
+    logger.info("Hy-MT2 本地引擎已卸载（引用计数归零，模型内存已释放）")
+    return True
+
+
+def _dispose_local_engine(engine: HyMT2LocalEngine) -> None:
+    """释放 llama.cpp 模型/上下文内存（通过包装对象的 __del__）。
+
+    先等推理锁：若此刻有请求正在推理则等它结束，避免释放正在使用的模型。
+    """
+    engine_lock = getattr(engine, "_engine_lock", None)
+    if engine_lock is not None:
+        engine_lock.acquire()
+    try:
+        # 先释放上下文（llama_free），再释放模型（llama_model_free）
+        engine.ctx = None
+        engine.model = None
+    finally:
+        if engine_lock is not None:
+            engine_lock.release()
+    gc.collect()
+
+
+def get_local_engine_runtime_status() -> Dict:
+    """进程内本地引擎运行时状态快照（供 Web 前端展示加载/已加载）。"""
+    with _local_engine_registry_lock:
+        engines = [
+            {
+                "model_path": model_path or None,
+                "device": device,
+                "loaded": entry["engine"] is not None,
+                "loading": bool(entry["loading"] and entry["engine"] is None),
+                "refcount": int(entry["refcount"]),
+            }
+            for (model_path, device), entry in _local_engine_registry.items()
+        ]
+    return {
+        "loaded": any(e["loaded"] for e in engines),
+        "loading": any(e["loading"] for e in engines),
+        "engines": engines,
+    }
+
+
 class HyMT2API(BaseTranslationAPI):
     """Hy-MT2 实时流式修订翻译（支持 WebSocket 外部服务与本地 GGUF 推理）。"""
 
@@ -236,6 +391,40 @@ class HyMT2API(BaseTranslationAPI):
             # 兜底：沿用本连接最近一次已知的具体语言码
             code = self._last_source_lang or self.DEFAULT_SOURCE_LANG
         return code
+
+    # ── Local engine lifecycle ─────────────────────────────────────────
+
+    def load_local_engine(self) -> bool:
+        """立即加载（或复用）本地模型；非 local 后端或已加载时直接返回。
+
+        服务启动 / 切换为本地后端时由宿主调用，避免首次请求才加载。
+        """
+        if self.backend != "local" or self._local_engine is not None:
+            return self._local_engine is not None
+        self._local_engine = acquire_local_engine(
+            self._model_path, device=self.local_device,
+        )
+        return True
+
+    def unload_local_engine(self) -> bool:
+        """放弃本实例对本地模型的引用；最后一个引用释放时真正卸载模型。
+
+        返回是否成功释放了本实例持有的引用（是否真正卸载取决于引用计数）。
+        """
+        engine, self._local_engine = self._local_engine, None
+        if engine is None:
+            return False
+        try:
+            release_local_engine(engine)
+            return True
+        except Exception as e:
+            logger.warning("Hy-MT2 本地引擎释放失败: %s", e)
+            return False
+
+    def close(self) -> None:
+        """释放本实例持有的全部资源（本地模型引用 + WebSocket 连接）。"""
+        self.unload_local_engine()
+        self._close_ws()
 
     # ── Connection management ──────────────────────────────────────────
 
@@ -407,8 +596,9 @@ class HyMT2API(BaseTranslationAPI):
         if self.backend == "local":
             try:
                 if self._local_engine is None:
-                    self._local_engine = HyMT2LocalEngine(
-                        self._model_path, device=self.local_device
+                    # 兜底：宿主未预载时首次请求仍可用（走共享注册表）
+                    self._local_engine = acquire_local_engine(
+                        self._model_path, device=self.local_device,
                     )
                 return self._translate_local(
                     text=text,

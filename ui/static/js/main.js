@@ -463,15 +463,23 @@ function renderLocalAsrStatus(payload) {
     if (hymt2Status) {
         const isReady = !!hymt2Status.ready;
         const modelName = hymt2Status.model_file || '';
+        const engine = hymt2Status.engine || null;
+        const engineKey = engine
+            ? (engine.loading ? 'status.hymt2EngineLoading'
+              : engine.loaded ? 'status.hymt2EngineLoaded' : null)
+            : null;
+        const engineText = engineKey ? t(engineKey) : '';
 
         setLocalModelBadge(hymt2Badge, isReady ? 'ready' : 'missing');
         if (hymt2CardStatusBox) {
             hymt2CardStatusBox.textContent = isReady
-                ? t('status.localModelReady') + (modelName ? ` (${modelName})` : '')
+                ? (engineText || t('status.localModelReady')) + (modelName ? ` (${modelName})` : '')
                 : t('status.hymt2Missing');
         }
         if (hymt2SettingsStatusBox) {
-            const key = isReady ? 'status.hymt2LocalReady' : 'status.hymt2LocalMissing';
+            const key = isReady
+                ? (engineKey || 'status.hymt2LocalReady')
+                : 'status.hymt2LocalMissing';
             hymt2SettingsStatusBox.textContent = t(key);
             hymt2SettingsStatusBox.setAttribute('data-i18n', key);
         }

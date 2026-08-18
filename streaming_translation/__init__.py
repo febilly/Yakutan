@@ -11,7 +11,7 @@ from .api.base import BaseTranslationAPI
 from .api.deepl import DeepLAPI
 from .api.google_dictionary import GoogleDictionaryAPI
 from .api.google_web import GoogleWebAPI
-from .api.hymt2 import HyMT2API
+from .api.hymt2 import HyMT2API, get_local_engine_runtime_status
 from .api.openrouter import OpenRouterAPI, OpenRouterStreamingAPI, merge_with_draft
 from .api.qwen_mt import QwenMTAPI
 from .core.context_aware import ContextAwareTranslator, TranslationHistoryEntry
@@ -23,6 +23,8 @@ from .pipeline import (
     ensure_secondary_translator,
     is_streaming_deepl_hybrid_mode,
     is_streaming_translation_mode,
+    prewarm_local_engines,
+    release_local_engines,
     reinitialize_translator,
     reverse_translation,
     translate_with_backend,
@@ -49,7 +51,10 @@ __all__ = [
     "ensure_secondary_translator",
     "is_streaming_deepl_hybrid_mode",
     "is_streaming_translation_mode",
+    "get_local_engine_runtime_status",
     "merge_with_draft",
+    "prewarm_local_engines",
+    "release_local_engines",
     "reinitialize_translator",
     "reverse_translation",
     "translate_with_backend",

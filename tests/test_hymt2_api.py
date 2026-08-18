@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import threading
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 from streaming_translation.api.hymt2 import HyMT2API
 
@@ -617,3 +621,261 @@ class TestLocalBackend:
         assert "asr" in all_status
         assert "translation" in all_status
         assert "hymt2" in all_status["translation"]
+
+
+# ── Local engine lifecycle (shared instance / refcount / prewarm) ──────────
+
+class TestLocalEngineLifecycle:
+    @pytest.fixture(autouse=True)
+    def _clean_engine_registry(self):
+        from streaming_translation.api.hymt2 import (
+            _local_engine_registry,
+            _local_engine_registry_lock,
+        )
+        with _local_engine_registry_lock:
+            _local_engine_registry.clear()
+        yield
+        with _local_engine_registry_lock:
+            _local_engine_registry.clear()
+
+    @staticmethod
+    def _fake_engine_class():
+        instances: list = []
+
+        class FakeLocalEngine:
+            def __init__(self, model_path=None, device="auto"):
+                self.device = device
+                self.model = object()
+                self.ctx = object()
+                self._engine_lock = threading.Lock()
+                instances.append(self)
+
+        return FakeLocalEngine, instances
+
+    def test_acquire_release_refcount_and_dispose(self):
+        from streaming_translation.api.hymt2 import (
+            acquire_local_engine,
+            release_local_engine,
+        )
+        fake_cls, instances = self._fake_engine_class()
+        with patch("streaming_translation.api.hymt2.HyMT2LocalEngine", fake_cls):
+            e1 = acquire_local_engine(device="cpu")
+            e2 = acquire_local_engine(device="cpu")
+            assert e1 is e2
+            assert len(instances) == 1
+
+            # 不同运行位置 → 独立实例
+            e3 = acquire_local_engine(device="auto")
+            assert e3 is not e1
+            assert len(instances) == 2
+
+            # 第一个引用释放 → 尚未归零，不卸载
+            assert release_local_engine(e1) is False
+            assert instances[0].model is not None
+            # 最后一个引用释放 → 真正卸载（通过 __del__ 释放模型/上下文）
+            assert release_local_engine(e2) is True
+            assert instances[0].model is None
+            assert instances[0].ctx is None
+            assert release_local_engine(e3) is True
+
+    def test_api_load_unload_shares_engine(self):
+        fake_cls, instances = self._fake_engine_class()
+        with patch("streaming_translation.api.hymt2.HyMT2LocalEngine", fake_cls):
+            api = HyMT2API(backend="local", local_device="cpu")
+            assert api.load_local_engine() is True
+            assert api._local_engine is not None
+            assert api.load_local_engine() is True  # 幂等
+
+            api2 = HyMT2API(backend="local", local_device="cpu")
+            assert api2.load_local_engine() is True
+            assert api2._local_engine is api._local_engine
+            assert len(instances) == 1
+
+            assert api.unload_local_engine() is True
+            assert api._local_engine is None
+            assert api2._local_engine is not None  # 仍被 api2 持有
+            assert instances[0].model is not None
+
+            assert api2.unload_local_engine() is True
+            assert instances[0].model is None
+            assert instances[0].ctx is None
+            assert api2.unload_local_engine() is False  # 无引用可释放
+
+            # 非 local 后端不参与加载
+            api3 = HyMT2API(backend="api")
+            assert api3.load_local_engine() is False
+            assert api3.unload_local_engine() is False
+            assert len(instances) == 1
+
+    def test_pipeline_reinit_shares_and_frees_engine(self):
+        from streaming_translation import (
+            TranslationConfig,
+            prewarm_local_engines,
+            reinitialize_translator,
+        )
+        fake_cls, instances = self._fake_engine_class()
+        cfg_local = dict(
+            target_language="zh",
+            secondary_target_language="ja",
+            translation_api_type="hymt2",
+            hymt2_backend="local",
+        )
+        with patch("streaming_translation.api.hymt2.HyMT2LocalEngine", fake_cls):
+            state = SimpleNamespace()
+            # 服务启动路径：reinitialize 本身不加载，prewarm 立即加载
+            reinitialize_translator(state, TranslationConfig(**cfg_local))
+            assert state.translation_api._local_engine is None
+            prewarm_local_engines(state)
+            assert len(instances) == 1
+            assert state.translation_api._local_engine is (
+                state.secondary_translation_api._local_engine
+            )
+
+            # 切换到 api 后端：旧引擎引用全部释放 → 真正卸载
+            reinitialize_translator(
+                state,
+                TranslationConfig(
+                    target_language="zh",
+                    translation_api_type="hymt2",
+                    hymt2_backend="api",
+                ),
+            )
+            assert instances[0].model is None
+            assert instances[0].ctx is None
+            assert state.translation_api._local_engine is None
+
+            # 切回 local 并预载：加载新实例
+            reinitialize_translator(state, TranslationConfig(**cfg_local))
+            prewarm_local_engines(state)
+            assert len(instances) == 2
+            assert state.translation_api._local_engine is instances[1]
+            assert state.secondary_translation_api._local_engine is instances[1]
+
+    def test_runtime_status_reflects_load_state(self):
+        from streaming_translation.api.hymt2 import get_local_engine_runtime_status
+        fake_cls, instances = self._fake_engine_class()
+        with patch("streaming_translation.api.hymt2.HyMT2LocalEngine", fake_cls):
+            api = HyMT2API(backend="local", local_device="cpu")
+            assert get_local_engine_runtime_status()["loaded"] is False
+
+            api.load_local_engine()
+            status = get_local_engine_runtime_status()
+            assert status["loaded"] is True
+            assert status["loading"] is False
+            assert status["engines"][0]["refcount"] == 1
+
+            api.unload_local_engine()
+            assert get_local_engine_runtime_status()["loaded"] is False
+
+    def test_failed_load_is_retried_on_next_request(self):
+        from streaming_translation.api.hymt2 import (
+            acquire_local_engine,
+            get_local_engine_runtime_status,
+            release_local_engine,
+        )
+        attempts = {"n": 0}
+
+        class FailingEngine:
+            def __init__(self, model_path=None, device="auto"):
+                attempts["n"] += 1
+                self.model = object()
+                self.ctx = object()
+                self._engine_lock = threading.Lock()
+                if attempts["n"] == 1:
+                    raise RuntimeError("load boom")
+
+            def generate(self, prompt, max_tokens=128):
+                return "ok"
+
+        with patch("streaming_translation.api.hymt2.HyMT2LocalEngine", FailingEngine):
+            # 首次加载失败：抛异常，注册表不残留已加载实例
+            with pytest.raises(RuntimeError):
+                acquire_local_engine(device="cpu")
+            assert get_local_engine_runtime_status()["loaded"] is False
+
+            # 之后请求自动重试加载并成功
+            api = HyMT2API(backend="local", local_device="cpu")
+            assert api.translate("hi", target_language="zh") == "ok"
+            assert get_local_engine_runtime_status()["loaded"] is True
+            assert api._local_engine is not None
+            assert api.unload_local_engine() is True
+            assert release_local_engine(api._local_engine) is False
+            assert api._local_engine is None
+            assert get_local_engine_runtime_status()["loaded"] is False
+
+    def test_config_switch_during_load_does_not_leak(self):
+        """加载进行中被热重载替换：旧引用立即释放，最终仅剩 1 个有效引擎。"""
+        import time
+
+        from streaming_translation.api.hymt2 import get_local_engine_runtime_status
+        from streaming_translation.pipeline import (
+            prewarm_local_engines,
+            release_local_engines,
+        )
+
+        instances: list = []
+        started = threading.Event()
+
+        class SlowEngine:
+            def __init__(self, model_path=None, device="auto"):
+                self.model = object()
+                self.ctx = object()
+                self._engine_lock = threading.Lock()
+                instances.append(self)
+                started.set()
+                time.sleep(0.2)
+
+        with patch("streaming_translation.api.hymt2.HyMT2LocalEngine", SlowEngine):
+            state = SimpleNamespace()
+            api1 = HyMT2API(backend="local", local_device="cpu")
+            state.translation_api = api1
+
+            prewarm_t = threading.Thread(
+                target=prewarm_local_engines, args=(state,)
+            )
+            prewarm_t.start()
+            started.wait(5)
+            time.sleep(0.05)
+
+            # 加载中途切换：旧实例失去挂载，新实例接管
+            release_local_engines(state)
+            api2 = HyMT2API(backend="local", local_device="cpu")
+            state.translation_api = api2
+
+            prewarm_t.join()
+            # 被替换的旧 API 必须已放弃引用
+            assert api1._local_engine is None
+
+            # 切换后再次预载：新 API 必须拿到可用引擎（不得拿到已卸载实例）
+            prewarm_local_engines(state)
+            assert api2._local_engine is not None
+            assert api2._local_engine.ctx is not None
+            assert get_local_engine_runtime_status()["loaded"] is True
+
+            # 收尾释放后注册表应为空（无泄漏）
+            release_local_engines(state)
+            assert get_local_engine_runtime_status()["loaded"] is False
+            assert api2._local_engine is None
+
+        assert len(instances) <= 2
+        assert all(
+            e.ctx is None for e in instances if e is not api2._local_engine
+        )
+
+    def test_persistent_load_failure_reports_error(self):
+        class AlwaysFailingEngine:
+            def __init__(self, model_path=None, device="auto"):
+                raise RuntimeError("no gguf available")
+
+        with patch(
+            "streaming_translation.api.hymt2.HyMT2LocalEngine",
+            AlwaysFailingEngine,
+        ):
+            api = HyMT2API(backend="local", local_device="cpu")
+            for _ in range(2):
+                assert api.translate("hi", target_language="zh").startswith(
+                    "[ERROR]"
+                )
+            # 加载不成功后不会持有引用，卸载也应无副作用
+            assert api._local_engine is None
+            assert api.unload_local_engine() is False

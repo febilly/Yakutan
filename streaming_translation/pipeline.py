@@ -47,6 +47,20 @@ TRANSLATOR_CONTEXT_ATTRS = (
     "secondary_deepl_fallback_translator",
 )
 
+# 翻译器实例属性 → state 上对应翻译 API 属性的映射
+_TRANSLATOR_API_ATTRS = {
+    "translator": "translation_api",
+    "secondary_translator": "secondary_translation_api",
+    "backwards_translator": "backwards_translation_api",
+    "deepl_fallback_translator": "deepl_fallback_translation_api",
+    "secondary_deepl_fallback_translator": "secondary_deepl_fallback_translation_api",
+}
+
+SECONDARY_TRANSLATOR_ATTRS = (
+    "secondary_translator",
+    "secondary_deepl_fallback_translator",
+)
+
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -188,6 +202,78 @@ def clear_translation_contexts(
     return cleared
 
 
+def _iter_state_apis(state, attributes: Optional[tuple[str, ...]] = None):
+    """按 *attributes*（翻译器属性名）遍历 state 上对应的翻译 API 实例（去重）。"""
+    seen: set[int] = set()
+    for attr in attributes or TRANSLATOR_CONTEXT_ATTRS:
+        api_attr = _TRANSLATOR_API_ATTRS.get(attr)
+        api = getattr(state, api_attr, None) if api_attr else None
+        if api is None or id(api) in seen:
+            continue
+        seen.add(id(api))
+        yield api
+
+
+def release_local_engines(
+    state,
+    attributes: Optional[tuple[str, ...]] = None,
+) -> int:
+    """释放 *state* 上各翻译器持有的本地模型引用（如 Hy-MT2 进程内 GGUF 引擎）。
+
+    引用计数归零时模型才会真正卸载（释放内存/显存）；主/次翻译器共享同一
+    实例时，需全部释放后才卸载。返回实际释放的引用数。
+    """
+    released = 0
+    for api in _iter_state_apis(state, attributes):
+        unload = getattr(api, "unload_local_engine", None)
+        if not callable(unload):
+            continue
+        try:
+            if unload():
+                released += 1
+        except Exception as e:
+            logger.warning("释放本地翻译模型失败: %s", e)
+    return released
+
+
+def _api_still_attached(state, api) -> bool:
+    """判断 *api* 是否仍是 *state* 上当前使用的翻译 API 实例。"""
+    for attr in TRANSLATOR_CONTEXT_ATTRS:
+        api_attr = _TRANSLATOR_API_ATTRS.get(attr)
+        if api_attr and getattr(state, api_attr, None) is api:
+            return True
+    return False
+
+
+def prewarm_local_engines(state) -> int:
+    """立即加载 *state* 上各翻译器需要的本地模型（幂等，已加载则跳过）。
+
+    返回取得本地引擎的翻译器数量；单引擎加载失败仅告警不抛异常，
+    失败后由首次翻译请求重试（懒加载兜底）。
+    加载耗时数秒，期间若发生配置热重载替换了翻译实例，则立即释放
+    刚取得的引用，避免旧实例持有的模型引用泄漏。
+    """
+    loaded = 0
+    for api in _iter_state_apis(state):
+        load = getattr(api, "load_local_engine", None)
+        if not callable(load):
+            continue
+        try:
+            if not load():
+                continue
+        except Exception as e:
+            logger.warning("预加载本地翻译模型失败（首次翻译时将重试）: %s", e)
+            continue
+        if not _api_still_attached(state, api):
+            try:
+                api.unload_local_engine()
+            except Exception:
+                pass
+            continue
+        loaded += 1
+    return loaded
+
+
 # ── Factory ───────────────────────────────────────────────────────────
 
 def _build_api(api_class: type[BaseTranslationAPI], cfg: TranslationConfig) -> BaseTranslationAPI:
@@ -304,6 +390,7 @@ def ensure_secondary_translator(
     ``secondary_target_language``, etc. attributes.
     """
     if not target_language:
+        release_local_engines(state, SECONDARY_TRANSLATOR_ATTRS)
         state.secondary_translation_api = None
         state.secondary_translator = None
         state.secondary_deepl_fallback_translation_api = None
@@ -317,6 +404,7 @@ def ensure_secondary_translator(
     ):
         return True
 
+    release_local_engines(state, SECONDARY_TRANSLATOR_ATTRS)
     state.secondary_translation_api = None
     state.secondary_translator = None
     state.secondary_deepl_fallback_translation_api = None
@@ -355,6 +443,9 @@ def reinitialize_translator(state, cfg: TranslationConfig) -> None:
         cfg.translate_partial_results = True
 
     clear_translation_contexts(state)
+    # 先释放旧翻译器持有的本地模型引用（避免新旧引擎内存叠加），
+    # 再构建新翻译器；新引擎由宿主调用 prewarm_local_engines 立即加载。
+    release_local_engines(state)
     api_class = _get_api_class(cfg.translation_api_type)
     tm = get_terminology_manager()
 
@@ -437,13 +528,8 @@ def update_secondary_translator(state, cfg: TranslationConfig) -> None:
         state._translation_config = cfg
         return
 
-    clear_translation_contexts(
-        state,
-        (
-            "secondary_translator",
-            "secondary_deepl_fallback_translator",
-        ),
-    )
+    clear_translation_contexts(state, SECONDARY_TRANSLATOR_ATTRS)
+    release_local_engines(state, SECONDARY_TRANSLATOR_ATTRS)
     state.secondary_translation_api = None
     state.secondary_translator = None
     state.secondary_deepl_fallback_translation_api = None

@@ -889,12 +889,19 @@ def get_local_asr_status():
         return jsonify({'success': False, 'message': 'Local ASR is disabled in this build'}), 404
 
     models_status = get_all_local_models_status()
+    hymt2_status = dict(models_status['translation'].get('hymt2') or {})
+    # 进程内本地模型运行时状态（服务启动/切换本地后端时加载，停止时卸载）
+    try:
+        from streaming_translation import get_local_engine_runtime_status
+        hymt2_status['engine'] = get_local_engine_runtime_status()
+    except Exception:
+        hymt2_status['engine'] = {'loaded': False, 'loading': False, 'engines': []}
     return jsonify({
         'success': True,
         'ui_enabled': is_local_asr_ui_enabled(),
         'engines': models_status['asr'],
         'models': models_status,
-        'hymt2': models_status['translation'].get('hymt2', {}),
+        'hymt2': hymt2_status,
         'download': _snapshot_local_asr_download_state(),
     })
 

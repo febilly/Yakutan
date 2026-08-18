@@ -46,6 +46,8 @@ from app_state import AppState, get_state, set_state
 from streaming_translation import (
     clear_translation_contexts,
     config_from_module,
+    prewarm_local_engines,
+    release_local_engines,
     reinitialize_translator,
     update_secondary_translator,
 )
@@ -115,12 +117,42 @@ def update_subtitles(original: str, translated: str, ongoing: bool, reverse_tran
         subtitles_state["ongoing"] = ongoing
 
 
+# 进行中的本地模型预加载 future（服务停止时先等其结束再释放模型，避免泄漏）
+_local_engine_prewarm_futures: set = set()
+
+
+def _schedule_local_engine_prewarm(state):
+    """后台线程预载本地 Hy-MT2 模型（不阻塞主事件循环，音频采集不受影响）。"""
+
+    def _worker():
+        try:
+            loaded = prewarm_local_engines(state)
+            if loaded:
+                print(f'[Translator] 本地 Hy-MT2 模型已就绪（供 {loaded} 个翻译器使用）')
+        except Exception as e:
+            print(f'[Translator] 本地 Hy-MT2 模型预加载失败: {e}')
+
+    loop = state.main_loop
+    if loop is None or not loop.is_running():
+        _worker()
+        return
+    try:
+        future = loop.run_in_executor(state.executor, _worker)
+    except RuntimeError:
+        _worker()
+        return
+    _local_engine_prewarm_futures.add(future)
+    future.add_done_callback(_local_engine_prewarm_futures.discard)
+
+
 def reinitialize_translator_compat():
     state = get_state()
     if state:
         # 翻译关闭时跳过（重）构建翻译器，避免未配置对应 API Key 时报错。
-        # 运行时重新开启翻译会再次调用本函数并正常构建。
+        # 运行时重新开启翻译会再次调用本函数并正常构建；
+        # 关闭时同时释放本地模型，不再占用内存/显存。
         if not getattr(config, 'ENABLE_TRANSLATION', True):
+            release_local_engines(state)
             return
         cfg = config_from_module(config)
         if _is_primary_translator_config_changed(state, cfg):
@@ -131,6 +163,8 @@ def reinitialize_translator_compat():
         loop = state.main_loop
         if loop is not None and loop.is_running():
             loop.create_task(osc_manager.apply_runtime_config(app_name="Yakutan"))
+        # 切换翻译模式/Hy-MT2 本地开关后，当场（后台）加载新的本地模型
+        _schedule_local_engine_prewarm(state)
 
 
 def clear_translator_contexts_compat():
@@ -406,6 +440,9 @@ async def main(
     cfg = config_from_module(config)
     if config.ENABLE_TRANSLATION:
         reinitialize_translator(state, cfg)
+        # 本地 Hy-MT2：服务启动时立即加载模型（此时尚无流量，同步加载不阻塞用户）
+        if prewarm_local_engines(state):
+            print('[Translator] 本地 Hy-MT2 模型已在服务启动时加载')
 
     # 初始化热词（在线：qwen 语料 / qwen_audio3 即时热词 / dashscope 热词表；
     # 本地：Qwen3-ASR 走与在线 Qwen 相同的语料注入）
@@ -610,6 +647,25 @@ async def main(
 
     finally:
         emit_lifecycle('stopping', state.recognition_active)
+        # 等待进行中的本地模型预加载结束后再统一释放，避免“加载完才释放”的泄漏
+        if _local_engine_prewarm_futures:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        *(
+                            asyncio.wrap_future(fut)
+                            for fut in list(_local_engine_prewarm_futures)
+                        ),
+                        return_exceptions=True,
+                    ),
+                    timeout=300,
+                )
+            except Exception as e:
+                print(f'[Translator] 等待本地模型预加载结束失败: {e}')
+        # 服务关闭：卸载本地翻译模型（释放内存/显存）
+        released = release_local_engines(state)
+        if released:
+            print(f'[Translator] 本地 Hy-MT2 模型已卸载（释放 {released} 个引用）')
         clear_translator_contexts_compat()
         osc_manager.clear_mute_callback()
         osc_manager.reset_runtime_state()
