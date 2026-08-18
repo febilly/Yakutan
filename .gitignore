@@ -16,6 +16,7 @@ models/lid.176.bin
 *.zip
 hot_words_private/*.txt
 temp/
+start_hymt2_tunnel.bat
 
 # PyInstaller build files
 build/
