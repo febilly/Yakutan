@@ -253,6 +253,13 @@ LLM_PARALLEL_FASTEST_MODE = 'off'
 # Hy-MT2 流式修订翻译配置（WebSocket 无状态协议，见 Hy-MT2 INTEGRATION.md）
 # ============================================================================
 
+# Hy-MT2 接入方式：'api' (外部 WebSocket 服务) 或 'local' (本地 GGUF 模型)
+HYMT2_BACKEND = 'api'
+
+# 本地 GGUF 推理的运行位置：'auto'（自动挑一张 GPU，独显优先）、'cpu'（纯 CPU）
+# 或 'vulkan:N'（指定第 N 张 GPU）。仅在 HYMT2_BACKEND = 'local' 时有意义。
+HYMT2_LOCAL_DEVICE = 'auto'
+
 # Hy-MT2 服务的 WebSocket 地址。该地址**不内置默认值**——服务属于用户自托管/
 # 内网部署，必须由用户自行填写（网页「翻译API设置」或 .env 的 HYMT2_WEBSOCKET_URL）。
 # 例如：ws://127.0.0.1:18765
@@ -554,6 +561,7 @@ def apply_cli_env() -> None:
     global TRANSLATION_API_TYPE, LLM_BASE_URL, LLM_MODEL, LLM_TEMPLATE
     global LLM_TRANSLATION_FORMALITY, LLM_TRANSLATION_STYLE
     global OPENAI_COMPAT_EXTRA_BODY_JSON, TRANSLATE_PARTIAL_RESULTS
+    global HYMT2_BACKEND, HYMT2_LOCAL_DEVICE
     global HYMT2_WEBSOCKET_URL, HYMT2_TIMEOUT_SECONDS, HYMT2_MAX_RETRIES
     global DASHSCOPE_API_KEY, DEEPL_API_KEY, LLM_API_KEY, OPENAI_API_KEY
     global SONIOX_API_KEY, DOUBAO_API_KEY, DOUBAO_APP_ID, DOUBAO_ACCESS_KEY
@@ -622,6 +630,12 @@ def apply_cli_env() -> None:
         ),
     )
 
+    HYMT2_BACKEND = _read_first_env(
+        'HYMT2_BACKEND', default=HYMT2_BACKEND
+    )
+    HYMT2_LOCAL_DEVICE = sanitize_local_device(
+        _read_first_env('HYMT2_LOCAL_DEVICE', default=HYMT2_LOCAL_DEVICE)
+    )
     HYMT2_WEBSOCKET_URL = _read_first_env(
         'HYMT2_WEBSOCKET_URL', default=HYMT2_WEBSOCKET_URL
     )
@@ -702,6 +716,7 @@ def get_default_ui_config() -> dict:
             'llm_translation_style': DEFAULT_LLM_TRANSLATION_STYLE,
             'openai_compat_extra_body_json': DEFAULT_LLM_EXTRA_BODY_JSON,
             'llm_parallel_fastest_mode': 'off',
+            'hymt2_backend': 'api',
             'hymt2_websocket_url': '',
             'show_partial_results': False,
             'enable_furigana': False,

@@ -406,3 +406,141 @@ class TestPipelineIntegration:
         assert cfg.hymt2_websocket_url == "ws://192.168.1.5:18765"
         assert cfg.hymt2_timeout == 15.0
         assert cfg.hymt2_max_retries == 5
+
+    def test_reinit_builds_hymt2_api_with_local_backend(self):
+        from streaming_translation import (
+            TranslationConfig,
+            reinitialize_translator,
+        )
+
+        class State:
+            pass
+
+        state = State()
+        cfg = TranslationConfig(
+            target_language="zh",
+            translation_api_type="hymt2",
+            hymt2_backend="local",
+        )
+        reinitialize_translator(state, cfg)
+        assert isinstance(state.translation_api, HyMT2API)
+        assert state.translation_api.backend == "local"
+
+    def test_local_device_reaches_api_and_defaults_to_auto(self):
+        from streaming_translation import (
+            TranslationConfig,
+            config_from_module,
+            reinitialize_translator,
+        )
+
+        class Module:
+            HYMT2_BACKEND = "local"
+
+        assert config_from_module(Module()).hymt2_local_device == "auto"
+
+        for raw, expected in (
+            ("CPU", "cpu"),
+            ("gpu", "auto"),          # 旧值：等价于自动挑一张 GPU
+            ("Vulkan:1", "vulkan:1"),
+            ("vulkan:x", "auto"),     # 非法索引回退
+            (None, "auto"),
+        ):
+            class DeviceModule:
+                HYMT2_BACKEND = "local"
+                HYMT2_LOCAL_DEVICE = raw
+
+            assert config_from_module(DeviceModule()).hymt2_local_device == expected, raw
+
+        class State:
+            pass
+
+        state = State()
+        reinitialize_translator(
+            state,
+            TranslationConfig(
+                target_language="zh",
+                translation_api_type="hymt2",
+                hymt2_backend="local",
+                hymt2_local_device="cpu",
+            ),
+        )
+        assert state.translation_api.local_device == "cpu"
+
+    def test_switching_local_device_is_seen_as_config_change(self):
+        """热重载走 _is_primary_config_changed；漏掉该字段会继续用旧设备上的引擎。"""
+        from streaming_translation import TranslationConfig, reinitialize_translator
+        from streaming_translation.pipeline import _is_primary_config_changed
+
+        def cfg_for(device):
+            return TranslationConfig(
+                target_language="zh",
+                translation_api_type="hymt2",
+                hymt2_backend="local",
+                hymt2_local_device=device,
+            )
+
+        class State:
+            pass
+
+        state = State()
+        reinitialize_translator(state, cfg_for("gpu"))
+
+        assert _is_primary_config_changed(state, cfg_for("gpu")) is False
+        assert _is_primary_config_changed(state, cfg_for("cpu")) is True
+
+        reinitialize_translator(state, cfg_for("cpu"))
+        assert state.translation_api.local_device == "cpu"
+
+
+# ── Local Backend & Model Manager ──────────────────────────────────────
+
+class TestLocalBackend:
+    def test_local_backend_missing_model_returns_error(self):
+        api = HyMT2API(backend="local", model_path="nonexistent_model.gguf")
+        res = api.translate("Hello", source_language="en", target_language="zh")
+        assert res.startswith("[ERROR]")
+
+    def test_local_backend_translates_and_revises(self):
+        api = HyMT2API(backend="local")
+        # Mock _local_engine to test revision prompt logic
+        class FakeLocalEngine:
+            def __init__(self):
+                self.prompts = []
+            def generate(self, prompt, max_tokens=128):
+                self.prompts.append(prompt)
+                if "Hello" in prompt and "world" not in prompt:
+                    return "你好"
+                elif "world" in prompt:
+                    return "你好世界"
+                return "翻译结果"
+
+        fake_engine = FakeLocalEngine()
+        api._local_engine = fake_engine
+
+        # Step 1: partial
+        out1 = api.translate("Hello", source_language="en", target_language="zh", is_partial=True)
+        assert out1 == "你好"
+        assert len(fake_engine.prompts) == 1
+
+        # Step 2: revised partial
+        out2 = api.translate("Hello world", source_language="en", target_language="zh", is_partial=False)
+        assert out2 == "你好世界"
+        assert len(fake_engine.prompts) == 2
+        assert "Previous version of the current source:\nHello" in fake_engine.prompts[1]
+        assert "Previous translation of the current source:\n你好" in fake_engine.prompts[1]
+
+    def test_model_manager_hymt2_helpers(self):
+        from local_asr.model_manager import (
+            get_all_local_models_status,
+            get_hymt2_model_path,
+            get_hymt2_status,
+            is_hymt2_cached,
+        )
+        status = get_hymt2_status()
+        assert status["engine"] == "hymt2"
+        assert "ready" in status
+
+        all_status = get_all_local_models_status()
+        assert "asr" in all_status
+        assert "translation" in all_status
+        assert "hymt2" in all_status["translation"]

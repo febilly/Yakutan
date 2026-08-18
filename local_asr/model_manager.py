@@ -7,7 +7,12 @@ import sys
 from pathlib import Path
 from urllib.request import Request, urlopen, urlretrieve
 
-from . import LOCAL_ASR_DISPLAY_NAMES, get_engine_runtime_issues
+from . import (
+    LOCAL_ASR_DISPLAY_NAMES,
+    LOCAL_ASR_ENGINES,
+    get_common_runtime_issues,
+    get_engine_runtime_issues,
+)
 from proxy_detector import refresh_system_proxy_env
 
 logger = logging.getLogger(__name__)
@@ -111,7 +116,13 @@ _MODEL_SIZE_BYTES = {
     "silero-vad": 1_300_000,
     "sensevoice": 380_000_000,
     "qwen3-asr": 770_000_000,
+    "hymt2": 1_100_000_000,
 }
+
+HYMT2_DIR_NAME = "hymt2"
+HYMT2_MODEL_PLACEHOLDER_URL = (
+    "https://huggingface.co/Tencent-Hunyuan/HunYuan-MT-1.8B"
+)
 
 _QWEN3_VENDOR_URLS = {
     "asr_engine.py": "https://raw.githubusercontent.com/TheDeathDragon/LiveTranslate/main/qwen_asr_gguf/asr_engine.py",
@@ -535,7 +546,47 @@ def prepare_engine(engine: str) -> None:
         download_asr(engine)
 
 
+def get_hymt2_model_path() -> Path | None:
+    """获取本地 Hy-MT2 GGUF 模型文件路径（如果存在）。"""
+    hymt2_dir = MODELS_DIR / HYMT2_DIR_NAME
+    if hymt2_dir.is_dir():
+        gguf_files = sorted(hymt2_dir.glob("*.gguf"))
+        if gguf_files:
+            return gguf_files[0]
+    return None
+
+
+def is_hymt2_cached() -> bool:
+    """检测本地 Hy-MT2 GGUF 模型是否已就绪。"""
+    return get_hymt2_model_path() is not None
+
+
+def download_hymt2(progress_callback=None) -> None:
+    """下载或初始化本地 Hy-MT2 模型（支持占位下载）。"""
+    apply_cache_env()
+    hymt2_dir = MODELS_DIR / HYMT2_DIR_NAME
+    hymt2_dir.mkdir(parents=True, exist_ok=True)
+    if is_hymt2_cached():
+        logger.info("Hy-MT2 GGUF model already present: %s", get_hymt2_model_path())
+        return
+    logger.info("Hy-MT2 model download placeholder triggered for %s", hymt2_dir)
+
+
+def get_hymt2_status() -> dict:
+    hymt2_path = get_hymt2_model_path()
+    return {
+        "engine": "hymt2",
+        "display_name": "Hy-MT2 1.8B",
+        "model_file": hymt2_path.name if hymt2_path else None,
+        "model_path": str(hymt2_path) if hymt2_path else None,
+        "ready": hymt2_path is not None,
+        "runtime_issues": get_common_runtime_issues(),
+    }
+
+
 def get_engine_status(engine: str) -> dict:
+    if engine == "hymt2":
+        return get_hymt2_status()
     return {
         "engine": engine,
         "display_name": LOCAL_ASR_DISPLAY_NAMES.get(engine, engine),
@@ -544,4 +595,25 @@ def get_engine_status(engine: str) -> dict:
         "model_cached": bool(get_local_model_path(engine)) if engine != "qwen3-asr" else is_qwen3_asr_ready(),
         "ready": is_asr_cached(engine),
         "missing": get_missing_models(engine),
+    }
+
+
+def get_all_local_models_status() -> dict:
+    asr_engines = {}
+    for engine in LOCAL_ASR_ENGINES:
+        try:
+            asr_engines[engine] = get_engine_status(engine)
+        except Exception as e:
+            asr_engines[engine] = {
+                "engine": engine,
+                "display_name": LOCAL_ASR_DISPLAY_NAMES.get(engine, engine),
+                "ready": False,
+                "error": str(e),
+            }
+    translation_engines = {
+        "hymt2": get_hymt2_status()
+    }
+    return {
+        "asr": asr_engines,
+        "translation": translation_engines,
     }

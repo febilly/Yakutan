@@ -136,6 +136,8 @@ def _primary_config_signature(cfg: TranslationConfig) -> tuple:
     if api_type == "hymt2":
         signature.extend(
             [
+                ("hymt2_backend", cfg.hymt2_backend),
+                ("hymt2_local_device", cfg.hymt2_local_device),
                 ("hymt2_websocket_url", cfg.hymt2_websocket_url),
                 ("hymt2_timeout", cfg.hymt2_timeout),
                 ("hymt2_max_retries", cfg.hymt2_max_retries),
@@ -219,6 +221,8 @@ def _build_api(api_class: type[BaseTranslationAPI], cfg: TranslationConfig) -> B
         kwargs["use_international"] = cfg.use_international_endpoint
 
     elif issubclass(api_class, HyMT2API):
+        kwargs["backend"] = cfg.hymt2_backend
+        kwargs["local_device"] = cfg.hymt2_local_device
         kwargs["websocket_url"] = cfg.hymt2_websocket_url
         kwargs["timeout"] = cfg.hymt2_timeout
         kwargs["max_retries"] = cfg.hymt2_max_retries
@@ -280,6 +284,8 @@ def _is_primary_config_changed(state, cfg: TranslationConfig) -> bool:
         or cfg.llm_parallel_fastest_mode != getattr(
             state, "_last_parallel_fastest_mode", None
         )
+        or getattr(state, "_last_hymt2_backend", None) != cfg.hymt2_backend
+        or getattr(state, "_last_hymt2_local_device", None) != cfg.hymt2_local_device
         or getattr(state, "_last_hymt2_websocket_url", None) != cfg.hymt2_websocket_url
         or getattr(state, "_last_hymt2_timeout", None) != cfg.hymt2_timeout
         or getattr(state, "_last_hymt2_max_retries", None) != cfg.hymt2_max_retries
@@ -416,6 +422,8 @@ def reinitialize_translator(state, cfg: TranslationConfig) -> None:
     state._last_dashscope_api_key_fingerprint = _secret_fingerprint(cfg.dashscope_api_key)
     state._last_use_international_endpoint = cfg.use_international_endpoint
     state._last_parallel_fastest_mode = cfg.llm_parallel_fastest_mode
+    state._last_hymt2_backend = cfg.hymt2_backend
+    state._last_hymt2_local_device = cfg.hymt2_local_device
     state._last_hymt2_websocket_url = cfg.hymt2_websocket_url
     state._last_hymt2_timeout = cfg.hymt2_timeout
     state._last_hymt2_max_retries = cfg.hymt2_max_retries

@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
+import re
 import threading
 import time
 from typing import Dict, List, Optional
@@ -40,20 +42,106 @@ PROTOCOL_VERSION = 1
 MAX_HISTORY = 8        # 服务端接受 <=10 条，取 8 与本应用上下文窗口一致
 HISTORY_KEEP = 20      # 本地保留的完成句对上限（截断后再取最新一条发送）
 
+LANGUAGE_NAMES: Dict[str, str] = {
+    "zh": "Chinese",
+    "en": "English",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "yue": "Cantonese",
+    "fr": "French",
+    "de": "German",
+    "es": "Spanish",
+    "ru": "Russian",
+    "it": "Italian",
+}
+
+
+def _sanitize_local_device(value) -> str:
+    """把运行位置收敛成 'auto' / 'cpu' / 'vulkan:N'（不触碰 GPU 运行时）。"""
+    normalized = str(value or "").strip().lower()
+    if normalized == "cpu":
+        return "cpu"
+    if normalized.startswith("vulkan:") and normalized[len("vulkan:"):].isdigit():
+        return normalized
+    return "auto"
+
+
+class HyMT2LocalEngine:
+    """本地 Hy-MT2 GGUF 推理引擎（基于 llama.cpp / LlamaModel）。"""
+
+    def __init__(self, model_path: Optional[str] = None, device: str = "auto"):
+        from local_asr.gpu_devices import describe_device, resolve_device
+        from local_asr.model_manager import (
+            get_hymt2_model_path,
+            prepare_qwen_llama_runtime_env,
+        )
+
+        prepare_qwen_llama_runtime_env()
+        path = model_path or get_hymt2_model_path()
+        if not path or not Path(path).is_file():
+            raise FileNotFoundError(f"Hy-MT2 本地模型文件未找到: {path}")
+
+        from local_asr.vendor.qwen_asr_gguf.inference.llama import (
+            LlamaContext,
+            LlamaModel,
+            LlamaSampler,
+        )
+
+        # 解析运行位置：cpu -> 不卸载任何层；auto/vulkan:N -> 只用一张 GPU
+        # （load_model 已固定 split_mode = NONE，不会把层切到核显上）
+        n_gpu_layers, main_gpu, self.device = resolve_device(device)
+        logger.info(
+            "Hy-MT2 本地引擎运行位置: %s -> %s",
+            self.device,
+            describe_device(self.device),
+        )
+
+        self._LlamaSampler = LlamaSampler
+        self.model = LlamaModel(str(path), n_gpu_layers=n_gpu_layers, main_gpu=main_gpu)
+        self.ctx = LlamaContext(self.model, n_ctx=2048)
+        self.eos_token = self.model.token_eos()
+        self.stop_ids = {self.eos_token}
+        for s in (
+            "<｜hy_place▁holder▁no▁2｜>",
+            "<｜hy_User｜>",
+            "<｜hy_Assistant｜>",
+            "<|im_end|>",
+            "<|endoftext|>",
+            "</s>",
+        ):
+            tid = self.model.token_to_id(s)
+            if tid >= 0:
+                self.stop_ids.add(tid)
+        self._engine_lock = threading.Lock()
+
+    def generate(self, prompt: str, max_tokens: int = 128) -> str:
+        with self._engine_lock:
+            self.ctx.clear_kv_cache()
+            tokens = self.model.tokenize(prompt, add_special=False, parse_special=True)
+            for i, token in enumerate(tokens):
+                self.ctx.decode_token(token, pos=i)
+
+            sampler = self._LlamaSampler(temperature=0.0)
+            curr_pos = len(tokens)
+            out_tokens = []
+            for _ in range(max_tokens):
+                next_token = sampler.sample(self.ctx, idx=-1)
+                if next_token in self.stop_ids:
+                    break
+                out_tokens.append(next_token)
+                self.ctx.decode_token(next_token, pos=curr_pos)
+                curr_pos += 1
+
+            raw = self.model.detokenize(out_tokens)
+            clean = re.split(r"<[|｜].*?[|｜]>", raw)[0].strip()
+            for prefix in ("Translation:", "翻译：", "译文："):
+                if clean.startswith(prefix):
+                    clean = clean[len(prefix) :].strip()
+            return clean
+
 
 class HyMT2API(BaseTranslationAPI):
-    """Hy-MT2 实时流式修订翻译（WebSocket 无状态协议）。
-
-    连接级语义：
-
-    - 第一条消息必须是 ``init``（协商连接级默认方向 / prompt 模式）；
-    - 之后每条 ``update`` 都完整自携带修订链，服务端无状态；
-    - 连接可随时断开重连（本类会在下次请求时自动重连并重新 init）。
-
-    语言方向：``translate()`` 的 ``source_language``/``target_language``
-    每次都可不同（方向随请求切换，无需重连）。``detected_source_language``
-    kwarg（本应用识别器已解析出的具体语言码）优先于 ``source_language``。
-    """
+    """Hy-MT2 实时流式修订翻译（支持 WebSocket 外部服务与本地 GGUF 推理）。"""
 
     SUPPORTS_CONTEXT = True
 
@@ -66,13 +154,23 @@ class HyMT2API(BaseTranslationAPI):
         timeout: float = 30.0,
         max_retries: int = 3,
         proxy_url: Optional[str] = None,
+        backend: str = "api",
+        model_path: Optional[str] = None,
+        local_device: str = "auto",
     ):
+        self.backend = (backend or "api").lower().strip()
         self.websocket_url = (websocket_url or "").strip()
         self.timeout = float(timeout or 30.0)
         self.max_retries = int(max_retries if max_retries is not None else 3)
-        self._proxy_url = proxy_url  # 透传给 websockets（本地服务通常无需代理）
+        self._proxy_url = proxy_url
+        self._model_path = model_path
+        self.local_device = _sanitize_local_device(local_device)
+        self._local_engine: Optional[HyMT2LocalEngine] = None
 
         self._lock = threading.Lock()
+        self._ws = None
+        self._boot_ms = time.time() * 1000
+        self.reset_session()
         self._ws = None
         self._boot_ms = time.time() * 1000
         self.reset_session()
@@ -245,11 +343,6 @@ class HyMT2API(BaseTranslationAPI):
     ) -> str:
         if not text or not text.strip():
             return ""
-        if not self.websocket_url:
-            return (
-                "[ERROR] Hy-MT2: WebSocket 地址未配置，请在网页「翻译API设置」"
-                "中填写 Hy-MT2 WebSocket 地址（或设置 HYMT2_WEBSOCKET_URL）。"
-            )
 
         is_partial = bool(kwargs.get("is_partial", False))
         detected_source = kwargs.get("detected_source_language")
@@ -258,6 +351,29 @@ class HyMT2API(BaseTranslationAPI):
             self._last_target_lang or self.DEFAULT_TARGET_LANG
         )
         history = self._history_from_context_pairs(context_pairs)
+
+        if self.backend == "local":
+            try:
+                if self._local_engine is None:
+                    self._local_engine = HyMT2LocalEngine(
+                        self._model_path, device=self.local_device
+                    )
+                return self._translate_local(
+                    text=text,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    is_partial=is_partial,
+                    history=history,
+                )
+            except Exception as e:
+                logger.warning("Hy-MT2 local translate failed: %s", e)
+                return f"[ERROR] Hy-MT2 本地模型错误: {e}"
+
+        if not self.websocket_url:
+            return (
+                "[ERROR] Hy-MT2: WebSocket 地址未配置，请在网页「翻译API设置」"
+                "中填写 Hy-MT2 WebSocket 地址（或设置 HYMT2_WEBSOCKET_URL）。"
+            )
 
         try:
             payload, previous_translation = self._build_update(
@@ -288,6 +404,73 @@ class HyMT2API(BaseTranslationAPI):
         except Exception as e:
             logger.warning("Hy-MT2 translate failed: %s", e)
             return f"[ERROR] Hy-MT2: {e}"
+
+    def _translate_local(
+        self,
+        *,
+        text: str,
+        source_lang: str,
+        target_lang: str,
+        is_partial: bool,
+        history: List[List[str]],
+    ) -> str:
+        with self._lock:
+            if self._last_final:
+                self._prev_source = None
+                self._prev_translation = None
+
+            prev_src = self._prev_source
+            prev_trans = self._prev_translation
+            recent_history = [p[0] for p in (self._history + history)][-MAX_HISTORY:]
+
+            source_name = LANGUAGE_NAMES.get(source_lang, source_lang)
+            target_name = LANGUAGE_NAMES.get(target_lang, target_lang)
+
+            if not recent_history and not prev_src and not prev_trans:
+                direction = f"from {source_name} into {target_name}"
+                content = (
+                    f"Translate the following text {direction}. Note that you should "
+                    "only output the translated result without any additional explanation:\n\n"
+                    f"{text}"
+                )
+            else:
+                background = []
+                if recent_history:
+                    background.append(
+                        "Recent source utterances:\n" + "\n".join(recent_history)
+                    )
+                if prev_src:
+                    background.append(
+                        "Previous version of the current source:\n" + prev_src
+                    )
+                if prev_trans:
+                    background.append(
+                        "Previous translation of the current source:\n" + prev_trans
+                    )
+                background.append(
+                    "When the source meaning has not changed, preserve the still-correct prefix "
+                    "of the previous translation whenever possible. When content is added or "
+                    "corrected, accuracy and completeness take priority."
+                )
+                direction = f"from {source_name} into {target_name}"
+                content = (
+                    "[Background Information]\n"
+                    + "\n\n".join(background)
+                    + f"\n\nPlease translate the following text {direction}, taking the provided "
+                    "background information into consideration.\n\n[Source Text]\n"
+                    + text
+                )
+
+            prompt = f"<｜hy_User｜>{content}<｜hy_Assistant｜>"
+            display = self._local_engine.generate(prompt) if self._local_engine else ""
+
+            self._prev_source = text
+            self._prev_translation = display
+            self._last_final = not is_partial
+            if not is_partial and text and display:
+                self._history.append([text, display])
+                self._history = self._history[-HISTORY_KEEP:]
+            return display
 
     def _build_update(
         self,

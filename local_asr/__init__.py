@@ -11,10 +11,12 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 LOCAL_ASR_UI_ENV = "YAKUTAN_LOCAL_ASR_UI"
 
 LOCAL_ASR_ENGINES = ("sensevoice", "qwen3-asr")
+LOCAL_MT_ENGINES = ("hymt2",)
 
 LOCAL_ASR_DISPLAY_NAMES: Dict[str, str] = {
     "sensevoice": "SenseVoice Small",
     "qwen3-asr": "Qwen3-ASR 1.7B",
+    "hymt2": "Hy-MT2 1.8B",
 }
 
 COMMON_RUNTIME_MODULES = (
