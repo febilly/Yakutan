@@ -95,6 +95,23 @@ class _StubEngine:
         return {"text": "最终一句", "language": "zh", "language_name": "zh"}
 
 
+class _CountingStubEngine:
+    """每次识别返回不同文本，便于区分"最终结果是复用还是重新识别"。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def set_language(self, language: str) -> None:
+        return None
+
+    def unload(self) -> None:
+        return None
+
+    def transcribe(self, audio: np.ndarray) -> dict | None:
+        self.calls += 1
+        return {"text": f"复用测试句{self.calls}", "language": "zh", "language_name": "zh"}
+
+
 class LocalAsrTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -294,6 +311,162 @@ class LocalAsrTests(unittest.TestCase):
             )
         finally:
             recognizer.stop()
+
+    def _feed_until_open_segment(
+        self,
+        recognizer: "LocalSpeechRecognizer",
+        audio: np.ndarray,
+        sr: int,
+        need_sec: float = 1.2,
+    ) -> None:
+        """小步喂入样本音频，直到落在一个"当前开口且尾部有声"的 VAD 段上：
+        缓冲已累积 >= need_sec，且 VAD 仍在说话、尾部不是长静音。
+        样本音频内部的自然间隙可能提前断句，这里跨间隙继续喂直到条件满足。"""
+        head_end = min(6 * sr, len(audio))
+        offset = 0
+        step = sr // 5
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline:
+            if offset < head_end:
+                end = min(offset + step, head_end)
+                for chunk in chunk_pcm16(audio[offset:end]):
+                    recognizer.send_audio_frame(chunk)
+                    time.sleep(0.005)
+                offset = end
+            with recognizer._lock:
+                peek = recognizer._vad.peek_buffer()
+                tail_voiced = (
+                    recognizer._vad._is_speaking
+                    and recognizer._vad._silence_counter <= 2
+                )
+            if peek is not None and peek[1] >= need_sec and tail_voiced:
+                # 排空积压：快速喂入会让队列堆积，而队列积压 >= 8 时
+                # 增量触发会被"防陈旧更新"闸门跳过，受控静音阶段前必须先排空。
+                time.sleep(0.3)
+                return
+            time.sleep(0.02)
+        raise AssertionError("超时：未找到满足条件的开口语音段")
+
+    def test_final_reuses_partial_when_no_new_voiced_audio(self) -> None:
+        """句尾短停顿已触发过中间结果且之后无新语音时，终句应直接复用，
+        不再对整句音频重复识别一次。"""
+        audio, sample_rate = load_audio_file(SAMPLE_WAV)
+        if sample_rate != 16000:
+            self.skipTest("测试音频采样率不是 16kHz")
+
+        sr = 16000
+        callback = CollectingCallback()
+        engine = _CountingStubEngine()
+        recognizer = LocalSpeechRecognizer(callback=callback, sample_rate=16000, source_language="auto")
+        recognizer._engine = engine
+        recognizer._ensure_engine = lambda: engine  # type: ignore[assignment]
+        recognizer.start()
+        try:
+            self._feed_until_open_segment(recognizer, audio, sr)
+            calls_before = engine.calls
+
+            # 400ms 短静音（小于 800ms 断句阈值）→ 触发一次增量更新
+            for chunk in chunk_pcm16(np.zeros(int(0.4 * sr), dtype=np.float32)):
+                recognizer.send_audio_frame(chunk)
+                time.sleep(0.01)
+
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline and not any(
+                not event.is_final for event in callback.events
+            ):
+                time.sleep(0.05)
+            partial = next(
+                (e for e in callback.events if not e.is_final), None,
+            )
+            self.assertIsNotNone(partial, "短停顿未触发增量更新")
+            events_after_partial = len(callback.events)
+
+            # 再追加 1.2s 纯静音（累计越过 800ms 断句阈值，且不再出现任何语音）
+            # → 终句应复用中间结果
+            for chunk in chunk_pcm16(np.zeros(int(1.2 * sr), dtype=np.float32)):
+                recognizer.send_audio_frame(chunk)
+                time.sleep(0.01)
+
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline and not any(
+                event.is_final for event in callback.events[events_after_partial:]
+            ):
+                time.sleep(0.05)
+        finally:
+            recognizer.stop()
+
+        self.assertFalse(callback.errors)
+        final = next(
+            event for event in callback.events[events_after_partial:] if event.is_final
+        )
+        self.assertEqual(final.text, partial.text, "无声续时终句应复用中间结果文本")
+        self.assertEqual(
+            engine.calls,
+            calls_before + 1,
+            "复用场景下不应再对整句音频重复识别",
+        )
+
+    def test_final_retranscribes_when_new_voiced_after_partial(self) -> None:
+        """中间结果之后又出现新语音时，整句音频与快照不等价，终句必须重新识别。"""
+        audio, sample_rate = load_audio_file(SAMPLE_WAV)
+        if sample_rate != 16000:
+            self.skipTest("测试音频采样率不是 16kHz")
+
+        sr = 16000
+        callback = CollectingCallback()
+        engine = _CountingStubEngine()
+        recognizer = LocalSpeechRecognizer(callback=callback, sample_rate=16000, source_language="auto")
+        recognizer._engine = engine
+        recognizer._ensure_engine = lambda: engine  # type: ignore[assignment]
+        recognizer.start()
+        try:
+            self._feed_until_open_segment(recognizer, audio, sr)
+
+            for chunk in chunk_pcm16(np.zeros(int(0.4 * sr), dtype=np.float32)):
+                recognizer.send_audio_frame(chunk)
+                time.sleep(0.01)
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline and not any(
+                not event.is_final for event in callback.events
+            ):
+                time.sleep(0.05)
+            partial = next(
+                (e for e in callback.events if not e.is_final), None,
+            )
+            self.assertIsNotNone(partial, "短停顿未触发增量更新")
+            events_after_partial = len(callback.events)
+            calls_before_more = engine.calls
+
+            # 继续说话（新语音使快照失效）+ 尾静音断句 → 终句必须重新识别
+            more_offset = min(2 * sr, max(0, len(audio) - 2 * sr))
+            more = audio[more_offset : more_offset + 2 * sr]
+            for chunk in chunk_pcm16(more):
+                recognizer.send_audio_frame(chunk)
+                time.sleep(0.01)
+            for chunk in chunk_pcm16(np.zeros(int(1.2 * sr), dtype=np.float32)):
+                recognizer.send_audio_frame(chunk)
+                time.sleep(0.01)
+
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline and not any(
+                event.is_final for event in callback.events[events_after_partial:]
+            ):
+                time.sleep(0.05)
+        finally:
+            recognizer.stop()
+
+        self.assertFalse(callback.errors)
+        final = next(
+            event for event in callback.events[events_after_partial:] if event.is_final
+        )
+        self.assertGreaterEqual(
+            engine.calls,
+            calls_before_more + 1,
+            "有新语音时终句应重新识别，而不是复用中间结果",
+        )
+        self.assertNotEqual(
+            final.text, partial.text, "终句文本应来自重新识别而非复用上次中间结果"
+        )
 
     def test_long_audio_excerpt_vad_or_recognizer_smoke(self) -> None:
         if not LONG_AUDIO.exists():

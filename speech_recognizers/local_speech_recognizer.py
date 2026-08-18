@@ -53,6 +53,12 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         self._last_partial_text = ""
         self._last_partial_time = 0.0
         self._silence_trigger_armed = True
+        # 有声内容计数：每处理到一个有声 VAD 分块 +1。
+        # 最近一次"已完成"中间结果入队时的快照值若与当前一致，
+        # 说明该快照之后缓冲里只追加了静音——中间结果已覆盖整句。
+        self._voiced_chunk_seq = 0
+        self._last_partial_voiced_seq = -1
+        self._partial_pending_voiced_seq = -1
         self._last_request_id = f"local-{self._engine_name}"
         self._stream_id = 0
         self._corpus_text = (corpus_text or "").strip()
@@ -164,12 +170,18 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             text, raw = payload
             with self._lock:
                 if is_final:
-                    self._last_partial_text = ""
-                    self._stream_id += 1
-                    self._emit_result(text, is_final=True, raw=raw)
-                elif stream_id == self._stream_id and text != self._last_partial_text:
-                    self._last_partial_text = text
-                    self._emit_result(text, is_final=False, raw=raw)
+                    self._emit_final_result(text, raw)
+                elif stream_id == self._stream_id:
+                    # 中间结果完成：记录其快照对应的有声计数，供整句复用时比对。
+                    self._last_partial_voiced_seq = self._partial_pending_voiced_seq
+                    if text != self._last_partial_text:
+                        self._last_partial_text = text
+                        self._emit_result(text, is_final=False, raw=raw)
+        else:
+            with self._lock:
+                if is_final or stream_id == self._stream_id:
+                    # 空结果/失败：作废"可复用"资格，避免用上更早的旧文本。
+                    self._last_partial_voiced_seq = -1
 
         with self._lock:
             self._try_start_transcribe_locked()
@@ -222,6 +234,8 @@ class LocalSpeechRecognizer(SpeechRecognizer):
                 self._waiting_final_audio = copy
             else:
                 self._waiting_partial_audio = copy
+                # 记录这份快照入队时的有声计数（完成时回写到 _last_partial_voiced_seq）。
+                self._partial_pending_voiced_seq = self._voiced_chunk_seq
             self._try_start_transcribe_locked()
 
     def _maybe_emit_partial(self) -> None:
@@ -271,16 +285,44 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         self._last_partial_time = now
         self._enqueue_transcribe(audio, is_final=False)
 
+    def _try_reuse_partial_as_final(self, segment: np.ndarray) -> str | None:
+        """整句收束时，若最近一次已完成的中间结果之后没有任何新的有声内容
+        （缓冲只是又追加了静音），该中间结果已覆盖整句，直接复用它作为
+        最终结果，省掉一次重复的整句识别。"""
+        if not getattr(config, "LOCAL_INCREMENTAL_ASR", True):
+            return None
+        if self._voiced_chunk_seq != self._last_partial_voiced_seq:
+            return None
+        text = (self._last_partial_text or "").strip()
+        if not text:
+            return None
+        # print("[本地ASR] 终句复用中间结果（未出现新的有声内容，省一次识别）")
+        return text
+
+    def _emit_final_result(self, text: str, raw: dict | None) -> None:
+        # 调用方需持有 self._lock
+        self._last_partial_text = ""
+        self._last_partial_voiced_seq = -1
+        self._stream_id += 1
+        self._emit_result(text, is_final=True, raw=raw)
+
     def _process_chunk(self, chunk: np.ndarray) -> None:
         if self._vad._is_speaking and self._vad._speech_samples >= self._input_cap_samples():
             chunk = np.zeros_like(chunk)
         was_speaking = self._vad._is_speaking
         speech_segment = self._vad.process_chunk(chunk)
+        if self._vad._is_speaking and self._vad._silence_counter == 0:
+            # 本分块是有声内容：此后缓冲与任何既有中间结果快照不再等价。
+            self._voiced_chunk_seq += 1
         if speech_segment is not None:
             # 整句提交（断句）：下一句的保底计时与短停顿触发从此处重新计。
             self._last_partial_time = time.monotonic()
             self._silence_trigger_armed = True
-            self._enqueue_transcribe(speech_segment, is_final=True)
+            reused = self._try_reuse_partial_as_final(speech_segment)
+            if reused is not None:
+                self._emit_final_result(reused, None)
+            else:
+                self._enqueue_transcribe(speech_segment, is_final=True)
             return
         if self._vad._is_speaking:
             if not was_speaking:
@@ -323,7 +365,11 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             self._pending_samples = np.array([], dtype=np.float32)
         segment = self._vad.force_flush() if self._vad._is_speaking else self._vad.flush()
         if segment is not None:
-            self._enqueue_transcribe(segment, is_final=True)
+            reused = self._try_reuse_partial_as_final(segment)
+            if reused is not None:
+                self._emit_final_result(reused, None)
+            else:
+                self._enqueue_transcribe(segment, is_final=True)
         self._last_partial_text = ""
         # 新句子从此刻重新计时：保底间隔从新句子开始计而不是从进程启动计。
         self._last_partial_time = time.monotonic()
@@ -364,6 +410,9 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             self._last_partial_text = ""
             self._last_partial_time = time.monotonic()
             self._silence_trigger_armed = True
+            self._voiced_chunk_seq = 0
+            self._last_partial_voiced_seq = -1
+            self._partial_pending_voiced_seq = -1
             self._waiting_partial_audio = None
             self._waiting_final_audio = None
             self._active_transcribe_future = None
