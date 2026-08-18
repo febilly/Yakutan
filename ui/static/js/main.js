@@ -253,12 +253,13 @@ function getLocalAsrConfigFromForm() {
         engine: document.getElementById('local-asr-engine')?.value || 'sensevoice',
         device: getDeviceSelectValue('local-asr-device'),
         incremental_asr: document.getElementById('local-incremental-asr')?.checked ?? true,
-        incremental_trigger_silence_ms:
-            parseInt(document.getElementById('local-incremental-trigger-silence')?.value || '100', 10),
+        incremental_trigger_silence:
+            parseInt(document.getElementById('local-incremental-trigger-silence')?.value || '100', 10) / 1000,
+        // 表单以毫秒为单位；对外配置接口沿用秒，在此换算
         incremental_min_interval:
-            parseFloat(document.getElementById('local-incremental-min-interval')?.value || '1'),
+            parseFloat(document.getElementById('local-incremental-min-interval')?.value || '1000') / 1000,
         incremental_fallback_interval:
-            parseFloat(document.getElementById('local-incremental-fallback-interval')?.value || '4'),
+            parseFloat(document.getElementById('local-incremental-fallback-interval')?.value || '4000') / 1000,
     };
 }
 
@@ -272,30 +273,37 @@ function applyLocalAsrConfig(config) {
         document.getElementById('local-incremental-asr').checked = config.incremental_asr ?? true;
     }
     if (document.getElementById('local-incremental-trigger-silence')) {
-        document.getElementById('local-incremental-trigger-silence').value =
-            config.incremental_trigger_silence_ms ?? 100;
+        // 新接口为秒；旧保存值 incremental_trigger_silence_ms 为毫秒，兼容迁移
+        const triggerMs = config.incremental_trigger_silence != null
+            ? config.incremental_trigger_silence * 1000
+            : (config.incremental_trigger_silence_ms ?? 100);
+        document.getElementById('local-incremental-trigger-silence').value = triggerMs;
     }
+    // 表单以毫秒为单位展示；配置接口沿用秒
     if (document.getElementById('local-incremental-min-interval')) {
         document.getElementById('local-incremental-min-interval').value =
-            config.incremental_min_interval ?? 1.0;
+            (config.incremental_min_interval ?? 1.0) * 1000;
     }
     if (document.getElementById('local-incremental-fallback-interval')) {
         document.getElementById('local-incremental-fallback-interval').value =
-            config.incremental_fallback_interval ?? 4.0;
+            (config.incremental_fallback_interval ?? 4.0) * 1000;
     }
     updateLocalAsrEngineHint();
     updateLocalAsrDeviceState();
 }
 
 function getVadConfigFromForm() {
+    // 表单以毫秒为单位；对外配置接口沿用秒，在此换算
+    const secondsFromMs = (id, defaultMs) =>
+        parseFloat(document.getElementById(id)?.value || String(defaultMs)) / 1000;
     return {
         enabled: document.getElementById('vad-enabled')?.checked ?? true,
         mode: document.getElementById('vad-mode')?.value || 'silero',
         threshold: parseFloat(document.getElementById('vad-threshold')?.value || '0.5'),
-        min_speech_duration: parseFloat(document.getElementById('vad-min-speech-duration')?.value || '1'),
-        max_speech_duration: parseFloat(document.getElementById('vad-max-speech-duration')?.value || '30'),
-        silence_duration: parseFloat(document.getElementById('vad-silence-duration')?.value || '0.8'),
-        pre_speech_duration: parseFloat(document.getElementById('vad-pre-speech-duration')?.value || '0.2'),
+        min_speech_duration: secondsFromMs('vad-min-speech-duration', 1000),
+        max_speech_duration: secondsFromMs('vad-max-speech-duration', 30000),
+        silence_duration: secondsFromMs('vad-silence-duration', 800),
+        pre_speech_duration: secondsFromMs('vad-pre-speech-duration', 200),
     };
 }
 
@@ -346,17 +354,18 @@ function applyVadConfig(config) {
     if (document.getElementById('vad-threshold')) {
         document.getElementById('vad-threshold').value = vad.threshold ?? 0.5;
     }
+    // 表单以毫秒为单位展示；配置接口沿用秒
     if (document.getElementById('vad-min-speech-duration')) {
-        document.getElementById('vad-min-speech-duration').value = vad.min_speech_duration ?? 1.0;
+        document.getElementById('vad-min-speech-duration').value = (vad.min_speech_duration ?? 1.0) * 1000;
     }
     if (document.getElementById('vad-max-speech-duration')) {
-        document.getElementById('vad-max-speech-duration').value = vad.max_speech_duration ?? 30.0;
+        document.getElementById('vad-max-speech-duration').value = (vad.max_speech_duration ?? 30.0) * 1000;
     }
     if (document.getElementById('vad-silence-duration')) {
-        document.getElementById('vad-silence-duration').value = vad.silence_duration ?? 0.8;
+        document.getElementById('vad-silence-duration').value = (vad.silence_duration ?? 0.8) * 1000;
     }
     if (document.getElementById('vad-pre-speech-duration')) {
-        document.getElementById('vad-pre-speech-duration').value = vad.pre_speech_duration ?? 0.2;
+        document.getElementById('vad-pre-speech-duration').value = (vad.pre_speech_duration ?? 0.2) * 1000;
     }
 }
 
@@ -2765,7 +2774,7 @@ function loadConfigFromLocalStorage() {
 
             if (config.mic_control) {
                 document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control ?? false;
-                document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds || 0.2;
+                document.getElementById('mute-delay').value = (config.mic_control.mute_delay_seconds || 0.2) * 1000;
                 document.getElementById('enable-double-mute-clear').checked = config.mic_control.enable_double_mute_clear ?? true;
 
                 const micSelect = document.getElementById('mic-device');
@@ -2942,7 +2951,7 @@ function loadDefaultConfig() {
 
     // 麦克风控制
     document.getElementById('enable-mic-control').checked = false;
-    document.getElementById('mute-delay').value = 0.2;
+    document.getElementById('mute-delay').value = 200;
     document.getElementById('enable-double-mute-clear').checked = true;
 
     // 麦克风设备
@@ -2969,7 +2978,7 @@ function loadDefaultConfig() {
             engine: 'sensevoice',
             device: getDefaultDeviceValue(),
             incremental_asr: true,
-            incremental_trigger_silence_ms: 100,
+            incremental_trigger_silence: 0.1,
             incremental_min_interval: 1.0,
             incremental_fallback_interval: 4.0,
         });
@@ -3120,7 +3129,7 @@ function applyServerConfigPayload(config) {
     }
 
     document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control;
-    document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds;
+    document.getElementById('mute-delay').value = (config.mic_control.mute_delay_seconds ?? 0.2) * 1000;
     document.getElementById('enable-double-mute-clear').checked = config.mic_control.enable_double_mute_clear ?? true;
     const micSelect = document.getElementById('mic-device');
     if (micSelect && config.mic_control) {
@@ -3339,7 +3348,7 @@ function saveConfigToLocalStorage() {
             },
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
-                mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value),
+                mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value || '200') / 1000,
                 enable_double_mute_clear: document.getElementById('enable-double-mute-clear').checked,
                 mic_device_index: (() => {
                     const v = document.getElementById('mic-device') ? document.getElementById('mic-device').value : '';
@@ -3592,7 +3601,7 @@ async function saveConfig(autoSave = false) {
             },
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
-                mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value),
+                mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value || '200') / 1000,
                 enable_double_mute_clear: document.getElementById('enable-double-mute-clear').checked,
                 mic_device_index: (() => {
                     const v = document.getElementById('mic-device') ? document.getElementById('mic-device').value : '';
