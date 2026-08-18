@@ -374,20 +374,45 @@ function ensureLocalInferenceBackendOption() {
     if (!select) return;
     const t = window.i18n ? window.i18n.t : (key) => key;
     let option = select.querySelector('option[value="local"]');
+    if (!option) {
+        option = document.createElement('option');
+        option.value = 'local';
+        select.appendChild(option);
+    }
     if (isLocalInferenceUiEnabled()) {
-        if (!option) {
-            option = document.createElement('option');
-            option.value = 'local';
-            option.setAttribute('data-i18n', 'asr.local');
-            select.appendChild(option);
-        }
+        option.disabled = false;
+        option.setAttribute('data-i18n', 'asr.local');
         option.textContent = t('asr.local');
-    } else if (option) {
+    } else {
         if (select.value === 'local') {
             select.value = 'qwen';
         }
-        option.remove();
+        option.disabled = true;
+        // 去掉 data-i18n，避免切语言时被覆盖成不带「需要 Local 版本」的原始文案
+        option.removeAttribute('data-i18n');
+        option.textContent = t('asr.local') + ' ' + t('local.needsLocalVersion');
     }
+}
+
+function ensureHymt2LocalBackendOption() {
+    const select = document.getElementById('hymt2-backend-mode');
+    if (!select) return;
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const option = select.querySelector('option[value="local"]');
+    if (!option) return;
+    if (isLocalInferenceUiEnabled()) {
+        option.disabled = false;
+        option.setAttribute('data-i18n', 'option.hymt2BackendLocal');
+        option.textContent = t('option.hymt2BackendLocal');
+        return;
+    }
+    if (select.value === 'local') {
+        select.value = 'api';
+        onHymt2BackendModeChange(false);
+    }
+    option.disabled = true;
+    option.removeAttribute('data-i18n');
+    option.textContent = t('option.hymt2BackendLocal') + ' ' + t('local.needsLocalVersion');
 }
 
 function sanitizeAsrBackendValue(value) {
@@ -592,6 +617,7 @@ function updateLocalInferenceUiVisibility() {
     const card = document.getElementById('local-inference-card');
     if (!card) return;
     ensureLocalInferenceBackendOption();
+    ensureHymt2LocalBackendOption();
     if (isLocalInferenceUiEnabled()) {
         card.style.display = 'block';
         updateLocalInferenceEngineHint();
@@ -2714,7 +2740,11 @@ function loadConfigFromLocalStorage() {
                 }
                 const hymt2BackendEl = document.getElementById('hymt2-backend-mode');
                 if (hymt2BackendEl) {
-                    hymt2BackendEl.value = config.translation.hymt2_backend || 'api';
+                    const hymt2BackendValue = config.translation.hymt2_backend || 'api';
+                    // 标准版无本地推理运行时：后端配置里的 'local' 回退到 'api'
+                    hymt2BackendEl.value = (hymt2BackendValue === 'local' && !isLocalInferenceUiEnabled())
+                        ? 'api'
+                        : hymt2BackendValue;
                 }
                 const hymt2WsUrlEl = document.getElementById('hymt2-ws-url');
                 if (hymt2WsUrlEl) {

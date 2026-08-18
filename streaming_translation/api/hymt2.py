@@ -57,6 +57,18 @@ LANGUAGE_NAMES: Dict[str, str] = {
 }
 
 
+def _local_backend_available() -> bool:
+    """本地推理后端是否可用（仅本地推理版打包 / 源码模式带 local_inference 运行时）。"""
+    try:
+        from local_inference import is_local_inference_ui_enabled
+    except Exception:
+        return False
+    try:
+        return bool(is_local_inference_ui_enabled())
+    except Exception:
+        return False
+
+
 def _sanitize_local_device(value) -> str:
     """把运行位置收敛成 'auto' / 'cpu' / 'vulkan:N'（不触碰 GPU 运行时）。"""
     normalized = str(value or "").strip().lower()
@@ -338,6 +350,11 @@ class HyMT2API(BaseTranslationAPI):
         local_device: str = "auto",
     ):
         self.backend = (backend or "api").lower().strip()
+        if self.backend == "local" and not _local_backend_available():
+            logger.warning(
+                "Hy-MT2 本地推理运行时不可用（标准版不含本地模型支持），已回退到 API 后端"
+            )
+            self.backend = "api"
         self.websocket_url = (websocket_url or "").strip()
         self.timeout = float(timeout or 30.0)
         self.max_retries = int(max_retries if max_retries is not None else 3)
