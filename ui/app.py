@@ -418,6 +418,8 @@ def get_config_dict():
             'fallback_language': config.FALLBACK_LANGUAGE,
             'api_type': config.TRANSLATION_API_TYPE,
             'translate_partial_results': getattr(config, 'TRANSLATE_PARTIAL_RESULTS', True),
+            'llm_streaming': bool(getattr(config, 'LLM_STREAMING_PREF', True)),
+            'hymt2_streaming': bool(getattr(config, 'HYMT2_STREAMING_PREF', True)),
             'llm_template': getattr(
                 config, 'LLM_TEMPLATE', config.DEFAULT_LLM_TEMPLATE
             ),
@@ -569,6 +571,10 @@ def update_config(config_data):
                     )
             elif 'translate_partial_results' in trans:
                 config.TRANSLATE_PARTIAL_RESULTS = bool(trans['translate_partial_results'])
+            if 'llm_streaming' in trans:
+                config.LLM_STREAMING_PREF = bool(trans['llm_streaming'])
+            if 'hymt2_streaming' in trans:
+                config.HYMT2_STREAMING_PREF = bool(trans['hymt2_streaming'])
             if 'hymt2_backend' in trans:
                 config.HYMT2_BACKEND = (trans['hymt2_backend'] or 'api').strip()
             if 'hymt2_local_device' in trans:

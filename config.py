@@ -314,6 +314,12 @@ ENABLE_TRANSLATION = True  # True: 识别后翻译文本
 # 或 'hymt2'（且开启流式开关）时启用
 TRANSLATE_PARTIAL_RESULTS = True
 
+# 网页「流式翻译模式」开关的**各模型独立偏好**。TRANSLATE_PARTIAL_RESULTS 只记录当前
+# 生效模型的状态，切换模型后另一个模型的偏好需要单独记住，否则重启/对账后会被重置。
+# 仅供 WebUI 往返保存，识别与翻译流程不读取这两个值。
+LLM_STREAMING_PREF = True
+HYMT2_STREAMING_PREF = True
+
 # 触发流式中间翻译所需的最小文本长度（字符数）
 # 仅影响中间翻译触发，不影响最终整句翻译
 MIN_PARTIAL_TRANSLATION_CHARS = 2
