@@ -329,11 +329,17 @@ async def audio_capture_task(state, recognizer):
     _vad_last_diag_at = 0.0
     _vad_verbose = bool(getattr(config, 'ENABLE_VAD_GATING_VERBOSE', False))
 
-    # 一次性报告 VAD 状态
+    # 一次性报告采集侧 VAD 门控状态。
+    # 注意：这里的门控只服务于在线 API（静音时暂停发送以省流），本地识别需要连续音频供
+    # 识别器内部 VAD 分段，因此本地后端下采集侧本就不门控，不再重复输出，避免被误读成
+    # 「VAD 没开」。
     if state.vad_enabled and state.vad_processor is not None:
         print(f'[VAD] capture loop 已激活，等待语音...')
-    else:
-        print(f'[VAD] capture loop — VAD 未启用 (enabled={state.vad_enabled}, proc={state.vad_processor is not None})')
+    elif state.current_asr_backend != 'local':
+        print(
+            f'[VAD] capture loop — 在线 API 发送门控未启用 '
+            f'(enabled={state.vad_enabled}, proc={state.vad_processor is not None})'
+        )
 
     try:
         while not state.stop_event.is_set():
