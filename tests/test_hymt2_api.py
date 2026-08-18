@@ -529,6 +529,79 @@ class TestLocalBackend:
         assert "Previous version of the current source:\nHello" in fake_engine.prompts[1]
         assert "Previous translation of the current source:\n你好" in fake_engine.prompts[1]
 
+    def test_final_reuses_last_translation_when_source_unchanged(self):
+        api = HyMT2API(backend="local")
+
+        class FakeLocalEngine:
+            def __init__(self):
+                self.calls = 0
+            def generate(self, prompt, max_tokens=128):
+                self.calls += 1
+                return f"译文{self.calls}"
+
+        fake_engine = FakeLocalEngine()
+        api._local_engine = fake_engine
+
+        out1 = api.translate("Hi", source_language="en", target_language="zh", is_partial=True)
+        assert out1 == "译文1"
+        assert fake_engine.calls == 1
+
+        # 终句原文与上次中间一致 → 复用上次译文，不再推理
+        out2 = api.translate("Hi", source_language="en", target_language="zh", is_partial=False)
+        assert out2 == "译文1"
+        assert fake_engine.calls == 1
+        # 修订链按终句方式收尾
+        assert api._last_final is True
+        assert api._prev_source is None
+        assert api._history[-1] == ["Hi", "译文1"]
+
+        # 下一句正常触发推理
+        out3 = api.translate("Hi there", source_language="en", target_language="zh", is_partial=False)
+        assert out3 == "译文2"
+        assert fake_engine.calls == 2
+
+    def test_final_not_reused_when_source_or_language_changes(self):
+        class FakeLocalEngine:
+            def __init__(self):
+                self.calls = 0
+            def generate(self, prompt, max_tokens=128):
+                self.calls += 1
+                return "ok"
+
+        # 原文变了 → 不能复用
+        api = HyMT2API(backend="local")
+        fake_engine = FakeLocalEngine()
+        api._local_engine = fake_engine
+        api.translate("Hi", source_language="en", target_language="zh", is_partial=True)
+        out = api.translate("Hi there", source_language="en", target_language="zh", is_partial=False)
+        assert out == "ok"
+        assert fake_engine.calls == 2
+
+        # 源语言变化（同原文）→ 也不能复用
+        api2 = HyMT2API(backend="local")
+        fake_engine2 = FakeLocalEngine()
+        api2._local_engine = fake_engine2
+        api2.translate("Hi", source_language="en", target_language="zh", is_partial=True)
+        out2 = api2.translate("Hi", source_language="ja", target_language="zh", is_partial=False)
+        assert out2 == "ok"
+        assert fake_engine2.calls == 2
+
+    def test_final_reuse_skips_ws_request_when_source_unchanged(self):
+        api = _make_api()
+        with patch("streaming_translation.api.hymt2._sync_ws_connect") as connect:
+            # 模拟已发送过同一原文的中间结果（链处于 partial 之后状态）
+            api._sent_any = True
+            api._last_final = False
+            api._prev_source = "こんにちは"
+            api._prev_translation = "你好"
+            api._last_source_lang = "ja"
+            api._last_target_lang = "zh"
+            out = api.translate("こんにちは", source_language="ja", target_language="zh", is_partial=False)
+        assert out == "你好"
+        connect.assert_not_called()
+        assert api._last_final is True
+        assert api._history[-1] == ["こんにちは", "你好"]
+
     def test_model_manager_hymt2_helpers(self):
         from local_asr.model_manager import (
             get_all_local_models_status,

@@ -82,10 +82,12 @@ class HyMT2LocalEngine:
             raise FileNotFoundError(f"Hy-MT2 本地模型文件未找到: {path}")
 
         from local_asr.vendor.qwen_asr_gguf.inference.llama import (
+            LlamaBatch,
             LlamaContext,
             LlamaModel,
             LlamaSampler,
         )
+        self._LlamaBatch = LlamaBatch
 
         # 解析运行位置：cpu -> 不卸载任何层；auto/vulkan:N -> 只用一张 GPU
         # （load_model 已固定 split_mode = NONE，不会把层切到核显上）
@@ -98,7 +100,8 @@ class HyMT2LocalEngine:
 
         self._LlamaSampler = LlamaSampler
         self.model = LlamaModel(str(path), n_gpu_layers=n_gpu_layers, main_gpu=main_gpu)
-        self.ctx = LlamaContext(self.model, n_ctx=2048)
+        self._n_ctx = 2048
+        self.ctx = LlamaContext(self.model, n_ctx=self._n_ctx)
         self.eos_token = self.model.token_eos()
         self.stop_ids = {self.eos_token}
         for s in (
@@ -114,12 +117,33 @@ class HyMT2LocalEngine:
                 self.stop_ids.add(tid)
         self._engine_lock = threading.Lock()
 
+    def _prefill(self, tokens: List[int]) -> None:
+        """整段 prompt 一次性提交（批量 prefill）。
+
+        逐 token 调用 llama_decode 时每个 token 都要走一遍完整的 kernel 提交/
+        同步往返，实测 100+ token 的 prompt 比批量提交慢 30-40 倍；
+        批量语义与逐个等价（位置编码相同，只对末位 token 取 logits）。
+        """
+        n = len(tokens)
+        if n <= 0:
+            return
+        if n > self._n_ctx:
+            raise ValueError(f"prompt 超过上下文长度: {n} > {self._n_ctx}")
+        batch = self._LlamaBatch(n, 0, 1)
+        for i, token in enumerate(tokens):
+            batch.token[i] = token
+            batch.pos[i] = i
+            batch.n_seq_id[i] = 1
+            batch.seq_id[i][0] = 0
+            batch.logits[i] = 1 if i == n - 1 else 0
+        batch.n_tokens = n
+        self.ctx.decode(batch.struct)
+
     def generate(self, prompt: str, max_tokens: int = 128) -> str:
         with self._engine_lock:
             self.ctx.clear_kv_cache()
             tokens = self.model.tokenize(prompt, add_special=False, parse_special=True)
-            for i, token in enumerate(tokens):
-                self.ctx.decode_token(token, pos=i)
+            self._prefill(tokens)
 
             sampler = self._LlamaSampler(temperature=0.0)
             curr_pos = len(tokens)
@@ -332,6 +356,29 @@ class HyMT2API(BaseTranslationAPI):
 
     # ── Translation entry point ────────────────────────────────────────
 
+    def _try_reuse_final(
+        self, text: str, source_lang: str, target_lang: str
+    ) -> Optional[str]:
+        """终句原文与上一次中间结果完全一致（且语言方向一致）时，跳过这次
+        重复请求/推理，直接复用上一次的译文，并按终句方式收尾修订链
+        （记入历史、清空当前句 prev、标记终译），等价于正常终句响应的效果。"""
+        with self._lock:
+            if self._last_final or self._prev_source is None or self._prev_source != text:
+                return None
+            if self._last_source_lang != source_lang or self._last_target_lang != target_lang:
+                return None
+            display = (self._prev_translation or "").strip()
+            if not display or display.startswith("[ERROR]"):
+                return None
+            print("[Hy-MT2] 终句原文与上次中间结果一致，复用上次译文（省一次调用）")
+            if text.strip():
+                self._history.append([text, display])
+                self._history = self._history[-HISTORY_KEEP:]
+            self._prev_source = None
+            self._prev_translation = None
+            self._last_final = True
+            return display
+
     def translate(
         self,
         text: str,
@@ -351,6 +398,11 @@ class HyMT2API(BaseTranslationAPI):
             self._last_target_lang or self.DEFAULT_TARGET_LANG
         )
         history = self._history_from_context_pairs(context_pairs)
+
+        if not is_partial:
+            reused = self._try_reuse_final(text, source_lang, target_lang)
+            if reused is not None:
+                return reused
 
         if self.backend == "local":
             try:
@@ -462,11 +514,22 @@ class HyMT2API(BaseTranslationAPI):
                 )
 
             prompt = f"<｜hy_User｜>{content}<｜hy_Assistant｜>"
-            display = self._local_engine.generate(prompt) if self._local_engine else ""
+            if self._local_engine is None:
+                display = ""
+            else:
+                inference_started = time.monotonic()
+                display = self._local_engine.generate(prompt)
+                # 临时：本地模型每次推理后输出一行日志，记录本次耗时（毫秒）
+                print(
+                    f"[Hy-MT2 本地] 推理完成（{'最终' if not is_partial else '中间'}）: "
+                    f"耗时 {(time.monotonic() - inference_started) * 1000.0:.0f}ms"
+                )
 
             self._prev_source = text
             self._prev_translation = display
             self._last_final = not is_partial
+            self._last_source_lang = source_lang
+            self._last_target_lang = target_lang
             if not is_partial and text and display:
                 self._history.append([text, display])
                 self._history = self._history[-HISTORY_KEEP:]
