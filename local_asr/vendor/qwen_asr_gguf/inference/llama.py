@@ -16,8 +16,13 @@ from . import logger
 # =========================================================================
 # Configuration
 # =========================================================================
-# QUIET_LOGS = True 时，不打印任何日志。但现在我们路由到 logger。
-QUIET_LOGS = True
+# llama.cpp 日志路由到 logger（见 python_log_callback）。
+# QUIET_LOGS = True 时会安装一个空回调，吞掉**所有** llama.cpp 输出——包括
+# "Vulkan 不可用，回退 CPU"这类关键警告，导致 GPU 静默失效时完全无从排查。
+# 因此默认 False；python_log_callback 按真实级别（2=INFO、3=WARN、4=ERROR）
+# 路由日志，并跳过 kv 元数据 dump 与进度点，避免刷屏；回退类 INFO 行升为 WARN，
+# 保证默认 LOG_LEVEL=ERROR 时"静默掉回 CPU"仍可见。
+QUIET_LOGS = False
 _log_callback_ref = None
 
 # =========================================================================
@@ -830,28 +835,64 @@ class ASRStreamDecoder:
         return remaining
 
 
+# 设备/后端落点相关的关键行（用于确认权重到底加载到了哪张卡；
+# 如 "using device Vulkan0 (...)"、"offloaded 29/29 layers to GPU"、
+# "cannot be used with preferred buffer type ... using CPU instead"、
+# "Vulkan ... not available" 等回退警告）。
+_BACKEND_HINTS = (
+    "using device",
+    "offloaded",
+    "offloading ",
+    "preferred buffer",
+    "vulkan",
+    "cuda",
+    "no gpu",
+    "no vulkan",
+)
+
+
+# level 2（INFO）行中，以下措辞意味着"回退/失败"——升级为 WARN，
+# 保证即使默认 LOG_LEVEL=ERROR 时，"静默掉回 CPU"这类情况也能在终端看到。
+_FALLBACK_HINTS = (
+    "unable to",
+    "cannot",
+    "failed",
+    "error",
+    "no gpu",
+    "no vulkan",
+    "using cpu instead",
+    "fallback",
+)
+
+
 def python_log_callback(level, message, user_data):
     """
-    llama.cpp 日志回调函数
-    level: 
-        2 = ERROR
-        3 = WARN
-        4 = INFO
-        5 = DEBUG
+    llama.cpp 日志回调函数。
+
+    本 build 实测的级别映射：0=VERBOSE、1=DEBUG（逐层分配）、
+    2=INFO（后端加载 / 设备选择 / offload / 缓冲区大小，kv dump 也在此级）、
+    3=WARN、4=ERROR、5≈FATAL（进度点等杂讯）。
+    注意：level 2 的行是**正常提示信息**（加载到哪张卡、占多少显存），不是错误。
     """
     if not message: return
     try:
         msg_str = message.decode('utf-8', errors='replace').strip()
         if not msg_str or msg_str in ['.', '\n']: return
-        
-        if level == 2:
+        low = msg_str.lower()
+
+        # 跳过 DEBUG/VERBOSE；INFO 级只保留设备/后端落点与回退相关行
+        # （跳过 kv 元数据 dump 等，避免刷屏）。
+        if level < 2:
+            return
+        if level == 2 and not any(hint in low for hint in _BACKEND_HINTS):
+            return
+
+        if level >= 4:
             logger.error(f"[llama.cpp] {msg_str}")
         elif level == 3:
             logger.warning(f"[llama.cpp] {msg_str}")
-        elif level == 4:
-            logger.info(f"[llama.cpp] {msg_str}")
-        elif level >= 5:
-            logger.debug(f"[llama.cpp] {msg_str}")
+        elif any(w in low for w in _FALLBACK_HINTS):
+            logger.warning(f"[llama.cpp] {msg_str}")
         else:
             logger.info(f"[llama.cpp] {msg_str}")
     except Exception as e:

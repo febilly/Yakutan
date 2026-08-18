@@ -76,13 +76,10 @@ class Qwen3ASREngine:
         resolved_model_dir = model_dir or get_local_model_path("qwen3-asr") or str(MODELS_DIR / "qwen3-asr")
 
         # GGUF 解码器的运行位置（SenseVoice 固定 CPU，只有 Qwen3-ASR 用得上 GPU）
-        n_gpu_layers, main_gpu, effective_device = resolve_device(
-            getattr(config, "LOCAL_ASR_DEVICE", "auto")
-        )
+        requested_device = getattr(config, "LOCAL_ASR_DEVICE", "auto")
+        n_gpu_layers, main_gpu, effective_device = resolve_device(requested_device)
+        # ONNX 音频编码（前后端）固定在 CPU（不用 DirectML）；GGUF 大模型按"运行位置"走 GPU/CPU。
         if use_dml is None:
-            use_dml = bool(getattr(config, "LOCAL_QWEN_ENCODER_USE_DML", False))
-        if n_gpu_layers == 0:
-            # 选了 CPU 就整条链路都留在 CPU 上，不要偷偷把 ONNX 编码器丢给 DirectML
             use_dml = False
         n_ctx = int(getattr(config, "LOCAL_QWEN_ASR_N_CTX", 2048))
         engine_cfg = ASREngineConfig(
@@ -103,12 +100,18 @@ class Qwen3ASREngine:
         self._corpus_text = (corpus_text or "").strip()
         self.model_dir = resolved_model_dir
         self.device = effective_device
+        encoder_actual = (
+            "DirectML(GPU)"
+            if getattr(self._engine.encoder, "active_dml", False)
+            else "CPU"
+        )
         logger.info(
-            "Qwen3-ASR loaded: %s (device=%s -> %s, encoder_DML=%s)",
+            "Qwen3-ASR loaded: %s (device=%s -> %s, GGUF: %s 层卸载到该卡, ONNX 编码器实际=%s)",
             resolved_model_dir,
-            effective_device,
+            requested_device,
             describe_device(effective_device),
-            use_dml,
+            n_gpu_layers if n_gpu_layers > 0 else 0,
+            encoder_actual,
         )
 
     def set_language(self, language: str) -> None:

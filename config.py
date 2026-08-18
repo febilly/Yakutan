@@ -103,7 +103,8 @@ DOUBAO_ASR_MAX_BUFFER_SECONDS = 60
 # 本地 ASR 引擎
 # 可选: 'sensevoice', 'qwen3-asr'（已移除 Fun-ASR-Nano）
 # sensevoice：INT8 ONNX，固定 CPU（约 1.5–2.5GB 内存；发布版可内置模型）
-# qwen3-asr：ONNX 编码默认 CPU；可选 DirectML（LOCAL_QWEN_ENCODER_USE_DML）。GGUF 解码可走 Vulkan，约需显存视配置而定
+# qwen3-asr：GGUF 解码跟随"运行位置"（GPU→走 Vulkan；CPU→CPU）；ONNX 音频编码固定在 CPU。
+# 约需显存视配置而定
 LOCAL_ASR_ENGINE = 'sensevoice'
 _VALID_LOCAL_ASR_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
 if LOCAL_ASR_ENGINE not in _VALID_LOCAL_ASR_ENGINES:
@@ -147,8 +148,6 @@ LOCAL_QWEN_CONTEXT_MAX_TOKENS = 1024
 # 是否在每条识别后打印 Qwen3-ASR 各阶段耗时（ONNX 编码 / LLM prefill / 生成），使用 INFO 级别。旧版 CLI 可在 .env 中用 LOCAL_QWEN_LOG_PIPELINE_TIMING=0 关闭。
 # 需在 config.LOG_LEVEL 为 INFO/DEBUG 时才能在终端看到（默认 ERROR 时不会输出）。
 LOCAL_QWEN_LOG_PIPELINE_TIMING = True
-# ONNX 音频编码（前后端）是否使用 DirectML；False 时仅用 CPUExecutionProvider（Mel 本就为 CPU）。
-LOCAL_QWEN_ENCODER_USE_DML = False
 
 # ============================================================================
 # 音频参数配置
@@ -568,7 +567,7 @@ def apply_cli_env() -> None:
     built-in defaults until the browser submits its saved settings.
     """
     global VAD_ENABLED
-    global LOCAL_QWEN_LOG_PIPELINE_TIMING, LOCAL_QWEN_ENCODER_USE_DML
+    global LOCAL_QWEN_LOG_PIPELINE_TIMING
     global LOCAL_ASR_DEVICE
     global SAVE_POST_RESAMPLE_AUDIO, SAVE_PRE_RESAMPLE_AUDIO
     global DEBUG_AUDIO_OUTPUT_DIR, ENABLE_VAD_GATING_VERBOSE
@@ -589,9 +588,6 @@ def apply_cli_env() -> None:
     VAD_ENABLED = _read_env_bool('VAD_ENABLED', VAD_ENABLED)
     LOCAL_QWEN_LOG_PIPELINE_TIMING = _read_env_bool(
         'LOCAL_QWEN_LOG_PIPELINE_TIMING', LOCAL_QWEN_LOG_PIPELINE_TIMING
-    )
-    LOCAL_QWEN_ENCODER_USE_DML = _read_env_bool(
-        'LOCAL_QWEN_ENCODER_USE_DML', LOCAL_QWEN_ENCODER_USE_DML
     )
     LOCAL_ASR_DEVICE = sanitize_local_device(
         _read_first_env('LOCAL_ASR_DEVICE', default=LOCAL_ASR_DEVICE)
