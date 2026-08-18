@@ -894,6 +894,64 @@ html[lang="en"] .language-setting-item label span[data-i18n="label.quickLangSlot
     min-height: 40px;
 }
 
+/* 本地模型卡片（ASR / MT 统一样式） */
+.local-model-card {
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: rgba(15, 23, 42, 0.02);
+}
+
+.local-model-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.local-model-card-title {
+    margin: 0;
+    font-weight: 600;
+}
+
+.local-model-badge {
+    flex: none;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--border-color);
+    color: #475569;
+    font-size: 12px;
+}
+
+.local-model-badge.is-ready {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.local-model-badge.is-missing {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.local-model-desc {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.local-model-card .local-asr-status-box {
+    background: var(--card-bg);
+}
+
+.local-model-card .local-asr-grid {
+    margin-bottom: 12px;
+}
+
+.local-model-card-actions {
+    margin-top: 10px;
+}
+
 .text-post-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

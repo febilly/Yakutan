@@ -285,12 +285,31 @@
                         </div>
 
                         <div class="form-group" id="hymt2-settings" style="display: none;">
-                            <label for="hymt2-ws-url" data-i18n="label.hyMt2WsUrl">Hy-MT2 WebSocket 地址</label>
-                            <input type="text" id="hymt2-ws-url" class="form-control"
-                                placeholder="ws://127.0.0.1:18765"
-                                autocomplete="off"
-                                onblur="onSettingChange()">
-                            <small class="form-text" data-i18n="hint.hyMt2WsUrl">填写 Hy-MT2 流式修订翻译服务的 WebSocket 地址（例如 ws://127.0.0.1:18765）。该地址不会内置默认值，请自行填写（也支持 .env 中的 HYMT2_WEBSOCKET_URL）。</small>
+                            <label for="hymt2-backend-mode" data-i18n="label.hymt2Backend">Hy-MT2 接入方式</label>
+                            <select id="hymt2-backend-mode" class="form-control" onchange="onHymt2BackendModeChange()">
+                                <option value="api" data-i18n="option.hymt2BackendApi">外部 API（WebSocket 独立服务）</option>
+                                <option value="local" data-i18n="option.hymt2BackendLocal">本地模型（GGUF 进程内推理）</option>
+                            </select>
+
+                            <div id="hymt2-api-subgroup" style="margin-top: 10px;">
+                                <label for="hymt2-ws-url" data-i18n="label.hyMt2WsUrl">Hy-MT2 WebSocket 地址</label>
+                                <input type="text" id="hymt2-ws-url" class="form-control"
+                                    placeholder="ws://127.0.0.1:18765"
+                                    autocomplete="off"
+                                    onblur="onSettingChange()">
+                                <small class="form-text">
+                                    <span data-i18n="hint.hyMt2WsUrl">填写 Hy-MT2 流式修订翻译服务的 WebSocket 地址（例如 ws://127.0.0.1:18765）。</span>
+                                    <a href="#" target="_blank" rel="noopener noreferrer" id="hymt2-deploy-guide-link" data-i18n="link.hyMt2DeployGuide" onclick="return false;">查看外部服务部署指南 →</a>
+                                </small>
+                            </div>
+
+                            <div id="hymt2-local-subgroup" style="margin-top: 10px; display: none;">
+                                <small class="form-text">
+                                    <span id="hymt2-local-status" data-i18n="status.hymt2LocalChecking">正在检测本地模型...</span>
+                                    <a href="#" id="hymt2-local-manage-link" data-i18n="link.manageInLocalModels"
+                                        onclick="focusLocalModelsCard(); return false;">前往「本地模型」下载与管理 →</a>
+                                </small>
+                            </div>
                         </div>
 
                         <div class="form-group" id="openrouter-streaming-mode-group" style="display: none;">
@@ -632,54 +651,100 @@
                     </div>
                 </section>
 
-                <!-- 本地音频识别 -->
+                <!-- 本地模型管理 -->
                 <section class="card" id="local-asr-card" style="display: none;">
                     <div class="collapsible-header" onclick="toggleCollapsible('local-asr-settings')">
-                        <h2 data-i18n="section.localAsrSettings">本地音频识别</h2>
+                        <h2 data-i18n="section.localModels">本地模型</h2>
                         <span class="collapse-icon collapsed" id="local-asr-settings-icon">▶</span>
                     </div>
                     <div class="collapsible-content collapsed" id="local-asr-settings">
-                        <div class="local-asr-grid">
-                            <div class="form-group">
-                                <label for="local-asr-engine" data-i18n="label.localAsrEngine">本地识别引擎</label>
-                                <select id="local-asr-engine" class="form-control" onchange="onLocalAsrSettingChange(this)"
-                                    data-restart-required="true">
-                                    <option value="sensevoice" data-i18n="localAsr.engine.sensevoice">SenseVoice Small（快速、CPU）</option>
-                                    <option value="qwen3-asr" data-i18n="localAsr.engine.qwen3">Qwen3-ASR（准确、GPU）</option>
-                                </select>
-                                <small id="local-asr-engine-hint" class="form-text"></small>
-                                <small class="form-text" data-i18n="hint.localAsrUsesGlobalSourceLang">
-                                    识别语言与上方「语音识别」中的源语言一致；留空或 auto 为自动检测。
-                                </small>
-                            </div>
-                            <div class="form-group" style="grid-column: 1 / -1;">
-                                <small class="form-text" data-i18n="hint.localVadMovedToAdvanced">VAD（语音活动检测）参数已移至「高级设置 → VAD」，对在线 API 与本地识别统一生效。</small>
-                            </div>
-                            <div class="form-group">
-                                <label class="switch-label">
-                                    <span data-i18n="label.localIncrementalAsr">启用增量识别</span>
-                                    <label class="switch">
-                                        <input type="checkbox" id="local-incremental-asr" onchange="onLocalAsrSettingChange(this)"
-                                            data-restart-required="true">
-                                        <span class="slider"></span>
-                                    </label>
-                                </label>
-                            </div>
-                            <div class="form-group">
-                                <label for="local-interim-interval" data-i18n="label.localInterimInterval">中间结果间隔（秒）</label>
-                                <input type="number" id="local-interim-interval" class="form-control" min="0.5" max="20"
-                                    step="0.5" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
-                            </div>
-                            <div class="form-group" style="grid-column: 1 / -1;">
-                                <label data-i18n="label.localAsrStatus">模型状态</label>
-                                <div id="local-asr-status" class="local-asr-status-box" data-i18n="hint.localAsrNotChecked">
-                                    尚未检查本地模型状态
+                        <!-- 语音识别模型 -->
+                        <div class="local-models-group">
+                            <h3 class="subsection-title" style="margin-top: 0; font-size: 15px;" data-i18n="label.localAsrModels">🎙️ 语音识别模型（ASR）</h3>
+                            <div class="local-model-card">
+                                <div class="local-model-card-head">
+                                    <strong class="local-model-card-title" id="local-asr-engine-name" data-i18n="localAsr.engine.sensevoiceName">SenseVoice Small</strong>
+                                    <span id="local-asr-badge" class="local-model-badge" data-i18n="status.localModelChecking">检测中...</span>
                                 </div>
-                                <small class="form-text" data-i18n="hint.localAsrStatus">首次使用前请先下载对应引擎模型和运行时。</small>
+                                <p class="local-model-desc" id="local-asr-engine-hint"></p>
+                                <div class="local-asr-grid">
+                                    <div class="form-group">
+                                        <label for="local-asr-engine" data-i18n="label.localAsrEngine">本地识别引擎</label>
+                                        <select id="local-asr-engine" class="form-control" onchange="onLocalAsrSettingChange(this)"
+                                            data-restart-required="true">
+                                            <option value="sensevoice" data-i18n="localAsr.engine.sensevoice">SenseVoice Small（快速、CPU）</option>
+                                            <option value="qwen3-asr" data-i18n="localAsr.engine.qwen3">Qwen3-ASR（准确、GPU）</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="local-asr-device" data-i18n="label.localDevice">运行位置</label>
+                                        <select id="local-asr-device" class="form-control"
+                                            onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                                            <option value="auto" data-i18n="option.deviceAuto">自动（独显优先）</option>
+                                            <option value="cpu" data-i18n="option.deviceCpu">CPU</option>
+                                        </select>
+                                        <small class="form-text" id="local-asr-device-hint" data-i18n="hint.localAsrDevice">仅对 Qwen3-ASR 生效；SenseVoice 固定在 CPU 上运行。</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="local-interim-interval" data-i18n="label.localInterimInterval">中间结果间隔（秒）</label>
+                                        <input type="number" id="local-interim-interval" class="form-control" min="0.5" max="20"
+                                            step="0.5" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
+                                    </div>
+                                    <div class="form-group" style="grid-column: 1 / -1;">
+                                        <label class="switch-label">
+                                            <span data-i18n="label.localIncrementalAsr">启用增量识别</span>
+                                            <label class="switch">
+                                                <input type="checkbox" id="local-incremental-asr" onchange="onLocalAsrSettingChange(this)"
+                                                    data-restart-required="true">
+                                                <span class="slider"></span>
+                                            </label>
+                                        </label>
+                                    </div>
+                                    <div class="form-group" style="grid-column: 1 / -1;">
+                                        <div id="local-asr-status" class="local-asr-status-box" data-i18n="hint.localAsrNotChecked">
+                                            尚未检查本地模型状态
+                                        </div>
+                                        <small class="form-text" data-i18n="hint.localAsrStatus">首次使用前请先下载对应引擎模型和运行时。</small>
+                                    </div>
+                                </div>
+                                <div class="local-model-card-actions">
+                                    <button type="button" class="btn btn-secondary" id="local-asr-download-btn"
+                                        onclick="downloadLocalAsrModels()" data-i18n="btn.downloadLocalAsr">下载本地识别模型</button>
+                                </div>
                             </div>
-                            <div class="form-group" style="grid-column: 1 / -1;">
-                                <button type="button" class="btn btn-primary" id="local-asr-download-btn"
-                                    onclick="downloadLocalAsrModels()" data-i18n="btn.downloadLocalAsr">下载本地识别模型</button>
+                        </div>
+
+                        <hr style="margin: 20px 0; border: 0; border-top: 1px solid var(--border-color, #e2e8f0);">
+
+                        <!-- 机器翻译模型 -->
+                        <div class="local-models-group">
+                            <h3 class="subsection-title" style="margin-top: 0; font-size: 15px;" data-i18n="label.localMtModels">🌐 机器翻译模型（MT）</h3>
+                            <div class="local-model-card">
+                                <div class="local-model-card-head">
+                                    <strong class="local-model-card-title" data-i18n="localModels.hymt2Name">Hy-MT2 1.8B（流式修订翻译）</strong>
+                                    <span id="local-hymt2-badge" class="local-model-badge" data-i18n="status.localModelChecking">检测中...</span>
+                                </div>
+                                <p class="local-model-desc" data-i18n="localModels.hymt2Desc">
+                                    基于混元 1.8B 多语言流式修订架构，支持在说话过程中根据上下文自动修正流式译文。
+                                </p>
+                                <div class="local-asr-grid">
+                                    <div class="form-group">
+                                        <label for="hymt2-local-device" data-i18n="label.localDevice">运行位置</label>
+                                        <select id="hymt2-local-device" class="form-control"
+                                            onchange="onSettingChange(this)">
+                                            <option value="auto" data-i18n="option.deviceAuto">自动（独显优先）</option>
+                                            <option value="cpu" data-i18n="option.deviceCpu">CPU</option>
+                                        </select>
+                                        <small class="form-text" data-i18n="hint.hymt2LocalDevice">仅影响本地 Hy-MT2 模型；切换后下一次翻译会用新设置重新加载模型。</small>
+                                    </div>
+                                </div>
+                                <div id="local-hymt2-status-box" class="local-asr-status-box">
+                                    检测本地 Hy-MT2 模型状态...
+                                </div>
+                                <div class="local-model-card-actions">
+                                    <button type="button" class="btn btn-secondary" id="local-hymt2-download-btn"
+                                        onclick="downloadHymt2Model()" data-i18n="btn.downloadHymt2">一键下载本地 Hy-MT2 模型</button>
+                                </div>
                             </div>
                         </div>
                     </div>

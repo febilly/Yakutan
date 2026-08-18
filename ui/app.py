@@ -33,14 +33,23 @@ try:
     from local_asr import (
         LOCAL_ASR_DISPLAY_NAMES,
         LOCAL_ASR_ENGINES,
+        LOCAL_MT_ENGINES,
         get_local_asr_features,
         is_local_asr_build_enabled,
         is_local_asr_ui_enabled,
     )
     from local_asr.model_manager import download_asr as download_local_asr_model
-    from local_asr.model_manager import download_silero, get_engine_status, is_silero_cached
+    from local_asr.model_manager import (
+        download_hymt2,
+        download_silero,
+        get_all_local_models_status,
+        get_engine_status,
+        get_hymt2_status,
+        is_silero_cached,
+    )
 except ImportError:  # pragma: no cover
     LOCAL_ASR_ENGINES = ()
+    LOCAL_MT_ENGINES = ()
     LOCAL_ASR_DISPLAY_NAMES = {}
 
     def get_local_asr_features():
@@ -202,6 +211,7 @@ def _get_feature_flags() -> dict:
 def _local_asr_config_dict() -> dict:
     return {
         'engine': getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice'),
+        'device': config.sanitize_local_device(getattr(config, 'LOCAL_ASR_DEVICE', 'auto')),
         'incremental_asr': getattr(config, 'LOCAL_INCREMENTAL_ASR', True),
         'interim_interval': getattr(config, 'LOCAL_INTERIM_INTERVAL', 2.0),
     }
@@ -361,13 +371,19 @@ def _download_local_asr_worker(engine: str) -> None:
         error=None,
     )
     try:
-        if not is_silero_cached():
-            _update_local_asr_download_state(status='下载 Silero VAD...')
-            download_silero()
-        _update_local_asr_download_state(
-            status=f'下载 {LOCAL_ASR_DISPLAY_NAMES.get(engine, engine)} 模型与运行时...',
-        )
-        download_local_asr_model(engine)
+        if engine == 'hymt2':
+            _update_local_asr_download_state(
+                status=f'下载 {LOCAL_ASR_DISPLAY_NAMES.get(engine, engine)} 模型...',
+            )
+            download_hymt2()
+        else:
+            if not is_silero_cached():
+                _update_local_asr_download_state(status='下载 Silero VAD...')
+                download_silero()
+            _update_local_asr_download_state(
+                status=f'下载 {LOCAL_ASR_DISPLAY_NAMES.get(engine, engine)} 模型与运行时...',
+            )
+            download_local_asr_model(engine)
         _update_local_asr_download_state(
             running=False,
             status='下载完成',
@@ -424,6 +440,10 @@ def get_config_dict():
             ),
             'llm_parallel_fastest_mode': getattr(
                 config, 'LLM_PARALLEL_FASTEST_MODE', 'off'
+            ),
+            'hymt2_backend': getattr(config, 'HYMT2_BACKEND', 'api'),
+            'hymt2_local_device': config.sanitize_local_device(
+                getattr(config, 'HYMT2_LOCAL_DEVICE', 'auto')
             ),
             'hymt2_websocket_url': getattr(config, 'HYMT2_WEBSOCKET_URL', ''),
             'enable_llm_parallel_fastest': (
@@ -549,6 +569,12 @@ def update_config(config_data):
                     )
             elif 'translate_partial_results' in trans:
                 config.TRANSLATE_PARTIAL_RESULTS = bool(trans['translate_partial_results'])
+            if 'hymt2_backend' in trans:
+                config.HYMT2_BACKEND = (trans['hymt2_backend'] or 'api').strip()
+            if 'hymt2_local_device' in trans:
+                config.HYMT2_LOCAL_DEVICE = config.sanitize_local_device(
+                    trans['hymt2_local_device']
+                )
             if 'hymt2_websocket_url' in trans:
                 config.HYMT2_WEBSOCKET_URL = (trans['hymt2_websocket_url'] or '').strip()
             if 'llm_template' in trans:
@@ -698,6 +724,8 @@ def update_config(config_data):
                 config.LOCAL_VAD_SILENCE_DURATION = float(local_asr['silence_duration'])
             if 'pre_speech_duration' in local_asr and 'vad' not in config_data:
                 config.LOCAL_VAD_PRE_SPEECH_DURATION = max(0.0, float(local_asr['pre_speech_duration']))
+            if 'device' in local_asr:
+                config.LOCAL_ASR_DEVICE = config.sanitize_local_device(local_asr['device'])
             if 'incremental_asr' in local_asr:
                 config.LOCAL_INCREMENTAL_ASR = bool(local_asr['incremental_asr'])
             if 'interim_interval' in local_asr:
@@ -829,45 +857,40 @@ def receive_vrcx_context():
     return ('', 204)
 
 
+@app.route('/api/local-models/status', methods=['GET'])
 @app.route('/api/local-asr/status', methods=['GET'])
 def get_local_asr_status():
-    """获取本地 ASR 下载/可用状态。"""
+    """获取本地 ASR 及翻译模型下载/可用状态。"""
     if not is_local_asr_build_enabled():
         return jsonify({'success': False, 'message': 'Local ASR is disabled in this build'}), 404
 
-    engines = {}
-    for engine in LOCAL_ASR_ENGINES:
-        try:
-            engines[engine] = get_engine_status(engine)
-        except Exception as e:
-            engines[engine] = {
-                'engine': engine,
-                'display_name': LOCAL_ASR_DISPLAY_NAMES.get(engine, engine),
-                'ready': False,
-                'error': str(e),
-            }
+    models_status = get_all_local_models_status()
     return jsonify({
         'success': True,
         'ui_enabled': is_local_asr_ui_enabled(),
-        'engines': engines,
+        'engines': models_status['asr'],
+        'models': models_status,
+        'hymt2': models_status['translation'].get('hymt2', {}),
         'download': _snapshot_local_asr_download_state(),
     })
 
 
+@app.route('/api/local-models/download', methods=['POST'])
 @app.route('/api/local-asr/download', methods=['POST'])
 def download_local_asr():
-    """后台下载本地 ASR 模型与运行时。"""
+    """后台下载本地 ASR / 翻译模型与运行时。"""
     if not is_local_asr_build_enabled():
         return jsonify({'success': False, 'message': 'Local ASR is disabled in this build'}), 404
 
     data = request.json or {}
     engine = str(data.get('engine') or getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice'))
-    if engine not in LOCAL_ASR_ENGINES:
+    valid_engines = set(LOCAL_ASR_ENGINES) | set(LOCAL_MT_ENGINES)
+    if engine not in valid_engines:
         return jsonify({'success': False, 'message': f'Unsupported engine: {engine}'}), 400
 
     snapshot = _snapshot_local_asr_download_state()
     if snapshot.get('running'):
-        return jsonify({'success': False, 'message': 'Another local ASR download is already running'}), 409
+        return jsonify({'success': False, 'message': 'Another download is already running'}), 409
 
     worker = threading.Thread(
         target=_download_local_asr_worker,
@@ -876,6 +899,29 @@ def download_local_asr():
     )
     worker.start()
     return jsonify({'success': True, 'message': 'download started', 'engine': engine})
+
+
+@app.route('/api/local-models/devices', methods=['GET'])
+def get_local_model_devices():
+    """列出本地 GGUF 推理可用的 GPU 设备（子进程枚举，结果带缓存）。"""
+    if not is_local_asr_build_enabled():
+        return jsonify({'success': False, 'message': 'Local ASR is disabled in this build'}), 404
+
+    refresh = str(request.args.get('refresh') or '').strip().lower() in ('1', 'true', 'yes')
+    try:
+        from local_asr.gpu_devices import pick_auto_index, probe_gpu_devices
+
+        devices = probe_gpu_devices(refresh=refresh)
+        auto_index = pick_auto_index(devices)
+    except Exception as e:
+        print(f'枚举本地推理设备失败: {e}')
+        devices, auto_index = [], None
+
+    return jsonify({
+        'success': True,
+        'devices': devices,
+        'auto_index': auto_index,
+    })
 
 
 @app.route('/api/local-asr/download-progress', methods=['GET'])

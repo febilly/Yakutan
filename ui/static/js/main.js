@@ -96,6 +96,7 @@ let localAsrStatus = {
 
 function updateLocalAsrEngineHint() {
     const el = document.getElementById('local-asr-engine-hint');
+    const nameEl = document.getElementById('local-asr-engine-name');
     const engine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
     if (!el) return;
     if (!isLocalAsrUiEnabled()) {
@@ -103,18 +104,154 @@ function updateLocalAsrEngineHint() {
         return;
     }
     const t = window.i18n ? window.i18n.t : (key) => key;
-    const key =
-        engine === 'qwen3-asr' ? 'localAsr.engine.qwen3Hint' : 'localAsr.engine.sensevoiceHint';
-    el.textContent = t(key);
+    const suffix = engine === 'qwen3-asr' ? 'qwen3' : 'sensevoice';
+    el.textContent = t(`localAsr.engine.${suffix}Hint`);
+    el.setAttribute('data-i18n', `localAsr.engine.${suffix}Hint`);
+    if (nameEl) {
+        nameEl.textContent = t(`localAsr.engine.${suffix}Name`);
+        nameEl.setAttribute('data-i18n', `localAsr.engine.${suffix}Name`);
+    }
 }
 
 function isLocalAsrUiEnabled() {
     return !!featureFlags.local_asr_ui_enabled;
 }
 
+// ===================== 本地推理设备（GPU/CPU） =====================
+//
+// 设备值是扁平字符串：'auto' | 'cpu' | 'vulkan:N'，与后端 / .env 共用。
+// 列表由 /api/local-models/devices 枚举得到（后端跑在子进程里）。
+
+const DEVICE_SELECT_IDS = ['local-asr-device', 'hymt2-local-device'];
+let localModelDevices = [];
+let localModelAutoDeviceIndex = null;
+
+function sanitizeDeviceValue(value) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (normalized === 'cpu') return 'cpu';
+    if (/^vulkan:\d+$/.test(normalized)) return normalized;
+    return 'auto';  // 含旧值 'gpu'
+}
+
+/** 该设备值当前是否可用（'vulkan:N' 需要 N 真的存在）。 */
+function isDeviceAvailable(value) {
+    const normalized = sanitizeDeviceValue(value);
+    if (normalized === 'auto' || normalized === 'cpu') return true;
+    const index = parseInt(normalized.split(':')[1], 10);
+    return localModelDevices.some((d) => Number(d.index) === index);
+}
+
+/** 保存的设备已经不在了就退回「自动」，避免一直指向一张拔掉的卡。 */
+function resolveStoredDevice(value) {
+    const normalized = sanitizeDeviceValue(value);
+    if (isDeviceAvailable(normalized)) return normalized;
+    console.warn(`保存的推理设备 ${normalized} 当前不可用，已回退到自动选择`);
+    return 'auto';
+}
+
+/**
+ * 设置下拉框的设备值。
+ *
+ * 设备选项是异步枚举出来的，配置加载往往早于枚举完成，这时直接赋值会因为没有
+ * 对应 <option> 而被浏览器丢成空值。因此先记在 dataset.pendingDevice 上，等
+ * renderDeviceOptions() 建好选项后再落到 value。
+ */
+function setDeviceSelectValue(select, value) {
+    if (!select) return;
+    const normalized = sanitizeDeviceValue(value);
+    const hasOption = Array.from(select.options).some((opt) => opt.value === normalized);
+    if (hasOption) {
+        select.value = normalized;
+        delete select.dataset.pendingDevice;
+    } else {
+        select.dataset.pendingDevice = normalized;
+    }
+}
+
+/** 读取下拉框的设备值（选项还没枚举出来时读待定值，避免把用户的选择存丢）。 */
+function getDeviceSelectValue(id) {
+    const select = document.getElementById(id);
+    if (!select) return 'auto';
+    return sanitizeDeviceValue(select.dataset.pendingDevice ?? select.value);
+}
+
+/** 「载入默认设置」时优先选中自动挑出的独显，枚举不可用时退回 'auto'。 */
+function getDefaultDeviceValue() {
+    if (localModelAutoDeviceIndex === null || localModelAutoDeviceIndex === undefined) {
+        return 'auto';
+    }
+    return `vulkan:${localModelAutoDeviceIndex}`;
+}
+
+function formatDeviceLabel(device) {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const gb = Number(device.total_bytes || 0) / (1024 ** 3);
+    const size = gb >= 0.1 ? ` · ${gb.toFixed(1)} GB` : '';
+    const tag = device.discrete ? '' : ` · ${t('label.deviceIntegrated')}`;
+    return `GPU ${device.index} — ${device.description}${size}${tag}`;
+}
+
+/** 把枚举到的 GPU 选项塞进两个下拉框（保持当前选中值）。 */
+function renderDeviceOptions() {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    for (const id of DEVICE_SELECT_IDS) {
+        const select = document.getElementById(id);
+        if (!select) continue;
+        const previous = select.dataset.pendingDevice ?? select.value;
+        select.innerHTML = '';
+
+        const autoOpt = document.createElement('option');
+        autoOpt.value = 'auto';
+        autoOpt.setAttribute('data-i18n', 'option.deviceAuto');
+        autoOpt.textContent = t('option.deviceAuto');
+        select.appendChild(autoOpt);
+
+        for (const device of localModelDevices) {
+            const opt = document.createElement('option');
+            opt.value = `vulkan:${device.index}`;
+            opt.textContent = formatDeviceLabel(device);
+            select.appendChild(opt);
+        }
+
+        const cpuOpt = document.createElement('option');
+        cpuOpt.value = 'cpu';
+        cpuOpt.setAttribute('data-i18n', 'option.deviceCpu');
+        cpuOpt.textContent = t('option.deviceCpu');
+        select.appendChild(cpuOpt);
+
+        setDeviceSelectValue(select, resolveStoredDevice(previous));
+    }
+    updateLocalAsrDeviceState();
+}
+
+/** SenseVoice 固定 CPU，选它时禁用 ASR 的设备下拉框。 */
+function updateLocalAsrDeviceState() {
+    const select = document.getElementById('local-asr-device');
+    if (!select) return;
+    const engine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
+    select.disabled = engine !== 'qwen3-asr';
+}
+
+async function loadLocalModelDevices() {
+    if (!isLocalAsrUiEnabled()) return;
+    try {
+        const response = await fetch(`${API_BASE}/local-models/devices`);
+        if (!response.ok) return;
+        const payload = await response.json();
+        localModelDevices = Array.isArray(payload.devices) ? payload.devices : [];
+        localModelAutoDeviceIndex = payload.auto_index ?? null;
+    } catch (error) {
+        console.warn('获取本地推理设备列表失败:', error);
+        localModelDevices = [];
+        localModelAutoDeviceIndex = null;
+    }
+    renderDeviceOptions();
+}
+
 function getLocalAsrConfigFromForm() {
     return {
         engine: document.getElementById('local-asr-engine')?.value || 'sensevoice',
+        device: getDeviceSelectValue('local-asr-device'),
         incremental_asr: document.getElementById('local-incremental-asr')?.checked ?? true,
         interim_interval: parseFloat(document.getElementById('local-interim-interval')?.value || '2'),
     };
@@ -125,6 +262,7 @@ function applyLocalAsrConfig(config) {
     if (document.getElementById('local-asr-engine')) {
         document.getElementById('local-asr-engine').value = config.engine || 'sensevoice';
     }
+    setDeviceSelectValue(document.getElementById('local-asr-device'), config.device);
     if (document.getElementById('local-incremental-asr')) {
         document.getElementById('local-incremental-asr').checked = config.incremental_asr ?? true;
     }
@@ -132,6 +270,7 @@ function applyLocalAsrConfig(config) {
         document.getElementById('local-interim-interval').value = config.interim_interval ?? 2.0;
     }
     updateLocalAsrEngineHint();
+    updateLocalAsrDeviceState();
 }
 
 function getVadConfigFromForm() {
@@ -236,56 +375,152 @@ function sanitizeAsrBackendValue(value) {
     return normalized;
 }
 
+function setLocalModelBadge(badge, state) {
+    if (!badge) return;
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const key = {
+        ready: 'status.localModelReady',
+        missing: 'status.localModelMissing',
+        downloading: 'status.localModelDownloading',
+        unknown: 'status.localModelChecking',
+    }[state] || 'status.localModelChecking';
+    badge.textContent = t(key);
+    badge.setAttribute('data-i18n', key);
+    badge.classList.toggle('is-ready', state === 'ready');
+    badge.classList.toggle('is-missing', state === 'missing');
+}
+
 function renderLocalAsrStatus(payload) {
     const box = document.getElementById('local-asr-status');
     const button = document.getElementById('local-asr-download-btn');
-    if (!box || !button) return;
+    const badge = document.getElementById('local-asr-badge');
     const t = window.i18n ? window.i18n.t : (key) => key;
     const engine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
-    const engineStatus = payload?.engines?.[engine];
+    const engineStatus = payload?.engines?.[engine] || payload?.models?.asr?.[engine];
     localAsrStatus = payload?.download || localAsrStatus;
 
-    if (!payload || !engineStatus) {
-        box.textContent = t('hint.localAsrNotChecked');
-        button.disabled = false;
-        return;
+    if (box && button) {
+        if (!payload || !engineStatus) {
+            box.textContent = t('hint.localAsrNotChecked');
+            setLocalModelBadge(badge, 'unknown');
+            button.disabled = false;
+        } else if (localAsrStatus.running) {
+            box.textContent = `${t('status.downloading')}: ${localAsrStatus.status || ''}`;
+            setLocalModelBadge(badge, 'downloading');
+            button.disabled = true;
+        } else if (engineStatus.ready) {
+            box.textContent = t('status.localAsrReady', { engine: engineStatus.display_name || engine });
+            setLocalModelBadge(badge, 'ready');
+            button.disabled = false;
+        } else {
+            const issues = [];
+            if (Array.isArray(engineStatus.runtime_issues) && engineStatus.runtime_issues.length) {
+                issues.push(`${t('label.dependencies')}: ${engineStatus.runtime_issues.join(', ')}`);
+            }
+            if (engineStatus.error) {
+                issues.push(engineStatus.error);
+            }
+            if (Array.isArray(engineStatus.missing) && engineStatus.missing.length) {
+                issues.push(t('hint.localAsrNeedsDownload'));
+            }
+            box.textContent = issues.length
+                ? issues.join(' | ')
+                : t('hint.localAsrNeedsDownload');
+            setLocalModelBadge(badge, 'missing');
+            button.disabled = false;
+        }
     }
 
-    if (localAsrStatus.running) {
-        box.textContent = `${t('status.downloading')}: ${localAsrStatus.status || ''}`;
-        button.disabled = true;
-        return;
-    }
+    // 渲染 Hy-MT2 本地模型状态：完整管理在「本地模型」卡片，翻译API设置里只显示一行简要状态
+    const hymt2Status = payload?.hymt2 || payload?.models?.translation?.hymt2;
+    const hymt2Badge = document.getElementById('local-hymt2-badge');
+    const hymt2CardStatusBox = document.getElementById('local-hymt2-status-box');
+    const hymt2SettingsStatusBox = document.getElementById('hymt2-local-status');
 
-    if (engineStatus.ready) {
-        box.textContent = t('status.localAsrReady', { engine: engineStatus.display_name || engine });
-    } else {
-        const issues = [];
-        if (Array.isArray(engineStatus.runtime_issues) && engineStatus.runtime_issues.length) {
-            issues.push(`${t('label.dependencies')}: ${engineStatus.runtime_issues.join(', ')}`);
+    if (hymt2Status) {
+        const isReady = !!hymt2Status.ready;
+        const modelName = hymt2Status.model_file || '';
+
+        setLocalModelBadge(hymt2Badge, isReady ? 'ready' : 'missing');
+        if (hymt2CardStatusBox) {
+            hymt2CardStatusBox.textContent = isReady
+                ? t('status.localModelReady') + (modelName ? ` (${modelName})` : '')
+                : t('status.hymt2Missing');
         }
-        if (engineStatus.error) {
-            issues.push(engineStatus.error);
+        if (hymt2SettingsStatusBox) {
+            const key = isReady ? 'status.hymt2LocalReady' : 'status.hymt2LocalMissing';
+            hymt2SettingsStatusBox.textContent = t(key);
+            hymt2SettingsStatusBox.setAttribute('data-i18n', key);
         }
-        if (Array.isArray(engineStatus.missing) && engineStatus.missing.length) {
-            issues.push(t('hint.localAsrNeedsDownload'));
+    }
+}
+
+function focusLocalModelsCard() {
+    const card = document.getElementById('local-asr-card');
+    const content = document.getElementById('local-asr-settings');
+    if (!card) return;
+    if (content && content.classList.contains('collapsed')) {
+        toggleCollapsible('local-asr-settings');
+    }
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function downloadHymt2Model() {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const button = document.getElementById('local-hymt2-download-btn');
+    if (button) button.disabled = true;
+    try {
+        const response = await fetch(`${API_BASE}/local-models/download`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                engine: 'hymt2',
+            }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'download failed');
         }
-        box.textContent = issues.length
-            ? issues.join(' | ')
-            : t('hint.localAsrNeedsDownload');
-        button.disabled = false;
+        showMessage(t('msg.localAsrDownloadStarted'), 'success');
+        await refreshLocalAsrStatus();
+    } catch (error) {
+        console.error('下载本地 Hy-MT2 失败:', error);
+        showMessage(t('msg.localAsrDownloadFailed') + ': ' + error.message, 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+/**
+ * 同步 Hy-MT2 接入方式对应的子分组显示。
+ *
+ * persist 仅在用户手动改动下拉框时为 true；配置加载/回填阶段必须传 false，否则一次
+ * 页面刷新就会被记成「用户编辑」，让本地配置在与后端对账时无条件覆盖服务器。
+ */
+function onHymt2BackendModeChange(persist = true) {
+    const mode = document.getElementById('hymt2-backend-mode')?.value || 'api';
+    const apiSubgroup = document.getElementById('hymt2-api-subgroup');
+    const localSubgroup = document.getElementById('hymt2-local-subgroup');
+    if (apiSubgroup) apiSubgroup.style.display = mode === 'api' ? 'block' : 'none';
+    if (localSubgroup) localSubgroup.style.display = mode === 'local' ? 'block' : 'none';
+    if (mode === 'local') {
+        void refreshLocalAsrStatus();
+    }
+    if (persist) {
+        onSettingChange();
     }
 }
 
 async function refreshLocalAsrStatus() {
-    if (!isLocalAsrUiEnabled()) return;
     try {
-        const response = await fetch(`${API_BASE}/local-asr/status`);
+        const response = await fetch(`${API_BASE}/local-models/status`);
         if (!response.ok) return;
         const payload = await response.json();
         renderLocalAsrStatus(payload);
     } catch (error) {
-        console.warn('获取本地 ASR 状态失败:', error);
+        console.warn('获取本地模型状态失败:', error);
     }
 }
 
@@ -329,6 +564,7 @@ function updateLocalAsrUiVisibility() {
     if (isLocalAsrUiEnabled()) {
         card.style.display = 'block';
         updateLocalAsrEngineHint();
+        void loadLocalModelDevices();
         void refreshLocalAsrStatus();
     } else {
         card.style.display = 'none';
@@ -339,6 +575,7 @@ function onLocalAsrSettingChange(changedElement = null) {
     if (!isLocalAsrUiEnabled()) return;
     if (changedElement && changedElement.id === 'local-asr-engine') {
         updateLocalAsrEngineHint();
+        updateLocalAsrDeviceState();
         void refreshLocalAsrStatus();
     }
     onSettingChange(changedElement);
@@ -1286,7 +1523,7 @@ function updateOpenRouterStreamingUi() {
     updateLLMStreamingPromoState();
 }
 
-/** 同步「Hy-MT2」设置分组（WebSocket 地址输入框）的显示。 */
+/** 同步「Hy-MT2」设置分组（WebSocket 地址与本地推理切换）的显示。 */
 function updateHymt2SettingsVisibility(apiType = null) {
     const actualApiType = apiType || (document.getElementById('translation-api-type')
         ? document.getElementById('translation-api-type').value
@@ -1294,6 +1531,9 @@ function updateHymt2SettingsVisibility(apiType = null) {
     const group = document.getElementById('hymt2-settings');
     if (group) {
         group.style.display = actualApiType === 'hymt2' ? 'block' : 'none';
+        if (actualApiType === 'hymt2') {
+            onHymt2BackendModeChange(false);
+        }
     }
 }
 
@@ -2048,6 +2288,7 @@ document.addEventListener('i18n:languageChanged', function () {
     const useInternational = document.getElementById('use-international-endpoint')?.checked ?? false;
     updateAsrOptionsForInternational(useInternational);
     updateLocalAsrEngineHint();
+    renderDeviceOptions();
     updateLocalAsrUiVisibility();
     renderLanguageComboMenus();
     refreshLanguageComboClearLabels();
@@ -2408,6 +2649,7 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('target-language').value = config.translation.target_language || 'ja';
                 document.getElementById('secondary-target-language').value = config.translation.secondary_target_language || '';
                 document.getElementById('fallback-language').value = config.translation.fallback_language || '';
+                const apiType = config.translation.api_type || 'openrouter_streaming';
                 // 加载各模型的流式翻译偏好
                 if (typeof config.translation.llm_streaming === 'boolean') {
                     modelStreamingPreferences.openrouter = config.translation.llm_streaming;
@@ -2439,10 +2681,19 @@ function loadConfigFromLocalStorage() {
                     document.getElementById('openrouter-streaming-mode').checked = modelStreamingPreferences.openrouter ?? true;
                     document.getElementById('openrouter-streaming-mode').disabled = false;
                 }
+                const hymt2BackendEl = document.getElementById('hymt2-backend-mode');
+                if (hymt2BackendEl) {
+                    hymt2BackendEl.value = config.translation.hymt2_backend || 'api';
+                }
                 const hymt2WsUrlEl = document.getElementById('hymt2-ws-url');
                 if (hymt2WsUrlEl) {
                     hymt2WsUrlEl.value = config.translation.hymt2_websocket_url || '';
                 }
+                setDeviceSelectValue(
+                    document.getElementById('hymt2-local-device'),
+                    config.translation.hymt2_local_device,
+                );
+                onHymt2BackendModeChange(false);
                 if (document.body.classList.contains('mode-simple')) {
                     document.getElementById('llm-base-url').value = SIMPLE_MODE_LLM_BASE_URL;
                     document.getElementById('llm-model').value = SIMPLE_MODE_LLM_TEMPLATE_NAME;
@@ -2653,9 +2904,17 @@ function loadDefaultConfig() {
         streamingModeEl.checked = true;
         streamingModeEl.disabled = false;
     }
+    const hymt2BackendDefault = document.getElementById('hymt2-backend-mode');
+    if (hymt2BackendDefault) {
+        hymt2BackendDefault.value = 'api';
+    }
     const hymt2WsUrlDefault = document.getElementById('hymt2-ws-url');
     if (hymt2WsUrlDefault) {
         hymt2WsUrlDefault.value = '';
+    }
+    for (const deviceSelectId of DEVICE_SELECT_IDS) {
+        // 默认尽量选中自动挑出的独显；枚举不可用时退回「自动」
+        setDeviceSelectValue(document.getElementById(deviceSelectId), getDefaultDeviceValue());
     }
     setLLMParallelFastestModeSelect('off');
     document.getElementById('llm-base-url').value = SIMPLE_MODE_LLM_BASE_URL;
@@ -2694,6 +2953,7 @@ function loadDefaultConfig() {
     if (isLocalAsrUiEnabled()) {
         applyLocalAsrConfig({
             engine: 'sensevoice',
+            device: getDefaultDeviceValue(),
             incremental_asr: true,
             interim_interval: 2.0,
         });
@@ -2801,10 +3061,19 @@ function applyServerConfigPayload(config) {
         document.getElementById('openrouter-streaming-mode').checked = modelStreamingPreferences.openrouter ?? true;
         document.getElementById('openrouter-streaming-mode').disabled = false;
     }
+    const hymt2BackendApply = document.getElementById('hymt2-backend-mode');
+    if (hymt2BackendApply) {
+        hymt2BackendApply.value = config.translation.hymt2_backend || 'api';
+    }
     const hymt2WsUrlApply = document.getElementById('hymt2-ws-url');
     if (hymt2WsUrlApply) {
         hymt2WsUrlApply.value = config.translation.hymt2_websocket_url || '';
     }
+    setDeviceSelectValue(
+        document.getElementById('hymt2-local-device'),
+        config.translation.hymt2_local_device,
+    );
+    onHymt2BackendModeChange(false);
     if (document.body.classList.contains('mode-simple')) {
         document.getElementById('llm-base-url').value = SIMPLE_MODE_LLM_BASE_URL;
         document.getElementById('llm-model').value = SIMPLE_MODE_LLM_TEMPLATE_NAME;
@@ -3037,6 +3306,8 @@ function saveConfigToLocalStorage() {
                 ),
                 openai_compat_extra_body_json: openaiExtraBodyJson,
                 llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
+                hymt2_backend: document.getElementById('hymt2-backend-mode')?.value || 'api',
+                hymt2_local_device: getDeviceSelectValue('hymt2-local-device'),
                 hymt2_websocket_url: (document.getElementById('hymt2-ws-url')?.value || '').trim(),
                 source_language: getSourceLanguageEffective(),
                 show_partial_results: document.getElementById('show-partial-results').checked,
@@ -3288,6 +3559,8 @@ async function saveConfig(autoSave = false) {
                 ),
                 openai_compat_extra_body_json: openaiExtraBodyJson,
                 llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
+                hymt2_backend: document.getElementById('hymt2-backend-mode')?.value || 'api',
+                hymt2_local_device: getDeviceSelectValue('hymt2-local-device'),
                 hymt2_websocket_url: (document.getElementById('hymt2-ws-url')?.value || '').trim(),
                 source_language: getSourceLanguageEffective(),
                 show_partial_results: document.getElementById('show-partial-results').checked,
@@ -3677,18 +3950,21 @@ async function startService() {
             }
 
             if (enableTranslation && translationApiType === 'hymt2') {
-                const hymt2Url = (document.getElementById('hymt2-ws-url')?.value || '').trim();
-                if (!hymt2Url) {
-                    showMessage('❌ ' + t('msg.hyMt2WsUrlRequired'), 'error');
-                    startBtn.disabled = false;
-                    startBtn.textContent = t('btn.startService');
-                    const hymt2Group = document.getElementById('hymt2-settings');
-                    if (hymt2Group) {
-                        hymt2Group.style.display = 'block';
-                        ensureCollapsibleExpanded('translation-api');
+                const hymt2Backend = document.getElementById('hymt2-backend-mode')?.value || 'api';
+                if (hymt2Backend === 'api') {
+                    const hymt2Url = (document.getElementById('hymt2-ws-url')?.value || '').trim();
+                    if (!hymt2Url) {
+                        showMessage('❌ ' + t('msg.hyMt2WsUrlRequired'), 'error');
+                        startBtn.disabled = false;
+                        startBtn.textContent = t('btn.startService');
+                        const hymt2Group = document.getElementById('hymt2-settings');
+                        if (hymt2Group) {
+                            hymt2Group.style.display = 'block';
+                            ensureCollapsibleExpanded('translation-api');
+                        }
+                        highlightInput('hymt2-ws-url');
+                        return;
                     }
-                    highlightInput('hymt2-ws-url');
-                    return;
                 }
             }
 
