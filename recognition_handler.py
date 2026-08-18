@@ -1188,7 +1188,12 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         primary_translated = False
 
         if is_ongoing:
-            print(f'部分：{text}', end='\r')
+            # 临时：终端中间结果改为逐行输出（原先 end='\r' 覆盖同一行），并带 hh:mm:ss.sss 时间戳
+            _now_partial = time.time()
+            print(
+                f"[{time.strftime('%H:%M:%S', time.localtime(_now_partial))}"
+                f".{int(_now_partial * 1000) % 1000:03d}] 部分：{text}"
+            )
             display_text = get_display_text(text)
             current_trans = s.subtitles_state.get("translated", "")
             current_reverse_trans = s.subtitles_state.get("reverse_translated", "")

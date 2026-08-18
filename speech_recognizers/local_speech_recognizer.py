@@ -138,7 +138,13 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         kwargs = {}
         if hasattr(engine, "transcribe") and "update_context" in engine.transcribe.__code__.co_varnames:
             kwargs["update_context"] = is_final
+        recognition_started = time.monotonic()
         result = engine.transcribe(audio, **kwargs)
+        # 临时：识别完成后输出一行日志，记录本次识别耗时（毫秒）
+        print(
+            f"[本地ASR] 识别完成（{'最终' if is_final else '中间'}）: "
+            f"耗时 {(time.monotonic() - recognition_started) * 1000.0:.0f}ms"
+        )
         if not result:
             return None
         text = (result.get("text") or "").strip()
@@ -188,6 +194,11 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             return
 
         stream_id = self._stream_id
+        # 临时：本地 ASR 触发时输出一行日志
+        print(
+            f"[本地ASR] 触发识别（{'最终' if is_final else '中间'}）: "
+            f"音频时长 {audio.size / LOCAL_VAD_SAMPLE_RATE:.2f}s"
+        )
         self._active_transcribe_future = self._asr_executor.submit(self._transcribe, audio, is_final=is_final)
         self._active_transcribe_future.add_done_callback(
             lambda done_future, _sid=stream_id, _fin=is_final: self._on_transcription_done(
