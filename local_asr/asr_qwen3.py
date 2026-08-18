@@ -6,6 +6,7 @@ import sys
 import numpy as np
 
 import config
+from .gpu_devices import describe_device, resolve_device
 from .model_manager import (
     MODELS_DIR,
     ensure_vendor_sources,
@@ -73,8 +74,16 @@ class Qwen3ASREngine:
         from qwen_asr_gguf.inference.schema import ASREngineConfig
 
         resolved_model_dir = model_dir or get_local_model_path("qwen3-asr") or str(MODELS_DIR / "qwen3-asr")
+
+        # GGUF 解码器的运行位置（SenseVoice 固定 CPU，只有 Qwen3-ASR 用得上 GPU）
+        n_gpu_layers, main_gpu, effective_device = resolve_device(
+            getattr(config, "LOCAL_ASR_DEVICE", "auto")
+        )
         if use_dml is None:
             use_dml = bool(getattr(config, "LOCAL_QWEN_ENCODER_USE_DML", False))
+        if n_gpu_layers == 0:
+            # 选了 CPU 就整条链路都留在 CPU 上，不要偷偷把 ONNX 编码器丢给 DirectML
+            use_dml = False
         n_ctx = int(getattr(config, "LOCAL_QWEN_ASR_N_CTX", 2048))
         engine_cfg = ASREngineConfig(
             model_dir=resolved_model_dir,
@@ -85,15 +94,20 @@ class Qwen3ASREngine:
             verbose=True,
             enable_aligner=False,
             pad_to=int(chunk_size),
+            n_gpu_layers=n_gpu_layers,
+            main_gpu=main_gpu,
         )
         self._engine = QwenASREngine(engine_cfg)
         self.language: str | None = None
         self._context = ""
         self._corpus_text = (corpus_text or "").strip()
         self.model_dir = resolved_model_dir
+        self.device = effective_device
         logger.info(
-            "Qwen3-ASR loaded: %s (encoder_DML=%s)",
+            "Qwen3-ASR loaded: %s (device=%s -> %s, encoder_DML=%s)",
             resolved_model_dir,
+            effective_device,
+            describe_device(effective_device),
             use_dml,
         )
 

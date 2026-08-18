@@ -124,6 +124,10 @@ LOCAL_VAD_SILENCE_DURATION = 0.8
 # 起声时拼接的预缓冲音频时长（秒），用于避免漏掉第一个字
 LOCAL_VAD_PRE_SPEECH_DURATION = 0.2
 
+# 本地识别的运行位置：'auto'（自动挑一张 GPU，独显优先）、'cpu' 或 'vulkan:N'。
+# 只对 Qwen3-ASR 的 GGUF 解码器生效——SenseVoice 是 INT8 ONNX，固定跑 CPU。
+LOCAL_ASR_DEVICE = 'auto'
+
 # 本地增量识别（中间结果）
 LOCAL_INCREMENTAL_ASR = True
 LOCAL_INTERIM_INTERVAL = 2.0
@@ -259,6 +263,23 @@ HYMT2_TIMEOUT_SECONDS = 30
 
 # 建连失败重试次数
 HYMT2_MAX_RETRIES = 3
+
+def sanitize_local_device(value) -> str:
+    """把本地推理设备设置收敛成 'auto' / 'cpu' / 'vulkan:N'。
+
+    实现在 local_asr.gpu_devices；这里做一层薄封装，好让 config 的调用方
+    （网页后端等）不必关心 local_asr 是否可用（精简构建里可能被裁掉）。
+    """
+    try:
+        from local_asr.gpu_devices import sanitize_device
+    except Exception:
+        normalized = str(value or '').strip().lower()
+        if normalized == 'cpu':
+            return 'cpu'
+        if normalized.startswith('vulkan:') and normalized[7:].isdigit():
+            return normalized
+        return 'auto'
+    return sanitize_device(value)
 
 # 运行期凭据。WebUI 只会通过页面请求更新这些进程内字段，不会读取或写入
 # os.environ；旧版 CLI 则由 ``apply_cli_env`` 从 .env 显式填充。
@@ -527,6 +548,7 @@ def apply_cli_env() -> None:
     """
     global VAD_ENABLED
     global LOCAL_QWEN_LOG_PIPELINE_TIMING, LOCAL_QWEN_ENCODER_USE_DML
+    global LOCAL_ASR_DEVICE
     global SAVE_POST_RESAMPLE_AUDIO, SAVE_PRE_RESAMPLE_AUDIO
     global DEBUG_AUDIO_OUTPUT_DIR, ENABLE_VAD_GATING_VERBOSE
     global TRANSLATION_API_TYPE, LLM_BASE_URL, LLM_MODEL, LLM_TEMPLATE
@@ -548,6 +570,9 @@ def apply_cli_env() -> None:
     )
     LOCAL_QWEN_ENCODER_USE_DML = _read_env_bool(
         'LOCAL_QWEN_ENCODER_USE_DML', LOCAL_QWEN_ENCODER_USE_DML
+    )
+    LOCAL_ASR_DEVICE = sanitize_local_device(
+        _read_first_env('LOCAL_ASR_DEVICE', default=LOCAL_ASR_DEVICE)
     )
     SAVE_POST_RESAMPLE_AUDIO = _read_env_bool(
         'SAVE_POST_RESAMPLE_AUDIO', SAVE_POST_RESAMPLE_AUDIO

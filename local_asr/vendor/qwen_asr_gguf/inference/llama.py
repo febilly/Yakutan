@@ -28,6 +28,12 @@ llama_token = ctypes.c_int32
 llama_pos = ctypes.c_int32
 llama_seq_id = ctypes.c_int32
 
+# llama_split_mode
+LLAMA_SPLIT_MODE_NONE = 0   # 只用 main_gpu
+LLAMA_SPLIT_MODE_LAYER = 1  # 按层切分到多张 GPU（llama.cpp 默认）
+LLAMA_SPLIT_MODE_ROW = 2
+
+
 class llama_model_params(ctypes.Structure):
     _fields_ = [
         ("devices", ctypes.POINTER(ctypes.c_void_p)),
@@ -405,13 +411,15 @@ def init_llama_lib():
     llama_sampler_accept.restype = None
 
 
-def load_model(model_path: str):
+def load_model(model_path: str, n_gpu_layers: int = 99, main_gpu: int = 0):
     """
     加载 GGUF 模型（自动处理初始化和路径编码）
-    
+
     Args:
         model_path: GGUF 模型文件路径
-        
+        n_gpu_layers: 卸载到 GPU 的层数，默认为 99（全部卸载），0 为纯 CPU
+        main_gpu: 使用第几张 GPU（与 ggml 的 GPU 设备枚举同序）
+
     Returns:
         model: llama_model 指针
     """
@@ -430,6 +438,15 @@ def load_model(model_path: str):
     # 初始化 backend，载入模型
     init_llama_lib()
     model_params = llama_model_default_params()
+    model_params.n_gpu_layers = 99 if n_gpu_layers == -1 else n_gpu_layers
+    # 默认 split_mode 是 LAYER（devices=NULL 时把层切分到所有可见 GPU）。核显+独显
+    # 的机器上这会把一部分层放到核显，比只用独显更慢，因此这里固定只用一张卡。
+    model_params.split_mode = LLAMA_SPLIT_MODE_NONE
+    model_params.main_gpu = max(0, int(main_gpu))
+    logger.info(
+        f"Loading model with n_gpu_layers={model_params.n_gpu_layers}, "
+        f"split_mode=NONE, main_gpu={model_params.main_gpu}"
+    )
     model = llama_model_load_from_file(
         model_rel.as_posix().encode('utf-8'),
         model_params
@@ -468,8 +485,8 @@ def create_context(model, n_ctx=2048, n_batch=2048, n_ubatch=512, n_seq_max=1,
 
 class LlamaModel:
     """模型的面向对象封装"""
-    def __init__(self, path, n_gpu_layers=-1):
-        self.ptr = load_model(path)
+    def __init__(self, path, n_gpu_layers=99, main_gpu=0):
+        self.ptr = load_model(path, n_gpu_layers=n_gpu_layers, main_gpu=main_gpu)
         if not self.ptr:
             raise RuntimeError(f"Failed to load llama model: {path}")
             
