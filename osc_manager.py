@@ -93,7 +93,7 @@ class OSCManager:
             self._vrchat_linked_logged = False
             
             # 发送节流配置（仅保留一个待发消息）
-            self._cooldown_seconds = 1.5  # 发送冷却时间（秒）
+            self._cooldown_seconds = 1.0  # 发送冷却时间（秒）
             self._last_send_time = 0.0  # 上次发送时间
             self._pending_message: Optional[QueuedMessage] = None
             self._pending_timer: Optional[threading.Timer] = None
