@@ -407,7 +407,7 @@ async def main(
                 threshold=config.LOCAL_VAD_THRESHOLD,
                 min_speech_duration=config.LOCAL_VAD_MIN_SPEECH_DURATION,
                 chunk_duration=512.0 / config.SAMPLE_RATE,
-                pre_speech_duration=config.LOCAL_VAD_PRE_SPEECH_DURATION,
+                pre_speech_duration=config.VAD_PRE_SPEECH_DURATION,
             )
             vad_silence_duration = config.clamp_vad_silence_duration(
                 config.LOCAL_VAD_SILENCE_DURATION
@@ -417,7 +417,7 @@ async def main(
                 'vad_threshold': config.LOCAL_VAD_THRESHOLD,
                 'min_speech_duration': config.LOCAL_VAD_MIN_SPEECH_DURATION,
                 'silence_duration': vad_silence_duration,
-                'pre_speech_duration': config.LOCAL_VAD_PRE_SPEECH_DURATION,
+                'pre_speech_duration': config.VAD_PRE_SPEECH_DURATION,
             })
             state.vad_enabled = True
             import numpy as np
@@ -428,6 +428,7 @@ async def main(
                   f'min_speech={config.LOCAL_VAD_MIN_SPEECH_DURATION:.1f}s '
                   f'silence={vad_silence_duration:.1f}s '
                   f'(在线服务端断句阈值同步为 {int(round(vad_silence_duration * 1000))}ms) '
+                  f'pre={config.VAD_PRE_SPEECH_DURATION:.1f}s '
                   f'mode={state.vad_processor.mode}')
         except Exception as e:
             import traceback

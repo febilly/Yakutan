@@ -78,7 +78,7 @@ class VADProcessor:
         threshold: float = 0.50,
         min_speech_duration: float = 1.0,
         chunk_duration: float = 0.032,
-        pre_speech_duration: float = 0.2,
+        pre_speech_duration: float = 0.5,
     ) -> None:
         self.sample_rate = sample_rate
         self.threshold = threshold

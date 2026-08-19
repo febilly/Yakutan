@@ -233,7 +233,7 @@ def _vad_config_dict() -> dict:
         'min_speech_duration': getattr(config, 'LOCAL_VAD_MIN_SPEECH_DURATION', 1.0),
         'max_speech_duration': getattr(config, 'LOCAL_VAD_MAX_SPEECH_DURATION', 30.0),
         'silence_duration': getattr(config, 'LOCAL_VAD_SILENCE_DURATION', 0.8),
-        'pre_speech_duration': getattr(config, 'LOCAL_VAD_PRE_SPEECH_DURATION', 0.2),
+        'pre_speech_duration': getattr(config, 'VAD_PRE_SPEECH_DURATION', 0.5),
     }
 
 
@@ -552,7 +552,7 @@ def update_config(config_data):
                     float(vad['silence_duration'])
                 )
             if 'pre_speech_duration' in vad:
-                config.LOCAL_VAD_PRE_SPEECH_DURATION = max(0.0, float(vad['pre_speech_duration']))
+                config.VAD_PRE_SPEECH_DURATION = max(0.0, float(vad['pre_speech_duration']))
 
         # 更新翻译配置
         if 'translation' in config_data:
@@ -739,7 +739,7 @@ def update_config(config_data):
                     float(local_inference['silence_duration'])
                 )
             if 'pre_speech_duration' in local_inference and 'vad' not in config_data:
-                config.LOCAL_VAD_PRE_SPEECH_DURATION = max(0.0, float(local_inference['pre_speech_duration']))
+                config.VAD_PRE_SPEECH_DURATION = max(0.0, float(local_inference['pre_speech_duration']))
             if 'device' in local_inference:
                 config.LOCAL_INFERENCE_DEVICE = config.sanitize_local_device(local_inference['device'])
             if 'incremental_asr' in local_inference:

@@ -124,8 +124,10 @@ LOCAL_VAD_MAX_SPEECH_DURATION = 30.0
 # 整句结束判定静音时长（秒）：本地 VAD 断句用；在线服务端断句阈值也由本值派生
 # （会话建立时下发，见 recognizer_factory），保持在线/本地断句行为一致。
 LOCAL_VAD_SILENCE_DURATION = 0.8
-# 起声时拼接的预缓冲音频时长（秒），用于避免漏掉第一个字
-LOCAL_VAD_PRE_SPEECH_DURATION = 0.2
+# 起声预缓冲时长（秒）：统一作用于两种 VAD，用于避免漏掉第一个字。
+# - 本地 ASR 断句：开口瞬间把此前累积的静音期音频拼到语音段首
+# - 在线 API 门控：检测到开口时，先把门控期间扣留的最近音频补发给 ASR
+VAD_PRE_SPEECH_DURATION = 0.5
 # 断句静音时长的允许范围（秒）：在线服务端断句参数
 # （max_sentence_silence / silence_duration_ms）官方支持 [200, 6000]ms，
 # 本地设置统一夹到同一范围，见 clamp_vad_silence_duration()。
@@ -729,7 +731,7 @@ def get_default_ui_config() -> dict:
             'min_speech_duration': 1.0,
             'max_speech_duration': 30.0,
             'silence_duration': 0.8,
-            'pre_speech_duration': 0.2,
+            'pre_speech_duration': VAD_PRE_SPEECH_DURATION,
         },
         'translation': {
             'enable_translation': True,

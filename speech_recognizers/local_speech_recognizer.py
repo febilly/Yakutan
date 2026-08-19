@@ -74,7 +74,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             threshold=float(getattr(config, "LOCAL_VAD_THRESHOLD", 0.50)),
             min_speech_duration=float(getattr(config, "LOCAL_VAD_MIN_SPEECH_DURATION", 1.0)),
             chunk_duration=LOCAL_VAD_CHUNK_DURATION,
-            pre_speech_duration=float(getattr(config, "LOCAL_VAD_PRE_SPEECH_DURATION", 0.2)),
+            pre_speech_duration=float(getattr(config, "VAD_PRE_SPEECH_DURATION", 0.5)),
         )
         vad_mode = (
             getattr(config, "LOCAL_VAD_MODE", "silero")
@@ -89,7 +89,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
                 "silence_duration": config.clamp_vad_silence_duration(
                     float(getattr(config, "LOCAL_VAD_SILENCE_DURATION", 0.8))
                 ),
-                "pre_speech_duration": float(getattr(config, "LOCAL_VAD_PRE_SPEECH_DURATION", 0.2)),
+                "pre_speech_duration": float(getattr(config, "VAD_PRE_SPEECH_DURATION", 0.5)),
             }
         )
         return vad

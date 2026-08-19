@@ -303,7 +303,7 @@ function getVadConfigFromForm() {
         min_speech_duration: secondsFromMs('vad-min-speech-duration', 1000),
         max_speech_duration: secondsFromMs('vad-max-speech-duration', 30000),
         silence_duration: secondsFromMs('vad-silence-duration', 800),
-        pre_speech_duration: secondsFromMs('vad-pre-speech-duration', 200),
+        pre_speech_duration: secondsFromMs('vad-pre-speech-duration', 500),
     };
 }
 
@@ -339,7 +339,7 @@ function resolveVadConfig(config = {}) {
         pre_speech_duration:
             vad.pre_speech_duration ??
             legacyLocalInference.pre_speech_duration ??
-            0.2,
+            0.5,
     };
 }
 
@@ -365,7 +365,7 @@ function applyVadConfig(config) {
         document.getElementById('vad-silence-duration').value = (vad.silence_duration ?? 0.8) * 1000;
     }
     if (document.getElementById('vad-pre-speech-duration')) {
-        document.getElementById('vad-pre-speech-duration').value = (vad.pre_speech_duration ?? 0.2) * 1000;
+        document.getElementById('vad-pre-speech-duration').value = (vad.pre_speech_duration ?? 0.5) * 1000;
     }
 }
 
@@ -3008,7 +3008,7 @@ function loadDefaultConfig() {
         min_speech_duration: 1.0,
         max_speech_duration: 30.0,
         silence_duration: 0.8,
-        pre_speech_duration: 0.2,
+        pre_speech_duration: 0.5,
     });
 
     if (isLocalInferenceUiEnabled()) {
