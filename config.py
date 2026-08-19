@@ -103,8 +103,8 @@ DOUBAO_ASR_MAX_BUFFER_SECONDS = 60
 # 本地 ASR 引擎
 # 可选: 'sensevoice', 'qwen3-asr'（已移除 Fun-ASR-Nano）
 # sensevoice：INT8 ONNX，固定 CPU（约 1.5–2.5GB 内存；发布版可内置模型）
-# qwen3-asr：GGUF 解码跟随"运行位置"（GPU→走 Vulkan；CPU→CPU）；ONNX 音频编码固定在 CPU。
-# 约需显存视配置而定
+# qwen3-asr：GGUF 解码跟随"运行位置"（GPU→走 Vulkan；CPU→CPU）；ONNX 音频编码见
+#            LOCAL_QWEN_ENCODER_DEVICE，可单独放 CPU 或显卡。显存占用见 QWEN3_ASR_VRAM_MB。
 LOCAL_INFERENCE_ENGINE = 'sensevoice'
 _VALID_LOCAL_INFERENCE_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
 if LOCAL_INFERENCE_ENGINE not in _VALID_LOCAL_INFERENCE_ENGINES:
@@ -146,6 +146,41 @@ def clamp_vad_silence_duration(seconds: float) -> float:
 # 本地识别的运行位置：'auto'（自动挑一张 GPU，独显优先）、'cpu' 或 'vulkan:N'。
 # 只对 Qwen3-ASR 的 GGUF 解码器生效——SenseVoice 是 INT8 ONNX，固定跑 CPU。
 LOCAL_INFERENCE_DEVICE = 'auto'
+
+# Qwen3-ASR 的 ONNX 音频编码器跑在哪：'auto'（跟随上面的运行位置）、'cpu'、'gpu'（DirectML）。
+# 编码器和 GGUF 解码器是两个独立的模型，可以分开放：
+#   - 放显卡：24s 音频的编码 400ms → 70ms；显存多占约 0.45GB
+#   - 放 CPU：不占显存，而且完全不受显卡上其他负载（比如游戏）影响
+# 显卡满载时编码器放 CPU 的耗时几乎不变，放显卡则会跟着变慢 2.6 倍，所以边打游戏边用时 'cpu' 是合理选择。
+LOCAL_QWEN_ENCODER_DEVICE = 'auto'
+_VALID_QWEN_ENCODER_DEVICES = frozenset({'auto', 'cpu', 'gpu'})
+if LOCAL_QWEN_ENCODER_DEVICE not in _VALID_QWEN_ENCODER_DEVICES:
+    LOCAL_QWEN_ENCODER_DEVICE = 'auto'
+
+
+def sanitize_qwen_encoder_device(value) -> str:
+    """把 ONNX 音频编码器的运行位置收敛成 'auto' / 'cpu' / 'gpu'。"""
+    normalized = str(value or '').strip().lower()
+    return normalized if normalized in _VALID_QWEN_ENCODER_DEVICES else 'auto'
+
+
+# 推测解码：把上一次的识别/翻译结果当作草稿，一次前向验证掉其中模型认同的部分。
+# 验证是精确比对，输出与逐 token 解码完全一致，只是前向次数变少。
+# 实测（RTX 3080 / Vulkan）：ASR token 循环约 2.3x，Hy-MT2 按句长 1.1x–2.3x。
+LOCAL_SPECULATIVE_DECODE = True
+
+# Hy-MT2 本地推理：复用上一次 prompt 的公共前缀（背景/历史那段每次都一样），
+# 只重算发生变化的部分。GPU 上约省 5%，CPU 上 prefill 是大头、收益明显。
+LOCAL_MT_PROMPT_CACHE = True
+
+# Qwen3-ASR 由两个独立模型组成，各自的显存占用（MB，实测于 RTX 3080）。
+# 网页面板据此分项显示，而不是笼统给一个总数——因为两部分可以分开放在 CPU/显卡上。
+QWEN3_ASR_VRAM_MB = {
+    'decoder': 1612,  # 识别解码器（GGUF LLM 1.7B q4），跟随"运行位置"
+    'encoder': 465,   # 音频编码器（ONNX int4），仅在放到显卡时占显存
+}
+# Hy-MT2 本地翻译模型（GGUF q4）的显存占用（MB，实测）。
+HYMT2_VRAM_MB = 1402
 
 # 本地增量识别（中间结果）
 # 触发方式基于 VAD：说话中检测到短停顿（如逗号/分句位置）立即做一次全量本地识别，

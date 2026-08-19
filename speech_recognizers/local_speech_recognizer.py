@@ -306,7 +306,17 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         self._last_partial_text = ""
         self._last_partial_voiced_seq = -1
         self._stream_id += 1
+        self._reset_engine_draft()
         self._emit_result(text, is_final=True, raw=raw)
+
+    def _reset_engine_draft(self) -> None:
+        """整句翻篇：让引擎丢掉上一句的推测解码草稿，别拿它去猜下一句。"""
+        engine = self._engine
+        if engine is not None and hasattr(engine, "reset_draft"):
+            try:
+                engine.reset_draft()
+            except Exception:  # pragma: no cover - 草稿只影响速度，失败不该打断识别
+                logger.debug("reset_draft failed", exc_info=True)
 
     def _process_chunk(self, chunk: np.ndarray) -> None:
         if self._vad._is_speaking and self._vad._speech_samples >= self._input_cap_samples():
@@ -409,6 +419,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
                 return
             self._running = True
             self._stream_id = 0
+            self._reset_engine_draft()
             self._last_partial_text = ""
             self._last_partial_time = time.monotonic()
             self._silence_trigger_armed = True

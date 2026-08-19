@@ -117,6 +117,55 @@ function isLocalInferenceUiEnabled() {
     return !!featureFlags.local_inference_ui_enabled;
 }
 
+// Qwen3-ASR 由两个独立模型组成，可以分别放在 CPU 或显卡上，所以显存要分项显示，
+// 而不是笼统给一个总数。数值由后端从 config.QWEN3_ASR_VRAM_MB 下发（实测值）。
+let qwen3VramMb = { decoder: 0, encoder: 0 };
+
+function formatVramMb(mb) {
+    const value = Number(mb) || 0;
+    return value >= 1024 ? `${(value / 1024).toFixed(1)} GB` : `${Math.round(value)} MB`;
+}
+
+function updateQwen3ModelPlacement() {
+    const box = document.getElementById('local-qwen3-vram');
+    const vramGroup = document.getElementById('local-qwen3-vram-group');
+    const encoderGroup = document.getElementById('local-encoder-device-group');
+    const isQwen3 = (document.getElementById('local-inference-engine')?.value || '') === 'qwen3-asr';
+    const show = isQwen3 && isLocalInferenceUiEnabled();
+
+    if (encoderGroup) encoderGroup.style.display = show ? '' : 'none';
+    if (vramGroup) vramGroup.style.display = show ? '' : 'none';
+    if (!box || !show) return;
+
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const decoderOnGpu = getDeviceSelectValue('local-inference-device') !== 'cpu';
+    const encoderChoice = document.getElementById('local-encoder-device')?.value || 'auto';
+    const encoderOnGpu = encoderChoice === 'gpu'
+        || (encoderChoice === 'auto' && decoderOnGpu);
+
+    const onGpu = t('localInference.placement.gpu');
+    const onCpu = t('localInference.placement.cpu');
+    const rows = [
+        {
+            name: t('localInference.part.decoder'),
+            where: decoderOnGpu ? onGpu : onCpu,
+            vram: decoderOnGpu ? formatVramMb(qwen3VramMb.decoder) : '—',
+        },
+        {
+            name: t('localInference.part.encoder'),
+            where: encoderOnGpu ? onGpu : onCpu,
+            vram: encoderOnGpu ? formatVramMb(qwen3VramMb.encoder) : '—',
+        },
+    ];
+    const totalMb = (decoderOnGpu ? qwen3VramMb.decoder : 0) + (encoderOnGpu ? qwen3VramMb.encoder : 0);
+
+    box.innerHTML = rows
+        .map((r) => `<div>${r.name} — ${r.where}，${t('localInference.vramLabel')} ${r.vram}</div>`)
+        .join('')
+        + `<div style="margin-top:4px;"><strong>${t('localInference.vramTotal')} ${
+            totalMb > 0 ? formatVramMb(totalMb) : '—'}</strong></div>`;
+}
+
 // ===================== 本地推理设备（GPU/CPU） =====================
 //
 // 设备值是扁平字符串：'auto' | 'cpu' | 'vulkan:N'，与后端 / .env 共用。
@@ -252,6 +301,7 @@ function getLocalInferenceConfigFromForm() {
     return {
         engine: document.getElementById('local-inference-engine')?.value || 'sensevoice',
         device: getDeviceSelectValue('local-inference-device'),
+        encoder_device: document.getElementById('local-encoder-device')?.value || 'auto',
         incremental_asr: document.getElementById('local-incremental-asr')?.checked ?? true,
         incremental_trigger_silence:
             parseInt(document.getElementById('local-incremental-trigger-silence')?.value || '10', 10) / 1000,
@@ -269,6 +319,15 @@ function applyLocalInferenceConfig(config) {
         document.getElementById('local-inference-engine').value = config.engine || 'sensevoice';
     }
     setDeviceSelectValue(document.getElementById('local-inference-device'), config.device);
+    const encoderSelect = document.getElementById('local-encoder-device');
+    if (encoderSelect) {
+        const encDev = String(config.encoder_device || 'auto');
+        encoderSelect.value = ['auto', 'cpu', 'gpu'].includes(encDev) ? encDev : 'auto';
+    }
+    if (config.qwen3_vram_mb) {
+        qwen3VramMb = config.qwen3_vram_mb;
+    }
+    updateQwen3ModelPlacement();
     if (document.getElementById('local-incremental-asr')) {
         document.getElementById('local-incremental-asr').checked = config.incremental_asr ?? true;
     }
@@ -621,6 +680,7 @@ function updateLocalInferenceUiVisibility() {
     if (isLocalInferenceUiEnabled()) {
         card.style.display = 'block';
         updateLocalInferenceEngineHint();
+        updateQwen3ModelPlacement();
         void loadLocalModelDevices();
         void refreshLocalInferenceStatus();
     } else {
@@ -634,6 +694,11 @@ function onLocalInferenceSettingChange(changedElement = null) {
         updateLocalInferenceEngineHint();
         updateLocalInferenceDeviceState();
         void refreshLocalInferenceStatus();
+    }
+    // 引擎/运行位置/编码器位置任一变化都会改变显存分布，重画那张分项表
+    if (changedElement && ['local-inference-engine', 'local-inference-device',
+        'local-encoder-device'].includes(changedElement.id)) {
+        updateQwen3ModelPlacement();
     }
     onSettingChange(changedElement);
 }
@@ -2345,6 +2410,7 @@ document.addEventListener('i18n:languageChanged', function () {
     const useInternational = document.getElementById('use-international-endpoint')?.checked ?? false;
     updateAsrOptionsForInternational(useInternational);
     updateLocalInferenceEngineHint();
+    updateQwen3ModelPlacement();
     renderDeviceOptions();
     updateLocalInferenceUiVisibility();
     renderLanguageComboMenus();

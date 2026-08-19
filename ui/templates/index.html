@@ -685,6 +685,19 @@
                                         </select>
                                         <small class="form-text" id="local-inference-device-hint" data-i18n="hint.localInferenceDevice">仅对 Qwen3-ASR 生效；SenseVoice 固定在 CPU 上运行。</small>
                                     </div>
+                                    <div class="form-group" id="local-encoder-device-group" style="display: none;">
+                                        <label for="local-encoder-device" data-i18n="label.localEncoderDevice">音频编码器运行位置</label>
+                                        <select id="local-encoder-device" class="form-control"
+                                            onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
+                                            <option value="auto" data-i18n="option.encoderDeviceAuto">跟随上面的运行位置</option>
+                                            <option value="gpu" data-i18n="option.encoderDeviceGpu">显卡（DirectML）</option>
+                                            <option value="cpu" data-i18n="option.encoderDeviceCpu">CPU</option>
+                                        </select>
+                                        <small class="form-text" data-i18n="hint.localEncoderDevice">音频编码器放显卡上明显更快（24 秒音频约 400ms → 70ms），代价是多占显存。放 CPU 则完全不受显卡上其他负载影响，边打游戏边用时更稳。</small>
+                                    </div>
+                                    <div class="form-group" id="local-qwen3-vram-group" style="grid-column: 1 / -1; display: none;">
+                                        <div class="local-inference-status-box" id="local-qwen3-vram"></div>
+                                    </div>
                                     <div class="form-group">
                                         <label for="local-incremental-trigger-silence" data-i18n="label.localIncrementalTriggerSilence">增量更新静音（毫秒）</label>
 <input type="number" id="local-incremental-trigger-silence" class="form-control" min="10" max="1000"

@@ -94,12 +94,15 @@ class HyMT2LocalEngine:
         if not path or not Path(path).is_file():
             raise FileNotFoundError(f"Hy-MT2 本地模型文件未找到: {path}")
 
+        from local_inference.vendor.qwen_asr_gguf.inference import llama as llama_mod
         from local_inference.vendor.qwen_asr_gguf.inference.llama import (
             LlamaBatch,
             LlamaContext,
             LlamaModel,
             LlamaSampler,
         )
+
+        self._llama_mod = llama_mod
         self._LlamaBatch = LlamaBatch
 
         # 解析运行位置：cpu -> 不卸载任何层；auto/vulkan:N -> 只用一张 GPU
@@ -130,51 +133,98 @@ class HyMT2LocalEngine:
                 self.stop_ids.add(tid)
         self._engine_lock = threading.Lock()
 
-    def _prefill(self, tokens: List[int]) -> None:
-        """整段 prompt 一次性提交（批量 prefill）。
+        from local_inference.spec_decode import SpeculativeDecoder
+
+        self._spec = SpeculativeDecoder(llama_mod, self.ctx, self.model)
+        # KV 里当前装着哪串 token（prompt + 已生成），供下一次比公共前缀
+        self._cached_tokens: List[int] = []
+
+    def _prefill(self, tokens: List[int], cached: List[int]) -> int:
+        """提交 prompt，返回本次真正送进模型的 token 数。
 
         逐 token 调用 llama_decode 时每个 token 都要走一遍完整的 kernel 提交/
         同步往返，实测 100+ token 的 prompt 比批量提交慢 30-40 倍；
         批量语义与逐个等价（位置编码相同，只对末位 token 取 logits）。
+
+        流式修订里相邻两次 prompt 的开头（背景/历史那段）是一样的，KV 里已经算过；
+        只重算从第一处不同开始的尾巴，把前面留着。
         """
         n = len(tokens)
         if n <= 0:
-            return
+            return 0
         if n > self._n_ctx:
             raise ValueError(f"prompt 超过上下文长度: {n} > {self._n_ctx}")
-        batch = self._LlamaBatch(n, 0, 1)
-        for i, token in enumerate(tokens):
-            batch.token[i] = token
-            batch.pos[i] = i
-            batch.n_seq_id[i] = 1
-            batch.seq_id[i][0] = 0
-            batch.logits[i] = 1 if i == n - 1 else 0
-        batch.n_tokens = n
-        self.ctx.decode(batch.struct)
 
-    def generate(self, prompt: str, max_tokens: int = 128) -> str:
-        with self._engine_lock:
+        from local_inference.spec_decode import common_prefix_len
+
+        reuse = 0
+        if self._prompt_cache_enabled() and cached:
+            reuse = common_prefix_len(cached, tokens)
+            # 末位必须重算：要拿它的 logits 起头
+            reuse = min(reuse, n - 1)
+
+        if reuse > 0:
+            self._spec.seq_rm(reuse, -1)
+        else:
             self.ctx.clear_kv_cache()
+
+        todo = tokens[reuse:]
+        self._spec.decode_tokens(todo, reuse, logits="last")
+        return len(todo)
+
+    @staticmethod
+    def _prompt_cache_enabled() -> bool:
+        import config as _config
+
+        return bool(getattr(_config, "LOCAL_MT_PROMPT_CACHE", True))
+
+    def generate(
+        self,
+        prompt: str,
+        max_tokens: int = 128,
+        draft: Optional[List[int]] = None,
+    ) -> tuple[str, List[int]]:
+        """生成译文；返回 (清洗后的文本, 原始 token)。
+
+        ``draft`` 是上一次中间结果的 token：流式修订里新旧译文大段重合，一次前向就能
+        验证掉模型认同的部分。验证是精确比对，输出与逐 token 解码一致。
+        """
+        import config as _config
+
+        with self._engine_lock:
             tokens = self.model.tokenize(prompt, add_special=False, parse_special=True)
-            self._prefill(tokens)
+            # 中途出错时 KV 与 _cached_tokens 会对不上，先作废；成功后再写回真实内容
+            cached, self._cached_tokens = self._cached_tokens, []
+            n_new = self._prefill(tokens, cached)
 
             sampler = self._LlamaSampler(temperature=0.0)
-            curr_pos = len(tokens)
-            out_tokens = []
-            for _ in range(max_tokens):
-                next_token = sampler.sample(self.ctx, idx=-1)
-                if next_token in self.stop_ids:
-                    break
-                out_tokens.append(next_token)
-                self.ctx.decode_token(next_token, pos=curr_pos)
-                curr_pos += 1
+            try:
+                use_draft = bool(getattr(_config, "LOCAL_SPECULATIVE_DECODE", True))
+                gen = self._spec.generate(
+                    sampler,
+                    len(tokens),
+                    stop_ids=self.stop_ids,
+                    max_tokens=max_tokens,
+                    draft=draft if use_draft else None,
+                )
+            finally:
+                del sampler
 
-            raw = self.model.detokenize(out_tokens)
+            # KV 现在正好是 prompt + 生成的 token，下一次可以拿它比前缀
+            self._cached_tokens = list(tokens) + list(gen.tokens)
+
+            logger.debug(
+                "Hy-MT2 本地生成: %s token / %s 次前向 (草稿 %s/%s), prompt 复用 %s/%s",
+                len(gen.tokens), gen.n_passes, gen.n_accepted, gen.n_drafted,
+                len(tokens) - n_new, len(tokens),
+            )
+
+            raw = self.model.detokenize(gen.tokens)
             clean = re.split(r"<[|｜].*?[|｜]>", raw)[0].strip()
             for prefix in ("Translation:", "翻译：", "译文："):
                 if clean.startswith(prefix):
                     clean = clean[len(prefix) :].strip()
-            return clean
+            return clean, list(gen.tokens)
 
 
 # ── 进程内共享本地引擎注册表（引用计数） ─────────────────────────────────
@@ -383,6 +433,8 @@ class HyMT2API(BaseTranslationAPI):
             self._utterance_id = -1  # 首次调用自增后从 0 开始
             self._prev_source: Optional[str] = None
             self._prev_translation: Optional[str] = None
+            # 上一次中间译文的 token，作为下一次修订的推测解码草稿（仅 local 后端用）
+            self._prev_tokens: List[int] = []
             self._last_final = True
             self._sent_any = False
             self._last_source_lang: Optional[str] = None
@@ -582,6 +634,7 @@ class HyMT2API(BaseTranslationAPI):
                 self._history = self._history[-HISTORY_KEEP:]
             self._prev_source = None
             self._prev_translation = None
+            self._prev_tokens = []
             self._last_final = True
             return display
 
@@ -677,6 +730,7 @@ class HyMT2API(BaseTranslationAPI):
             if self._last_final:
                 self._prev_source = None
                 self._prev_translation = None
+                self._prev_tokens = []
 
             prev_src = self._prev_source
             prev_trans = self._prev_translation
@@ -725,7 +779,11 @@ class HyMT2API(BaseTranslationAPI):
                 display = ""
             else:
                 inference_started = time.monotonic()
-                display = self._local_engine.generate(prompt)
+                display, out_tokens = self._local_engine.generate(
+                    prompt, draft=self._prev_tokens or None
+                )
+                # 同一句的下一次修订拿这次的结果当草稿；整句定稿后这一句就翻篇了。
+                self._prev_tokens = [] if not is_partial else out_tokens
                 # 临时：本地模型每次推理后输出一行日志，记录本次耗时（毫秒）
                 print(
                     f"[Hy-MT2 本地] 推理完成（{'最终' if not is_partial else '中间'}）: "
@@ -767,6 +825,7 @@ class HyMT2API(BaseTranslationAPI):
                 self._utterance_id += 1
                 self._prev_source = None
                 self._prev_translation = None
+                self._prev_tokens = []
                 self._utt_start_ms = time.time() * 1000
 
             self._seq += 1
@@ -819,6 +878,7 @@ class HyMT2API(BaseTranslationAPI):
                         self._history = self._history[-HISTORY_KEEP:]
                 self._prev_source = None
                 self._prev_translation = None
+                self._prev_tokens = []
             else:
                 self._prev_source = text
                 self._prev_translation = display

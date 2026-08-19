@@ -17,6 +17,13 @@ from .model_manager import (
 logger = logging.getLogger(__name__)
 QWEN_SAMPLE_RATE = 16000
 
+# 音频编码器后端在 DirectML 下需要固定输入形状，否则会退回 CPU 执行（12s 音频实测 195ms vs 62ms）。
+# 只用一个"够大的"形状意味着 2s 的句子也在算 30s 的注意力；改成挑最小的够用档，
+# 短句实测 43ms → 20ms，长句不受影响。单位：秒，必须升序，最后一档要覆盖最长音频。
+_ENCODER_SHAPE_BUCKETS_SEC = (5, 10, 20, 30)
+# 前端每秒输出 13 帧 hidden state（见 vendor 的 get_feat_extract_output_lengths）
+_ENCODER_FRAMES_PER_SEC = 13
+
 _LANG_MAP = {
     "zh": "Chinese",
     "en": "English",
@@ -78,9 +85,9 @@ class Qwen3ASREngine:
         # GGUF 解码器的运行位置（SenseVoice 固定 CPU，只有 Qwen3-ASR 用得上 GPU）
         requested_device = getattr(config, "LOCAL_INFERENCE_DEVICE", "auto")
         n_gpu_layers, main_gpu, effective_device = resolve_device(requested_device)
-        # ONNX 音频编码（前后端）固定在 CPU（不用 DirectML）；GGUF 大模型按"运行位置"走 GPU/CPU。
+        # ONNX 音频编码器可以和 GGUF 解码器分开放：'auto' 跟随解码器，也可单独钉在 CPU 或显卡上。
         if use_dml is None:
-            use_dml = False
+            use_dml = self._want_encoder_on_gpu(effective_device)
         n_ctx = int(getattr(config, "LOCAL_QWEN_ASR_N_CTX", 2048))
         engine_cfg = ASREngineConfig(
             model_dir=resolved_model_dir,
@@ -100,11 +107,12 @@ class Qwen3ASREngine:
         self._corpus_text = (corpus_text or "").strip()
         self.model_dir = resolved_model_dir
         self.device = effective_device
-        encoder_actual = (
-            "DirectML(GPU)"
-            if getattr(self._engine.encoder, "active_dml", False)
-            else "CPU"
-        )
+        self._encoder_on_gpu = bool(getattr(self._engine.encoder, "active_dml", False))
+        self._encoder_full_target = int(getattr(self._engine.encoder, "h_target_len", 0))
+        # 上一次中间结果的 token，作为下一次的推测解码草稿；整句结束后清空。
+        self._draft_tokens: list[int] = []
+        self._spec = None
+        encoder_actual = "DirectML(GPU)" if self._encoder_on_gpu else "CPU"
         logger.info(
             "Qwen3-ASR loaded: %s (device=%s -> %s, GGUF: %s 层卸载到该卡, ONNX 编码器实际=%s)",
             resolved_model_dir,
@@ -113,6 +121,39 @@ class Qwen3ASREngine:
             n_gpu_layers if n_gpu_layers > 0 else 0,
             encoder_actual,
         )
+
+    @staticmethod
+    def _want_encoder_on_gpu(effective_device: str) -> bool:
+        """解析 LOCAL_QWEN_ENCODER_DEVICE：'auto' 跟随解码器，'cpu'/'gpu' 强制。"""
+        choice = config.sanitize_qwen_encoder_device(
+            getattr(config, "LOCAL_QWEN_ENCODER_DEVICE", "auto")
+        )
+        if choice == "cpu":
+            return False
+        if choice == "gpu":
+            return True
+        return str(effective_device or "").strip().lower() != "cpu"
+
+    def _apply_encoder_shape_bucket(self, n_samples: int) -> None:
+        """按本次音频长度挑一个最小的够用固定形状（仅 DirectML 下有意义）。
+
+        编码器后端在 DirectML 上要求固定形状，vendor 的实现用单一的 pad_to 秒数兜住所有音频，
+        于是短句也按最长时长算注意力。这里在调用前改写 h_target_len，等价于分档 padding，
+        不需要动 vendor 代码。超过最大档时保持原值，走原来的路径。
+        """
+        if not self._encoder_on_gpu or self._encoder_full_target <= 0:
+            return
+        seconds = n_samples / float(QWEN_SAMPLE_RATE)
+        target = self._encoder_full_target
+        for bucket in _ENCODER_SHAPE_BUCKETS_SEC:
+            if seconds <= bucket:
+                target = min(self._encoder_full_target, bucket * _ENCODER_FRAMES_PER_SEC)
+                break
+        self._engine.encoder.h_target_len = target
+
+    def reset_draft(self) -> None:
+        """整句边界：丢弃上一句的草稿，避免拿旧句子的译文去推测新句子。"""
+        self._draft_tokens = []
 
     def set_language(self, language: str) -> None:
         self.language = language if language != "auto" else None
@@ -174,8 +215,89 @@ class Qwen3ASREngine:
 
     def unload(self) -> None:
         if hasattr(self, "_engine") and self._engine is not None:
+            # 解码器持有已释放的 ctx，必须跟着一起丢掉
+            self._spec = None
+            self._draft_tokens = []
             self._engine.shutdown()
             self._engine = None
+
+    def _ensure_spec(self):
+        """惰性建立推测解码器；拿引擎自己绑好 DLL 的那个 llama 模块，别再 import 一份没初始化的。"""
+        if self._spec is None:
+            from .spec_decode import SpeculativeDecoder
+
+            self._spec = SpeculativeDecoder(
+                self._engine.llama_mod, self._engine.ctx, self._engine.model
+            )
+        return self._spec
+
+    @staticmethod
+    def _is_repeating(tokens: list[int]) -> bool:
+        """vendor 的复读熔断：最近 15 个 token 里只有 <=3 种，判定跑飞。"""
+        return len(tokens) > 15 and len(set(tokens[-15:])) <= 3
+
+    def _decode(self, full_embd: np.ndarray) -> dict:
+        """整段 prefill + 生成，带草稿推测解码；复读时按 vendor 的做法加温重试。
+
+        对应 vendor 的 _decode/_safe_decode。这里不复刻 rollback_num 那套显示队列：
+        yakutan 每次都以 is_last_chunk=True 调用、整段取用文本，队列最终会被全部冲出，
+        对结果没有影响。
+        """
+        import time
+
+        engine = self._engine
+        spec = self._ensure_spec()
+        stop_ids = {engine.model.eos_token, engine.ID_IM_END}
+        use_draft = bool(getattr(config, "LOCAL_SPECULATIVE_DECODE", True))
+        draft = self._draft_tokens if use_draft else None
+
+        n_prefill = int(full_embd.shape[0])
+        temperature = 0.4
+        gen = None
+        t_prefill = 0.0
+        t_generate = 0.0
+
+        for _ in range(4):
+            spec.clear()
+            t0 = time.perf_counter()
+            spec.decode_embd(full_embd)
+            t_prefill = time.perf_counter() - t0
+
+            sampler = engine.llama_mod.LlamaSampler(
+                temperature=temperature, seed=int(np.random.randint(0, 2**31 - 1))
+            )
+            try:
+                t0 = time.perf_counter()
+                gen = spec.generate(
+                    sampler,
+                    n_prefill,
+                    stop_ids=stop_ids,
+                    max_tokens=512,
+                    draft=draft,
+                    planes=4,
+                    on_token=lambda toks: self._is_repeating(toks),
+                )
+                t_generate = time.perf_counter() - t0
+            finally:
+                del sampler
+
+            if not gen.aborted:
+                break
+            temperature += 0.3
+            draft = None  # 草稿跟着跑飞了就别再用它
+            logger.warning("Decode aborted, retry with temp=%.1f", temperature)
+
+        tokens = gen.tokens if gen else []
+        return {
+            "text": engine.model.detokenize(tokens) if tokens else "",
+            "tokens": tokens,
+            "t_prefill": t_prefill,
+            "t_generate": t_generate,
+            "n_prefill": n_prefill,
+            "n_passes": gen.n_passes if gen else 0,
+            "n_drafted": gen.n_drafted if gen else 0,
+            "n_accepted": gen.n_accepted if gen else 0,
+        }
 
     def transcribe(self, audio: np.ndarray, *, update_context: bool = True) -> dict | None:
         if self._engine is None:
@@ -188,6 +310,7 @@ class Qwen3ASREngine:
 
         context = self._prompt_context()
 
+        self._apply_encoder_shape_bucket(len(audio))
         audio_embd, enc_s = self._engine.encoder.encode(audio)
         full_embd = self._engine._build_prompt_embd(
             audio_embd=audio_embd,
@@ -195,32 +318,33 @@ class Qwen3ASREngine:
             context=context,
             language=qwen_language,
         )
-        result = self._engine._safe_decode(
-            full_embd,
-            prefix_text="",
-            rollback_num=5,
-            is_last_chunk=True,
-            temperature=0.4,
-        )
+        result = self._decode(full_embd)
         if getattr(config, "LOCAL_QWEN_LOG_PIPELINE_TIMING", False):
             audio_sec = len(audio) / QWEN_SAMPLE_RATE
-            pre_s = float(result.t_prefill)
-            gen_s = float(result.t_generate)
+            pre_s = float(result["t_prefill"])
+            gen_s = float(result["t_generate"])
             total_s = enc_s + pre_s + gen_s
             logger.info(
                 "[qwen3-asr] timing audio=%.2fs onnx_encode=%.3fs llm_prefill=%.3fs llm_generate=%.3fs "
-                "sum=%.3fs prefill_positions=%s gen_tokens=%s",
+                "sum=%.3fs prefill_positions=%s gen_tokens=%s passes=%s draft=%s/%s",
                 audio_sec,
                 enc_s,
                 pre_s,
                 gen_s,
                 total_s,
-                result.n_prefill,
-                result.n_generate,
+                result["n_prefill"],
+                len(result["tokens"]),
+                result["n_passes"],
+                result["n_accepted"],
+                result["n_drafted"],
             )
-        text = result.text.strip()
+        text = result["text"].strip()
         if not text:
+            self._draft_tokens = []
             return None
+
+        # 本句下一次中间结果的草稿；整句结束后这一句就翻篇了，不该再影响下一句。
+        self._draft_tokens = [] if update_context else list(result["tokens"])
 
         if update_context:
             # 仅累积「识别原文」；热词在 _corpus_text 中单独维护

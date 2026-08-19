@@ -510,13 +510,15 @@ class TestLocalBackend:
         class FakeLocalEngine:
             def __init__(self):
                 self.prompts = []
-            def generate(self, prompt, max_tokens=128):
+                self.drafts = []
+            def generate(self, prompt, max_tokens=128, draft=None):
                 self.prompts.append(prompt)
+                self.drafts.append(draft)
                 if "Hello" in prompt and "world" not in prompt:
-                    return "你好"
+                    return "你好", [1, 2]
                 elif "world" in prompt:
-                    return "你好世界"
-                return "翻译结果"
+                    return "你好世界", [1, 2, 3]
+                return "翻译结果", [9]
 
         fake_engine = FakeLocalEngine()
         api._local_engine = fake_engine
@@ -539,9 +541,9 @@ class TestLocalBackend:
         class FakeLocalEngine:
             def __init__(self):
                 self.calls = 0
-            def generate(self, prompt, max_tokens=128):
+            def generate(self, prompt, max_tokens=128, draft=None):
                 self.calls += 1
-                return f"译文{self.calls}"
+                return f"译文{self.calls}", [self.calls]
 
         fake_engine = FakeLocalEngine()
         api._local_engine = fake_engine
@@ -568,9 +570,9 @@ class TestLocalBackend:
         class FakeLocalEngine:
             def __init__(self):
                 self.calls = 0
-            def generate(self, prompt, max_tokens=128):
+            def generate(self, prompt, max_tokens=128, draft=None):
                 self.calls += 1
-                return "ok"
+                return "ok", [1]
 
         # 原文变了 → 不能复用
         api = HyMT2API(backend="local")
@@ -784,8 +786,8 @@ class TestLocalEngineLifecycle:
                 if attempts["n"] == 1:
                     raise RuntimeError("load boom")
 
-            def generate(self, prompt, max_tokens=128):
-                return "ok"
+            def generate(self, prompt, max_tokens=128, draft=None):
+                return "ok", [1]
 
         with patch("streaming_translation.api.hymt2.HyMT2LocalEngine", FailingEngine):
             # 首次加载失败：抛异常，注册表不残留已加载实例

@@ -209,9 +209,18 @@ def _get_feature_flags() -> dict:
 
 
 def _local_inference_config_dict() -> dict:
+    vram = getattr(config, 'QWEN3_ASR_VRAM_MB', {}) or {}
     return {
         'engine': getattr(config, 'LOCAL_INFERENCE_ENGINE', 'sensevoice'),
         'device': config.sanitize_local_device(getattr(config, 'LOCAL_INFERENCE_DEVICE', 'auto')),
+        'encoder_device': config.sanitize_qwen_encoder_device(
+            getattr(config, 'LOCAL_QWEN_ENCODER_DEVICE', 'auto')
+        ),
+        # 两部分模型各自的显存占用（MB），供面板分项显示
+        'qwen3_vram_mb': {
+            'decoder': int(vram.get('decoder', 0)),
+            'encoder': int(vram.get('encoder', 0)),
+        },
         'incremental_asr': getattr(config, 'LOCAL_INCREMENTAL_ASR', True),
         # 对外接口用秒（内部配置 LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS 为毫秒）
         'incremental_trigger_silence': int(getattr(
@@ -742,6 +751,10 @@ def update_config(config_data):
                 config.VAD_PRE_SPEECH_DURATION = max(0.0, float(local_inference['pre_speech_duration']))
             if 'device' in local_inference:
                 config.LOCAL_INFERENCE_DEVICE = config.sanitize_local_device(local_inference['device'])
+            if 'encoder_device' in local_inference:
+                config.LOCAL_QWEN_ENCODER_DEVICE = config.sanitize_qwen_encoder_device(
+                    local_inference['encoder_device']
+                )
             if 'incremental_asr' in local_inference:
                 config.LOCAL_INCREMENTAL_ASR = bool(local_inference['incremental_asr'])
             if 'incremental_trigger_silence' in local_inference:
