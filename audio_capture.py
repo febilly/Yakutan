@@ -2,6 +2,7 @@
 音频采集模块 - 负责 PyAudio 初始化、音频流管理、重采样和音频捕获任务
 """
 import asyncio
+import collections
 import logging
 import time
 from typing import Optional
@@ -303,6 +304,45 @@ def _drop_oldest_queue_item(queue: asyncio.Queue) -> None:
         pass
 
 
+class GatePreBuffer:
+    """采集侧门控的滚动音频预缓冲。
+
+    门控在静音期会丢弃音频帧，导致开口瞬间的前段语音丢失；本缓冲持续保留
+    最近一段时间（字节上限）的音频帧，检测到开口时由调用方整体 flush 补发，
+    避免漏掉句首。
+    """
+
+    def __init__(self, cap_bytes: int) -> None:
+        self._cap_bytes = max(0, int(cap_bytes))
+        self._frames: "collections.deque[bytes]" = collections.deque()
+        self._total_bytes = 0
+
+    def push(self, frame: bytes) -> None:
+        if self._cap_bytes <= 0 or not frame:
+            return
+        self._frames.append(frame)
+        self._total_bytes += len(frame)
+        while self._total_bytes > self._cap_bytes and len(self._frames) > 1:
+            self._total_bytes -= len(self._frames.popleft())
+
+    def flush(self) -> list:
+        if not self._frames:
+            return []
+        frames = list(self._frames)
+        self.clear()
+        return frames
+
+    def clear(self) -> None:
+        self._frames.clear()
+        self._total_bytes = 0
+
+    def __len__(self) -> int:
+        return len(self._frames)
+
+    def __bool__(self) -> bool:
+        return bool(self._frames)
+
+
 async def audio_capture_task(state, recognizer):
     """异步音频捕获任务。"""
     print('Starting audio capture...')
@@ -336,13 +376,24 @@ async def audio_capture_task(state, recognizer):
         if _vad_end_burst_ms > 0
         else b''
     )
+    # 门控预缓冲：静音期门控丢弃的音频先滚动保留，开口瞬间整体补发给 ASR，
+    # 避免漏掉句首（时长由 config.VAD_PRE_SPEECH_DURATION 统一控制）
+    _vad_pre_buffer_seconds = max(
+        0.0, float(getattr(config, 'VAD_PRE_SPEECH_DURATION', 0.5) or 0.0)
+    )
+    _vad_pre_buffer = GatePreBuffer(
+        int(_vad_pre_buffer_seconds * int(getattr(config, 'SAMPLE_RATE', 16000) or 16000) * 2)
+    )
+    # 会话代次（开麦/闭麦/切后端都会 bump）：变化时清空预缓冲，
+    # 防止把上一次会话残留的音频补发给新会话
+    _vad_pre_generation = getattr(state, 'audio_send_generation', 0)
 
     # 一次性报告采集侧 VAD 门控状态。
     # 注意：这里的门控只服务于在线 API（静音时暂停发送以省流），本地识别需要连续音频供
     # 识别器内部 VAD 分段，因此本地后端下采集侧本就不门控，不再重复输出，避免被误读成
     # 「VAD 没开」。
     if state.vad_enabled and state.vad_processor is not None:
-        print(f'[VAD] capture loop 已激活，等待语音...')
+        print(f'[VAD] capture loop 已激活，等待语音...（起声预缓冲 {_vad_pre_buffer_seconds:.1f}s）')
     elif state.current_asr_backend != 'local':
         print(
             f'[VAD] capture loop — 在线 API 发送门控未启用 '
@@ -358,6 +409,12 @@ async def audio_capture_task(state, recognizer):
             if not data:
                 await asyncio.sleep(0.001)
                 continue
+
+            # 会话代次变化（开麦/闭麦/切后端）：清空预缓冲，避免跨会话补发旧音频
+            _generation = getattr(state, 'audio_send_generation', 0)
+            if _generation != _vad_pre_generation:
+                _vad_pre_generation = _generation
+                _vad_pre_buffer.clear()
 
             # ── VAD 侧路分析（不阻塞主通道，且仅在识别激活时进行） ──
             if state.recognition_active and state.vad_enabled and state.vad_processor is not None:
@@ -378,6 +435,18 @@ async def audio_capture_task(state, recognizer):
                             state._vad_was_speaking = is_speaking
                             conf = state.vad_processor.last_confidence
                             if is_speaking:
+                                # 开口瞬间：把门控期间扣留的预缓冲音频整体补发，
+                                # 保证服务端收到句首（当前帧随后由发送块正常入队，不重复）
+                                pre_frames = _vad_pre_buffer.flush()
+                                if pre_frames:
+                                    for pre_frame in pre_frames:
+                                        try:
+                                            send_queue.put_nowait((_generation, pre_frame))
+                                        except asyncio.QueueFull:
+                                            _drop_oldest_queue_item(send_queue)
+                                            send_queue.put_nowait((_generation, pre_frame))
+                                    if _vad_verbose:
+                                        print(f'[VAD] 预缓冲补发 {len(pre_frames)} 帧（约 {_vad_pre_buffer_seconds:.1f}s）')
                                 print(f'[VAD] ▶ SPEECH 开始 (chunk=#{_vad_chunk_count}, 置信度={conf:.3f})')
                             else:
                                 # 说完瞬间补发一帧合成静音（此时门控即将停发真实帧），
@@ -421,8 +490,13 @@ async def audio_capture_task(state, recognizer):
             # VAD 门控：静音时不发送音频到 ASR（省流），说话时正常发送；
             # 说话结束瞬间的补发静音帧见上方 SPEECH→SILENCE 转换处理
             if state.recognition_active:
+                _gating_active = state.vad_enabled and state.vad_processor is not None
+                if _gating_active:
+                    # 门控激活时每帧都进预缓冲（说话中也持续滚动），
+                    # 供下一次开口时补发句首
+                    _vad_pre_buffer.push(data)
                 _should_send = True
-                if state.vad_enabled and state.vad_processor is not None:
+                if _gating_active:
                     _should_send = state.vad_processor.is_speaking
                 if _should_send:
                     item = (getattr(state, 'audio_send_generation', 0), data)

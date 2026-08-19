@@ -958,6 +958,7 @@
                                 <label for="vad-pre-speech-duration" data-i18n="label.localPreSpeechDuration">起声预缓冲（毫秒）</label>
                                 <input type="number" id="vad-pre-speech-duration" class="form-control" min="0" max="2000"
                                     step="50" onchange="onSettingChange()" data-restart-required="true">
+                                <small class="form-text" data-i18n="hint.localPreSpeechDuration">开口瞬间向前回补的音频时长，统一作用于在线 API 门控与本地识别断句，避免漏掉句首第一个字。</small>
                             </div>
                         </div>
 
