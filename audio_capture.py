@@ -328,6 +328,14 @@ async def audio_capture_task(state, recognizer):
     _vad_chunk_count = 0
     _vad_last_diag_at = 0.0
     _vad_verbose = bool(getattr(config, 'ENABLE_VAD_GATING_VERBOSE', False))
+    # 说话结束瞬间一次性补发的合成静音帧：吸收本地/服务端 VAD 话音判定时差，
+    # 保证服务端凑满其断句静音阈值（见 config.ONLINE_VAD_END_BURST_MS 注释）
+    _vad_end_burst_ms = int(getattr(config, 'ONLINE_VAD_END_BURST_MS', 200) or 0)
+    _vad_end_burst_bytes = (
+        b'\x00' * (int(config.SAMPLE_RATE * _vad_end_burst_ms / 1000) * 2)
+        if _vad_end_burst_ms > 0
+        else b''
+    )
 
     # 一次性报告采集侧 VAD 门控状态。
     # 注意：这里的门控只服务于在线 API（静音时暂停发送以省流），本地识别需要连续音频供
@@ -372,6 +380,20 @@ async def audio_capture_task(state, recognizer):
                             if is_speaking:
                                 print(f'[VAD] ▶ SPEECH 开始 (chunk=#{_vad_chunk_count}, 置信度={conf:.3f})')
                             else:
+                                # 说完瞬间补发一帧合成静音（此时门控即将停发真实帧），
+                                # 让服务端在"断流"前已凑满断句静音阈值
+                                if _vad_end_burst_bytes:
+                                    try:
+                                        send_queue.put_nowait(
+                                            (getattr(state, 'audio_send_generation', 0),
+                                             _vad_end_burst_bytes)
+                                        )
+                                    except asyncio.QueueFull:
+                                        _drop_oldest_queue_item(send_queue)
+                                        send_queue.put_nowait(
+                                            (getattr(state, 'audio_send_generation', 0),
+                                             _vad_end_burst_bytes)
+                                        )
                                 print(f'[VAD] ■ SILENCE (chunk=#{_vad_chunk_count}, 置信度={conf:.3f})')
                         # 定期诊断（仅在 verbose 模式下显示）
                         if _vad_verbose:
@@ -396,7 +418,8 @@ async def audio_capture_task(state, recognizer):
                             traceback.print_exc()
 
             # 只有在识别激活时才发送音频数据,否则丢弃
-            # VAD 门控：静音时不发送音频到 ASR（省流），说话时正常发送
+            # VAD 门控：静音时不发送音频到 ASR（省流），说话时正常发送；
+            # 说话结束瞬间的补发静音帧见上方 SPEECH→SILENCE 转换处理
             if state.recognition_active:
                 _should_send = True
                 if state.vad_enabled and state.vad_processor is not None:

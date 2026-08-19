@@ -949,7 +949,7 @@
 
                             <div class="form-group">
                                 <label for="vad-silence-duration" data-i18n="label.localSilenceDuration">句子结束静音（毫秒）</label>
-                                <input type="number" id="vad-silence-duration" class="form-control" min="100" max="5000"
+                                <input type="number" id="vad-silence-duration" class="form-control" min="200" max="6000"
                                     step="100" onchange="onSettingChange()" data-restart-required="true">
                                 <small class="form-text" data-i18n="hint.localSilenceDuration">连续静音达到该时长时，判定整句话说完，提交最终识别结果（本地识别断句）。</small>
                             </div>

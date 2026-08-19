@@ -121,9 +121,25 @@ LOCAL_VAD_THRESHOLD = 0.50
 LOCAL_VAD_MIN_SPEECH_DURATION = 1.0
 # 单段口语送入 VAD 的最长时长（秒）；超过后对本段仅送入静音块直至 VAD 静音或闭麦结束本段（不按时长强制切句）
 LOCAL_VAD_MAX_SPEECH_DURATION = 30.0
+# 整句结束判定静音时长（秒）：本地 VAD 断句用；在线服务端断句阈值也由本值派生
+# （会话建立时下发，见 recognizer_factory），保持在线/本地断句行为一致。
 LOCAL_VAD_SILENCE_DURATION = 0.8
 # 起声时拼接的预缓冲音频时长（秒），用于避免漏掉第一个字
 LOCAL_VAD_PRE_SPEECH_DURATION = 0.2
+# 断句静音时长的允许范围（秒）：在线服务端断句参数
+# （max_sentence_silence / silence_duration_ms）官方支持 [200, 6000]ms，
+# 本地设置统一夹到同一范围，见 clamp_vad_silence_duration()。
+VAD_SILENCE_DURATION_MIN = 0.2
+VAD_SILENCE_DURATION_MAX = 6.0
+# 在线门控：本地 VAD 判定说话结束的瞬间，向 API 一次性补发一帧合成静音（毫秒），
+# 用于吸收本地与服务端 VAD"话音结束"判定的时差，保证服务端能凑满其断句静音
+# 阈值。200ms @16kHz PCM16 单声道约 6.4KB，在在线 API 建议的单帧大小（1KB~16KB）内。
+ONLINE_VAD_END_BURST_MS = 200
+
+
+def clamp_vad_silence_duration(seconds: float) -> float:
+    """将断句静音时长（秒）夹到在线服务端断句参数支持的范围内。"""
+    return min(VAD_SILENCE_DURATION_MAX, max(VAD_SILENCE_DURATION_MIN, float(seconds)))
 
 # 本地识别的运行位置：'auto'（自动挑一张 GPU，独显优先）、'cpu' 或 'vulkan:N'。
 # 只对 Qwen3-ASR 的 GGUF 解码器生效——SenseVoice 是 INT8 ONNX，固定跑 CPU。
@@ -433,14 +449,14 @@ HOT_WORDS_PRIVATE_DIR = 'hot_words_private'
 ENABLE_VAD = True  # True: 启用VAD，服务器自动检测语音结束并断句
                    # False: 禁用VAD，需要手动调用commit()来触发断句
                    # 注意：VAD和手动commit不能同时使用
-                   # - 启用VAD时，pause()会发送静音音频触发断句，而不是调用commit()
-                   # - 禁用VAD时，pause()会调用commit()手动断句
+                   # - 启用VAD时，由服务端按静音阈值自动断句
+                   # - 禁用VAD时，stop()会调用commit()手动冲出当前句
 
 # VAD阈值（0.0-1.0），值越小越敏感
 VAD_THRESHOLD = 0.2
 
-# VAD静音持续时间（毫秒），检测到此时长的静音后触发断句
-VAD_SILENCE_DURATION_MS = 800
+# 服务端断句静音时长没有独立配置：会话建立时由 LOCAL_VAD_SILENCE_DURATION
+# 派生（夹到 [200, 6000]ms 后下发），保证在线/本地断句静音一致。
 
 # ============================================================================
 # WebSocket 保活配置（仅 Qwen 后端）

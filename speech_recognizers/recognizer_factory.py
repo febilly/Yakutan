@@ -71,6 +71,19 @@ def _normalize_qwen_language(lang: Optional[str]) -> Optional[str]:
     return None
 
 
+def _aligned_server_silence_ms() -> int:
+    """在线服务端断句静音阈值（毫秒）：与本地 VAD 断句静音时长对齐。
+
+    在线门控在本地 VAD 判定说完后最多再送达约 LOCAL_VAD_SILENCE_DURATION 的
+    真实静音（外加一帧合成静音 burst 吸收判定时差），因此服务端阈值取同一
+    数值，保证"本地判完 ≈ 服务端断句"，并夹到服务端支持的 [200, 6000]ms。
+    """
+    seconds = config.clamp_vad_silence_duration(
+        getattr(config, 'LOCAL_VAD_SILENCE_DURATION', 0.8)
+    )
+    return int(round(seconds * 1000))
+
+
 def _to_dashscope_language(source_language: Optional[str]) -> Optional[str]:
     """将 source_language 转换为 DashScope language_hints 格式。
     fun-asr-realtime 支持: zh, en, ja。不支持或 auto 返回 None。"""
@@ -170,7 +183,6 @@ def create_recognizer(
     hot_words: Optional[list] = None,
     enable_vad: bool = True,
     vad_threshold: float = 0.2,
-    vad_silence_duration_ms: int = 800,
     keepalive_interval: int = 30,
     **extra_kwargs: Any
 ) -> SpeechRecognizer:
@@ -188,7 +200,6 @@ def create_recognizer(
         hot_words: 热词条目列表 [{'text': ..., 'weight': ...}]（仅 qwen_audio3 后端使用）
         enable_vad: 是否启用VAD（仅 qwen 后端使用）
         vad_threshold: VAD阈值（仅 qwen 后端使用）
-        vad_silence_duration_ms: VAD静音持续时间（仅 qwen 后端使用）
         keepalive_interval: WebSocket心跳间隔（秒，仅 qwen 后端使用，0表示禁用）
         **extra_kwargs: 其他自定义参数
     
@@ -225,7 +236,7 @@ def create_recognizer(
             'input_audio_format': audio_format,
             'enable_turn_detection': enable_vad,
             'turn_detection_threshold': vad_threshold,
-            'turn_detection_silence_duration_ms': vad_silence_duration_ms,
+            'turn_detection_silence_duration_ms': _aligned_server_silence_ms(),
             'keepalive_interval': keepalive_interval,
         }
         
@@ -254,6 +265,7 @@ def create_recognizer(
             'model': config.QWEN_AUDIO3_ASR_MODEL,
             'format': audio_format,
             'sample_rate': sample_rate,
+            'max_sentence_silence': _aligned_server_silence_ms(),
             'corpus_text': corpus_text,
             'hot_words': hot_words,
         }
@@ -276,6 +288,7 @@ def create_recognizer(
             'format': audio_format,
             'sample_rate': sample_rate,
             'semantic_punctuation_enabled': False,
+            'max_sentence_silence': _aligned_server_silence_ms(),
         }
         
         # 热词表

@@ -409,21 +409,25 @@ async def main(
                 chunk_duration=512.0 / config.SAMPLE_RATE,
                 pre_speech_duration=config.LOCAL_VAD_PRE_SPEECH_DURATION,
             )
+            vad_silence_duration = config.clamp_vad_silence_duration(
+                config.LOCAL_VAD_SILENCE_DURATION
+            )
             state.vad_processor.update_settings({
                 'vad_mode': 'silero',
                 'vad_threshold': config.LOCAL_VAD_THRESHOLD,
                 'min_speech_duration': config.LOCAL_VAD_MIN_SPEECH_DURATION,
-                'silence_duration': config.LOCAL_VAD_SILENCE_DURATION,
+                'silence_duration': vad_silence_duration,
                 'pre_speech_duration': config.LOCAL_VAD_PRE_SPEECH_DURATION,
             })
             state.vad_enabled = True
             import numpy as np
             state._vad_pending_samples = np.array([], dtype=np.float32)
             state._vad_was_speaking = False
-            print('[VAD] ✓ 在线 API VAD 发送门控已启用')
+            print(f'[VAD] ✓ 在线 API VAD 发送门控已启用')
             print(f'[VAD]   threshold={state.vad_processor.threshold:.2f} '
                   f'min_speech={config.LOCAL_VAD_MIN_SPEECH_DURATION:.1f}s '
-                  f'silence={config.LOCAL_VAD_SILENCE_DURATION:.1f}s '
+                  f'silence={vad_silence_duration:.1f}s '
+                  f'(在线服务端断句阈值同步为 {int(round(vad_silence_duration * 1000))}ms) '
                   f'mode={state.vad_processor.mode}')
         except Exception as e:
             import traceback
@@ -537,7 +541,6 @@ async def main(
         hot_words=hot_word_entries,
         enable_vad=config.ENABLE_VAD,
         vad_threshold=config.VAD_THRESHOLD,
-        vad_silence_duration_ms=config.VAD_SILENCE_DURATION_MS,
         keepalive_interval=config.KEEPALIVE_INTERVAL,
     )
 
@@ -548,7 +551,9 @@ async def main(
         vad_status = '启用' if config.ENABLE_VAD else '禁用'
         print(f'[ASR] VAD状态: {vad_status}')
         if config.ENABLE_VAD:
-            print(f'[ASR] VAD配置: 阈值={config.VAD_THRESHOLD}, 静音时长={config.VAD_SILENCE_DURATION_MS}ms')
+            print(f'[ASR] VAD配置: 阈值={config.VAD_THRESHOLD}, '
+                  f'静音时长={int(round(config.clamp_vad_silence_duration(config.LOCAL_VAD_SILENCE_DURATION) * 1000))}ms '
+                  f'(与本地 VAD 对齐)')
 
         if config.KEEPALIVE_INTERVAL > 0:
             print(f'[ASR] WebSocket心跳已启用: 间隔={config.KEEPALIVE_INTERVAL}秒')

@@ -4,7 +4,7 @@
 
 Yakutan 的 VAD 设置现在统一由 `VAD_ENABLED` 和一组 `LOCAL_VAD_*` 参数控制：
 
-- 在线 API 后端（Qwen/DashScope/Soniox/Doubao）：客户端使用 Silero VAD 做发送门控，静音时不向 ASR 发送音频帧以减少无效计费。
+- 在线 API 后端（Qwen/DashScope/Soniox/Doubao）：客户端使用 Silero VAD 做发送门控，静音时不向 ASR 发送音频帧以减少无效计费。在线服务端（Qwen 系列）的断句静音阈值在会话建立时由 `LOCAL_VAD_SILENCE_DURATION` 派生（`max_sentence_silence` / `silence_duration_ms`，夹到 [200, 6000]ms），与本地断句保持一致；本地 VAD 判定说完的瞬间还会一次性补发 `ONLINE_VAD_END_BURST_MS`（默认 200ms）的合成静音帧，吸收本地/服务端 VAD 话音判定的时差，保证断句及时发生。
 - 本地 ASR 后端：采集侧不做发送门控，继续把连续音频交给本地识别器，由本地识别器内部 VAD 做自动分段。
 
 Web UI 中的入口为「高级设置 -> VAD」。本地音频识别卡片只保留引擎与增量识别参数；VAD 参数统一移到高级设置。
@@ -30,9 +30,9 @@ Web UI 中的入口为「高级设置 -> VAD」。本地音频识别卡片只保
 ```text
 Online API:
 Mic -> read_audio_data() -> VADProcessor.process_chunk() [side channel]
-                         -> is_speaking?
-                            -> speech: send_queue -> ASR backend
-                            -> silence: drop frame
+                          -> is_speaking?
+                             -> speech: send_queue -> ASR backend
+                             -> silence: drop frame（SPEECH→SILENCE 瞬间补发一帧合成静音）
 
 Local ASR:
 Mic -> read_audio_data() -> LocalSpeechRecognizer -> internal VAD segmentation
@@ -49,8 +49,11 @@ LOCAL_VAD_MODE = 'silero'          # 本地识别使用：'silero' 或 'energy'
 LOCAL_VAD_THRESHOLD = 0.50
 LOCAL_VAD_MIN_SPEECH_DURATION = 1.0
 LOCAL_VAD_MAX_SPEECH_DURATION = 30.0
-LOCAL_VAD_SILENCE_DURATION = 0.8
+LOCAL_VAD_SILENCE_DURATION = 0.8        # 本地断句；在线服务端断句阈值由本值派生（夹到 [200, 6000]ms）
 LOCAL_VAD_PRE_SPEECH_DURATION = 0.2
+VAD_SILENCE_DURATION_MIN = 0.2          # 断句静音时长允许范围（秒）
+VAD_SILENCE_DURATION_MAX = 6.0
+ONLINE_VAD_END_BURST_MS = 200           # 在线门控：说完瞬间一次性补发的合成静音帧（毫秒）
 
 LOCAL_INCREMENTAL_ASR = True
 LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 100
@@ -64,7 +67,7 @@ LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 4.0
 - `ENABLE_VAD_GATING_VERBOSE=1`：启用在线门控详细诊断日志。
 - `ENABLE_LOCAL_VAD_GATING_VERBOSE=1`：旧调试变量名，仍兼容。
 
-`ENABLE_VAD`、`VAD_THRESHOLD`、`VAD_SILENCE_DURATION_MS` 仍保留给 Qwen 服务端 VAD 使用，但不再作为 Web UI 的主要 VAD 设置面。
+`ENABLE_VAD`、`VAD_THRESHOLD` 仍保留给 Qwen 服务端 VAD 使用，但不再作为 Web UI 的主要 VAD 设置面。服务端断句静音时长没有独立配置：会话建立时由 `LOCAL_VAD_SILENCE_DURATION` 派生下发，会话中修改本地设置需下一次开麦（新会话）才同步到服务端。
 
 ## 相关文件
 

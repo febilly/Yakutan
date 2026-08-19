@@ -527,8 +527,6 @@ def update_config(config_data):
                 config.ENABLE_VAD = asr['enable_vad']
             if 'vad_threshold' in asr:
                 config.VAD_THRESHOLD = float(asr['vad_threshold'])
-            if 'vad_silence_duration_ms' in asr:
-                config.VAD_SILENCE_DURATION_MS = int(asr['vad_silence_duration_ms'])
             if 'keepalive_interval' in asr:
                 config.KEEPALIVE_INTERVAL = int(asr['keepalive_interval'])
             if 'enable_hot_words' in asr:
@@ -550,7 +548,9 @@ def update_config(config_data):
             if 'max_speech_duration' in vad:
                 config.LOCAL_VAD_MAX_SPEECH_DURATION = float(vad['max_speech_duration'])
             if 'silence_duration' in vad:
-                config.LOCAL_VAD_SILENCE_DURATION = float(vad['silence_duration'])
+                config.LOCAL_VAD_SILENCE_DURATION = config.clamp_vad_silence_duration(
+                    float(vad['silence_duration'])
+                )
             if 'pre_speech_duration' in vad:
                 config.LOCAL_VAD_PRE_SPEECH_DURATION = max(0.0, float(vad['pre_speech_duration']))
 
@@ -735,7 +735,9 @@ def update_config(config_data):
             if 'max_speech_duration' in local_inference and 'vad' not in config_data:
                 config.LOCAL_VAD_MAX_SPEECH_DURATION = float(local_inference['max_speech_duration'])
             if 'silence_duration' in local_inference and 'vad' not in config_data:
-                config.LOCAL_VAD_SILENCE_DURATION = float(local_inference['silence_duration'])
+                config.LOCAL_VAD_SILENCE_DURATION = config.clamp_vad_silence_duration(
+                    float(local_inference['silence_duration'])
+                )
             if 'pre_speech_duration' in local_inference and 'vad' not in config_data:
                 config.LOCAL_VAD_PRE_SPEECH_DURATION = max(0.0, float(local_inference['pre_speech_duration']))
             if 'device' in local_inference:
