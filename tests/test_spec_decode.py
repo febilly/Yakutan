@@ -110,6 +110,52 @@ class TestDraftTracker:
         assert tracker.n_drafted == 3  # [11,12] then [12]
 
 
+class TestLocalEngineDisposalDropsEveryReference:
+    """卸载靠的是引用计数归零后 __del__ 里的 llama_free/llama_model_free。
+
+    只要还有任何一个对象攥着 ctx 或 model，显存就要留到进程退出——推测解码器就踩过这个坑。
+    这里用 weakref 直接断言"没人再攥着"，比断言某个字段被置 None 更难绕过。
+    """
+
+    def test_dispose_releases_ctx_and_model(self):
+        import gc
+        import threading
+        import weakref
+
+        from streaming_translation.api.hymt2 import HyMT2LocalEngine, _dispose_local_engine
+
+        class Ctx:
+            ptr = 1
+
+        class Model:
+            pass
+
+        class FakeSpec:
+            """和真的 SpeculativeDecoder 一样，抓着 ctx 和 model 不放。"""
+
+            def __init__(self, ctx, model):
+                self._ctx = ctx
+                self._model = model
+
+        engine = HyMT2LocalEngine.__new__(HyMT2LocalEngine)
+        ctx, model = Ctx(), Model()
+        engine.ctx = ctx
+        engine.model = model
+        engine._spec = FakeSpec(ctx, model)
+        engine._cached_tokens = [1, 2, 3]
+        engine._engine_lock = threading.Lock()
+
+        ctx_ref, model_ref = weakref.ref(ctx), weakref.ref(model)
+        del ctx, model
+
+        _dispose_local_engine(engine)
+        gc.collect()
+
+        assert ctx_ref() is None, "上下文仍被引用，llama_free 不会执行，显存不会归还"
+        assert model_ref() is None, "模型仍被引用，llama_model_free 不会执行"
+        assert engine._cached_tokens == []
+
+
 class TestEncoderDeviceSetting:
     @pytest.mark.parametrize("value,expected", [
         ("auto", "auto"), ("cpu", "cpu"), ("gpu", "gpu"),
@@ -133,51 +179,3 @@ class TestEncoderDeviceSetting:
 
         monkeypatch.setattr(config, "LOCAL_QWEN_ENCODER_DEVICE", choice, raising=False)
         assert Qwen3ASREngine._want_encoder_on_gpu(decoder_device) is expected
-
-
-class TestEncoderShapeBuckets:
-    """DirectML needs a fixed input shape; padding every clip to the largest one wastes most of the win
-    on short utterances, and dropping below a clip's real length falls off the fast path entirely."""
-
-    def _engine(self, on_gpu, full_target=390):
-        from local_inference.asr_qwen3 import Qwen3ASREngine
-
-        engine = Qwen3ASREngine.__new__(Qwen3ASREngine)
-        engine._encoder_on_gpu = on_gpu
-        engine._encoder_full_target = full_target
-
-        class _Enc:
-            h_target_len = full_target
-
-        class _Inner:
-            encoder = _Enc()
-
-        engine._engine = _Inner()
-        return engine
-
-    @pytest.mark.parametrize("seconds,expected", [
-        (1.0, 5 * 13), (5.0, 5 * 13),
-        (5.1, 10 * 13), (10.0, 10 * 13),
-        (12.0, 20 * 13), (20.0, 20 * 13),
-        (24.0, 30 * 13),
-    ])
-    def test_picks_the_smallest_bucket_that_fits(self, seconds, expected):
-        engine = self._engine(on_gpu=True)
-        engine._apply_encoder_shape_bucket(int(seconds * 16000))
-        assert engine._engine.encoder.h_target_len == expected
-
-    def test_longer_than_every_bucket_keeps_the_original_target(self):
-        engine = self._engine(on_gpu=True)
-        engine._apply_encoder_shape_bucket(int(45 * 16000))
-        assert engine._engine.encoder.h_target_len == 390
-
-    def test_never_exceeds_the_configured_target(self):
-        # a small pad_to must not be inflated by a larger bucket - that would leave the fixed-shape path
-        engine = self._engine(on_gpu=True, full_target=104)
-        engine._apply_encoder_shape_bucket(int(4 * 16000))
-        assert engine._engine.encoder.h_target_len <= 104
-
-    def test_cpu_encoder_is_left_alone(self):
-        engine = self._engine(on_gpu=False)
-        engine._apply_encoder_shape_bucket(int(2 * 16000))
-        assert engine._engine.encoder.h_target_len == 390

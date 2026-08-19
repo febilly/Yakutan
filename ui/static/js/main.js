@@ -118,8 +118,12 @@ function isLocalInferenceUiEnabled() {
 }
 
 // Qwen3-ASR 由两个独立模型组成，可以分别放在 CPU 或显卡上，所以显存要分项显示，
-// 而不是笼统给一个总数。数值由后端从 config.QWEN3_ASR_VRAM_MB 下发（实测值）。
-let qwen3VramMb = { decoder: 0, encoder: 0 };
+// 而不是笼统给一个总数。数值随 /api/features 下发（实测值）——它是模型的固有属性而非
+// 用户设置，走 config 会在 localStorage 存取那一趟里被丢掉。
+function getQwen3VramMb() {
+    const v = featureFlags?.qwen3_vram_mb || {};
+    return { decoder: Number(v.decoder) || 0, encoder: Number(v.encoder) || 0 };
+}
 
 function formatVramMb(mb) {
     const value = Number(mb) || 0;
@@ -145,19 +149,20 @@ function updateQwen3ModelPlacement() {
 
     const onGpu = t('localInference.placement.gpu');
     const onCpu = t('localInference.placement.cpu');
+    const vram = getQwen3VramMb();
     const rows = [
         {
             name: t('localInference.part.decoder'),
             where: decoderOnGpu ? onGpu : onCpu,
-            vram: decoderOnGpu ? formatVramMb(qwen3VramMb.decoder) : '—',
+            vram: decoderOnGpu ? formatVramMb(vram.decoder) : '—',
         },
         {
             name: t('localInference.part.encoder'),
             where: encoderOnGpu ? onGpu : onCpu,
-            vram: encoderOnGpu ? formatVramMb(qwen3VramMb.encoder) : '—',
+            vram: encoderOnGpu ? formatVramMb(vram.encoder) : '—',
         },
     ];
-    const totalMb = (decoderOnGpu ? qwen3VramMb.decoder : 0) + (encoderOnGpu ? qwen3VramMb.encoder : 0);
+    const totalMb = (decoderOnGpu ? vram.decoder : 0) + (encoderOnGpu ? vram.encoder : 0);
 
     box.innerHTML = rows
         .map((r) => `<div>${r.name} — ${r.where}，${t('localInference.vramLabel')} ${r.vram}</div>`)
@@ -323,9 +328,6 @@ function applyLocalInferenceConfig(config) {
     if (encoderSelect) {
         const encDev = String(config.encoder_device || 'auto');
         encoderSelect.value = ['auto', 'cpu', 'gpu'].includes(encDev) ? encDev : 'auto';
-    }
-    if (config.qwen3_vram_mb) {
-        qwen3VramMb = config.qwen3_vram_mb;
     }
     updateQwen3ModelPlacement();
     if (document.getElementById('local-incremental-asr')) {

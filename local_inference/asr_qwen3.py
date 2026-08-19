@@ -17,12 +17,10 @@ from .model_manager import (
 logger = logging.getLogger(__name__)
 QWEN_SAMPLE_RATE = 16000
 
-# 音频编码器后端在 DirectML 下需要固定输入形状，否则会退回 CPU 执行（12s 音频实测 195ms vs 62ms）。
-# 只用一个"够大的"形状意味着 2s 的句子也在算 30s 的注意力；改成挑最小的够用档，
-# 短句实测 43ms → 20ms，长句不受影响。单位：秒，必须升序，最后一档要覆盖最长音频。
-_ENCODER_SHAPE_BUCKETS_SEC = (5, 10, 20, 30)
-# 前端每秒输出 13 帧 hidden state（见 vendor 的 get_feat_extract_output_lengths）
-_ENCODER_FRAMES_PER_SEC = 13
+# 注：音频编码器后端在 DirectML 下要求固定输入形状，vendor 用单一 pad_to 秒数兜住所有音频，
+# 于是 2s 的句子也在算 30s 的注意力。试过在调用前改写 h_target_len 做分档，实测是负优化
+# ——会话只认构造时那一个形状，换成别的会永久退化（2s 音频 50ms → 210ms，跑 20 次也不收敛）。
+# 想吃到这个收益只能在构造会话时就定小形状，代价是超过它的音频掉出快路径，属于另一个取舍。
 
 _LANG_MAP = {
     "zh": "Chinese",
@@ -108,7 +106,6 @@ class Qwen3ASREngine:
         self.model_dir = resolved_model_dir
         self.device = effective_device
         self._encoder_on_gpu = bool(getattr(self._engine.encoder, "active_dml", False))
-        self._encoder_full_target = int(getattr(self._engine.encoder, "h_target_len", 0))
         # 上一次中间结果的 token，作为下一次的推测解码草稿；整句结束后清空。
         self._draft_tokens: list[int] = []
         self._spec = None
@@ -133,23 +130,6 @@ class Qwen3ASREngine:
         if choice == "gpu":
             return True
         return str(effective_device or "").strip().lower() != "cpu"
-
-    def _apply_encoder_shape_bucket(self, n_samples: int) -> None:
-        """按本次音频长度挑一个最小的够用固定形状（仅 DirectML 下有意义）。
-
-        编码器后端在 DirectML 上要求固定形状，vendor 的实现用单一的 pad_to 秒数兜住所有音频，
-        于是短句也按最长时长算注意力。这里在调用前改写 h_target_len，等价于分档 padding，
-        不需要动 vendor 代码。超过最大档时保持原值，走原来的路径。
-        """
-        if not self._encoder_on_gpu or self._encoder_full_target <= 0:
-            return
-        seconds = n_samples / float(QWEN_SAMPLE_RATE)
-        target = self._encoder_full_target
-        for bucket in _ENCODER_SHAPE_BUCKETS_SEC:
-            if seconds <= bucket:
-                target = min(self._encoder_full_target, bucket * _ENCODER_FRAMES_PER_SEC)
-                break
-        self._engine.encoder.h_target_len = target
 
     def reset_draft(self) -> None:
         """整句边界：丢弃上一句的草稿，避免拿旧句子的译文去推测新句子。"""
@@ -310,7 +290,6 @@ class Qwen3ASREngine:
 
         context = self._prompt_context()
 
-        self._apply_encoder_shape_bucket(len(audio))
         audio_embd, enc_s = self._engine.encoder.encode(audio)
         full_embd = self._engine._build_prompt_embd(
             audio_embd=audio_embd,

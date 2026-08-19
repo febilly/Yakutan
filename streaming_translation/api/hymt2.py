@@ -352,6 +352,10 @@ def _dispose_local_engine(engine: HyMT2LocalEngine) -> None:
     if engine_lock is not None:
         engine_lock.acquire()
     try:
+        # 释放靠的是引用计数归零后包装对象的 __del__，所以每一个持有 ctx/model 的东西
+        # 都得放手——推测解码器也持有它们，漏掉它显存就要留到进程退出才还。
+        engine._spec = None
+        engine._cached_tokens = []
         # 先释放上下文（llama_free），再释放模型（llama_model_free）
         engine.ctx = None
         engine.model = None

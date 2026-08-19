@@ -86,9 +86,18 @@ def is_engine_runtime_available(engine: str) -> bool:
 
 
 def get_local_inference_features() -> dict:
+    # 显存占用是模型的固有属性，不是用户设置，所以走 features 而不是 config：
+    # 面板的设置会存进 localStorage 再回灌，未知字段在那一趟里会丢掉。
+    import config as _config
+
+    vram = getattr(_config, "QWEN3_ASR_VRAM_MB", {}) or {}
     return {
         "local_inference_build_enabled": is_local_inference_build_enabled(),
         "local_inference_ui_enabled": is_local_inference_ui_enabled(),
+        "qwen3_vram_mb": {
+            "decoder": int(vram.get("decoder", 0)),
+            "encoder": int(vram.get("encoder", 0)),
+        },
         "engines": {
             engine: {
                 "display_name": LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine),

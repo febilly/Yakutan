@@ -209,18 +209,14 @@ def _get_feature_flags() -> dict:
 
 
 def _local_inference_config_dict() -> dict:
-    vram = getattr(config, 'QWEN3_ASR_VRAM_MB', {}) or {}
     return {
         'engine': getattr(config, 'LOCAL_INFERENCE_ENGINE', 'sensevoice'),
         'device': config.sanitize_local_device(getattr(config, 'LOCAL_INFERENCE_DEVICE', 'auto')),
         'encoder_device': config.sanitize_qwen_encoder_device(
             getattr(config, 'LOCAL_QWEN_ENCODER_DEVICE', 'auto')
         ),
-        # 两部分模型各自的显存占用（MB），供面板分项显示
-        'qwen3_vram_mb': {
-            'decoder': int(vram.get('decoder', 0)),
-            'encoder': int(vram.get('encoder', 0)),
-        },
+        # 注：两个模型各自的显存占用走 /api/features（那是模型固有属性，不是设置，
+        # 而设置会经 localStorage 回灌、丢掉未知字段）
         'incremental_asr': getattr(config, 'LOCAL_INCREMENTAL_ASR', True),
         # 对外接口用秒（内部配置 LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS 为毫秒）
         'incremental_trigger_silence': int(getattr(
