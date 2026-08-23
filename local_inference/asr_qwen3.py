@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -12,6 +13,7 @@ from .model_manager import (
     ensure_vendor_sources,
     get_local_model_path,
     prepare_qwen_llama_runtime_env,
+    warn_if_weights_not_resident,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,7 +101,12 @@ class Qwen3ASREngine:
             n_gpu_layers=n_gpu_layers,
             main_gpu=main_gpu,
         )
-        self._engine = QwenASREngine(engine_cfg)
+        gguf = next(Path(resolved_model_dir).glob("*.gguf"), None)
+        if gguf is not None and n_gpu_layers > 0:
+            with warn_if_weights_not_resident("Qwen3-ASR 解码器", gguf):
+                self._engine = QwenASREngine(engine_cfg)
+        else:
+            self._engine = QwenASREngine(engine_cfg)
         self.language: str | None = None
         self._context = ""
         self._corpus_text = (corpus_text or "").strip()

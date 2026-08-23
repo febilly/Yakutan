@@ -3,7 +3,9 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.request import Request, urlopen, urlretrieve
 
@@ -55,6 +57,54 @@ def _qwen3_llama_bin_dir() -> Path:
     if _llama_vulkan_bin_has_core_dlls(vendor):
         return vendor
     return user
+
+
+def _gpu_used_mb() -> int | None:
+    """当前显卡已用显存（MiB）；拿不到就返回 None。纯诊断用，失败不影响任何流程。"""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return int(out.stdout.strip().splitlines()[0])
+    except Exception:
+        return None
+
+
+@contextmanager
+def warn_if_weights_not_resident(label: str, weights_path):
+    """包住一次模型加载，检查权重是否真的进了显存。
+
+    ggml-vulkan 在同一进程里加载**第二个**模型时会静默把权重放到系统内存——日志照样
+    打印 ``Vulkan0 model buffer size = ...``，完全看不出来。后果是每一次前向都要把整个
+    模型经 PCIe 搬一遍：实测 RTX 3080 上单 token 往返从 3.3ms 变成 56ms（1GB / 18.5GB/s，
+    正好是 PCIe 4.0 x16 的带宽），整句识别慢一个数量级。
+
+    与剩余显存无关——9GB 空闲时照样回退。决定因素是加载顺序：先加载的那个拿到显存。
+    """
+    try:
+        size_mb = Path(weights_path).stat().st_size / (1024 * 1024)
+    except OSError:
+        size_mb = 0.0
+    before = _gpu_used_mb()
+    try:
+        yield
+    finally:
+        after = _gpu_used_mb()
+        if before is None or after is None or size_mb <= 0:
+            return
+        delta = after - before
+        # 留一半的余量：KV 与 compute buffer 也算在 delta 里，权重进了显存就不可能只涨这么点
+        if delta < size_mb * 0.5:
+            logger.warning(
+                "%s 的权重没有进显存：预期 +%.0fMiB，实际只 +%dMiB。"
+                "ggml-vulkan 对同进程内第二个模型会静默回退到系统内存，"
+                "之后每次前向都要经 PCIe 重搬一遍权重（单 token 往返 3ms -> 56ms）。"
+                "让延迟敏感的模型先加载，或把两个模型拆到不同进程。",
+                label, size_mb, delta,
+            )
+        else:
+            logger.info("%s 权重已驻留显存（+%dMiB）", label, delta)
 
 
 def prepare_qwen_llama_runtime_env() -> None:
