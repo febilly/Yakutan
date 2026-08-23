@@ -3,6 +3,8 @@
 这些用例不碰真实 GPU：设备列表都是显式传入的，因此在没有显卡的 CI 上也能跑。
 """
 
+import os
+
 import config
 from local_inference.gpu_devices import (
     GPU_ALL_LAYERS,
@@ -12,6 +14,7 @@ from local_inference.gpu_devices import (
     resolve_device,
     sanitize_device,
 )
+from local_inference.model_manager import prepare_qwen_llama_runtime_env
 
 
 def _device(index, description, *, discrete=True, total_gb=8):
@@ -103,6 +106,18 @@ class TestResolve:
 
 
 class TestLoaderNeverSplits:
+    def test_runtime_env_prioritizes_vram_and_disables_silent_sysmem_fallback(
+        self, monkeypatch
+    ):
+        """显存紧张时保住 device-local 权重，不允许 Vulkan 静默分配到系统内存。"""
+        monkeypatch.delenv("GGML_VK_ENABLE_MEMORY_PRIORITY", raising=False)
+        monkeypatch.setenv("GGML_VK_ALLOW_SYSMEM_FALLBACK", "0")
+
+        prepare_qwen_llama_runtime_env()
+
+        assert os.environ["GGML_VK_ENABLE_MEMORY_PRIORITY"] == "1"
+        assert "GGML_VK_ALLOW_SYSMEM_FALLBACK" not in os.environ
+
     def test_load_model_forces_single_gpu(self):
         """核显+独显的机器上，llama.cpp 默认会把层切分到两张卡，必须显式关掉。"""
         import inspect

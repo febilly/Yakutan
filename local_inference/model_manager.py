@@ -73,14 +73,14 @@ def _gpu_used_mb() -> int | None:
 
 @contextmanager
 def warn_if_weights_not_resident(label: str, weights_path):
-    """包住一次模型加载，检查权重是否真的进了显存。
+    """包住一次模型加载，粗略检查权重是否在加载时进入了独显显存。
 
-    ggml-vulkan 在同一进程里加载**第二个**模型时会静默把权重放到系统内存——日志照样
-    打印 ``Vulkan0 model buffer size = ...``，完全看不出来。后果是每一次前向都要把整个
-    模型经 PCIe 搬一遍：实测 RTX 3080 上单 token 往返从 3.3ms 变成 56ms（1GB / 18.5GB/s，
-    正好是 PCIe 4.0 x16 的带宽），整句识别慢一个数量级。
+    Windows/WDDM 在独显显存紧张时可以把 Vulkan 的 device-local allocation 分页到共享
+    GPU 内存。模型仍显示为 Vulkan 模型，kernel 也仍在 GPU 上跑，但每次前向都要经 PCIe
+    读取权重：实测 RTX 3080 上单 token 往返会从约 3.3ms 增至约 56ms。
 
-    与剩余显存无关——9GB 空闲时照样回退。决定因素是加载顺序：先加载的那个拿到显存。
+    这里只比较加载前后的全卡占用，因此是辅助诊断，不是驻留性的完整证明；驱动也可能在
+    加载完成后才换出 allocation。真正的防护由 ``GGML_VK_ENABLE_MEMORY_PRIORITY`` 提供。
     """
     try:
         size_mb = Path(weights_path).stat().st_size / (1024 * 1024)
@@ -98,9 +98,8 @@ def warn_if_weights_not_resident(label: str, weights_path):
         if delta < size_mb * 0.5:
             logger.warning(
                 "%s 的权重没有进显存：预期 +%.0fMiB，实际只 +%dMiB。"
-                "ggml-vulkan 对同进程内第二个模型会静默回退到系统内存，"
-                "之后每次前向都要经 PCIe 重搬一遍权重（单 token 往返 3ms -> 56ms）。"
-                "让延迟敏感的模型先加载，或把两个模型拆到不同进程。",
+                "权重可能已被放进共享 GPU 内存，之后每次前向都要经 PCIe 读取，"
+                "解码会慢一个数量级。请释放其他程序占用的显存后重新加载模型。",
                 label, size_mb, delta,
             )
         else:
@@ -108,8 +107,16 @@ def warn_if_weights_not_resident(label: str, weights_path):
 
 
 def prepare_qwen_llama_runtime_env() -> None:
-    """供 llama.py 通过 YAKUTAN_QWEN_LLAMA_BIN 加载与 exe 同目录下的 Vulkan DLL（先于 import llama 调用）。"""
+    """在首次 import llama/Vulkan 后端前配置 DLL 路径和显存驻留策略。"""
     os.environ["YAKUTAN_QWEN_LLAMA_BIN"] = str(_qwen_llama_vulkan_user_bin().resolve())
+    # llama.cpp 的 Vulkan 后端默认不给 allocation 标记优先级。Windows/WDDM 在显存压力下
+    # 会优先把空闲的模型权重换到 shared GPU memory，下一次 forward 才经 PCIe 重新读取。
+    # bundled ggml-vulkan.dll 支持该开关；支持 VK_EXT_memory_priority 的驱动会给模型、KV、
+    # compute buffer 的 device allocation 设置最高优先级，不支持的驱动会安全忽略。
+    os.environ["GGML_VK_ENABLE_MEMORY_PRIORITY"] = "1"
+    # llama.cpp 以“变量是否存在”判断该低速回退（即使值是 "0" 也会启用）。Yakutan 的本地
+    # 实时模型宁可明确加载失败，也不能把权重直接分配进系统内存后无提示地慢十倍。
+    os.environ.pop("GGML_VK_ALLOW_SYSMEM_FALLBACK", None)
 
 
 def _default_models_dir() -> Path:
