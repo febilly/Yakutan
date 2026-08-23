@@ -277,6 +277,11 @@ class Qwen3ASREngine:
             "n_passes": gen.n_passes if gen else 0,
             "n_drafted": gen.n_drafted if gen else 0,
             "n_accepted": gen.n_accepted if gen else 0,
+            "t_decode": gen.t_decode if gen else 0.0,
+            "t_wait": gen.t_wait if gen else 0.0,
+            "t_verify": gen.t_verify if gen else 0.0,
+            "n_waits": gen.n_waits if gen else 0,
+            "n_verifies": gen.n_verifies if gen else 0,
         }
 
     def transcribe(self, audio: np.ndarray, *, update_context: bool = True) -> dict | None:
@@ -303,19 +308,46 @@ class Qwen3ASREngine:
             pre_s = float(result["t_prefill"])
             gen_s = float(result["t_generate"])
             total_s = enc_s + pre_s + gen_s
+            n_passes = int(result["n_passes"])
+            # 每次前向的耗时是这条流水线上最容易出问题的指标：它应该稳定在个位数毫秒。
+            # 涨到几十毫秒，先看启动时那条「权重已驻留显存 / 没进显存」的日志——权重被
+            # 换到系统内存后每次前向都要经 PCIe 重搬一遍，实测 3.3ms -> 56ms。
+            per_pass = f"{gen_s * 1000 / n_passes:.1f}" if n_passes else "-"
+            # generate 内部再拆四份，哪一份撑大了指向的原因完全不同：
+            #   submit  提交前向（llama_decode 是异步的，只算提交）
+            #   gpuwait 提交后第一次取 logits——synchronize 落在这里，即 GPU 往返
+            #   verify  草稿块里后续的采样，logits 已就绪，纯 CPU 跑词表
+            #   rest    剩下的 Python 开销
+            dec_s = float(result["t_decode"])
+            wait_s = float(result["t_wait"])
+            vfy_s = float(result["t_verify"])
+            n_waits = int(result["n_waits"])
+            n_vfy = int(result["n_verifies"])
+            per_wait = f"{wait_s * 1000 / n_waits:.1f}" if n_waits else "-"
             logger.info(
-                "[qwen3-asr] timing audio=%.2fs onnx_encode=%.3fs llm_prefill=%.3fs llm_generate=%.3fs "
-                "sum=%.3fs prefill_positions=%s gen_tokens=%s passes=%s draft=%s/%s",
+                "[qwen3-asr] timing audio=%.2fs onnx_encode=%.0fms llm_prefill=%.0fms "
+                "llm_generate=%.0fms sum=%.0fms prefill_positions=%s gen_tokens=%s "
+                "passes=%s ms_per_pass=%s draft=%s/%s | submit=%.0fms(%s次) "
+                "gpuwait=%.0fms(%s次,每次%sms) verify=%.0fms(%s次) rest=%.0fms",
                 audio_sec,
-                enc_s,
-                pre_s,
-                gen_s,
-                total_s,
+                enc_s * 1000,
+                pre_s * 1000,
+                gen_s * 1000,
+                total_s * 1000,
                 result["n_prefill"],
                 len(result["tokens"]),
-                result["n_passes"],
+                n_passes,
+                per_pass,
                 result["n_accepted"],
                 result["n_drafted"],
+                dec_s * 1000,
+                n_passes,
+                wait_s * 1000,
+                n_waits,
+                per_wait,
+                vfy_s * 1000,
+                n_vfy,
+                (gen_s - dec_s - wait_s - vfy_s) * 1000,
             )
         text = result["text"].strip()
         if not text:

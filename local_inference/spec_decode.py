@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Sequence
 
@@ -113,6 +114,20 @@ class GenerationResult:
     n_drafted: int = 0
     n_accepted: int = 0
     n_realigned: int = 0
+    # Wall time split across the loop's costs, so a slow run can be attributed without guessing.
+    # ``t_wait`` is the first sample after each forward pass - llama_get_logits_ith synchronizes there, so
+    # that call is where the GPU round-trip actually lands. ``t_verify`` is the remaining sampler calls
+    # inside a draft chunk, which read logits that are already resident: pure CPU over the vocab. Keeping
+    # them apart is the difference between "the GPU is slow to answer" and "the sampler is expensive".
+    t_decode: float = 0.0
+    t_wait: float = 0.0
+    t_verify: float = 0.0
+    n_waits: int = 0
+    n_verifies: int = 0
+
+    @property
+    def t_sample(self) -> float:
+        return self.t_wait + self.t_verify
 
     @property
     def tokens_per_pass(self) -> float:
@@ -257,8 +272,24 @@ class SpeculativeDecoder:
         tracker = DraftTracker(draft, window=window)
         emitted = res.tokens
         pos0 = pos
+        clock = time.perf_counter
 
-        sampled = sampler.sample(self._ctx, idx=-1)
+        def sample(idx: int, *, waits: bool) -> int:
+            # ``waits`` marks the first sampler call after a forward pass: llama_decode is asynchronous,
+            # so that call is the one that blocks on the GPU. The rest of a draft chunk reads logits that
+            # are already there.
+            t = clock()
+            tok = sampler.sample(self._ctx, idx=idx)
+            dt = clock() - t
+            if waits:
+                res.t_wait += dt
+                res.n_waits += 1
+            else:
+                res.t_verify += dt
+                res.n_verifies += 1
+            return tok
+
+        sampled = sample(-1, waits=True)
 
         while True:
             if sampled in stop_ids:
@@ -273,14 +304,20 @@ class SpeculativeDecoder:
             chunk = tracker.chunk_for(sampled, len(emitted) - 1)
 
             if not chunk:
-                if self.decode_one(sampled, pos) != 0:
+                t = clock()
+                rc = self.decode_one(sampled, pos, planes=planes)
+                res.t_decode += clock() - t
+                if rc != 0:
                     break
                 pos += 1
                 res.n_passes += 1
-                sampled = sampler.sample(self._ctx, idx=-1)
+                sampled = sample(-1, waits=True)
                 continue
 
-            if self.decode_tokens([sampled, *chunk], pos, planes=planes) != 0:
+            t = clock()
+            rc = self.decode_tokens([sampled, *chunk], pos, planes=planes)
+            res.t_decode += clock() - t
+            if rc != 0:
                 break
             res.n_passes += 1
 
@@ -288,7 +325,7 @@ class SpeculativeDecoder:
             nxt = None
             finished = False
             for i in range(len(chunk) + 1):
-                tok = sampler.sample(self._ctx, idx=i)
+                tok = sample(i, waits=(i == 0))
                 if i == len(chunk) or tok != chunk[i]:
                     nxt = tok
                     break
