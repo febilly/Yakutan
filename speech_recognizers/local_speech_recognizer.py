@@ -136,6 +136,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
                 text=text,
                 is_final=is_final,
                 raw=raw,
+                force_partial_translation=not is_final,
             )
         )
 

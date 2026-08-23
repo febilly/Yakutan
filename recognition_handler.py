@@ -1267,9 +1267,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             )
 
             if config.ENABLE_TRANSLATION and getattr(config, 'TRANSLATE_PARTIAL_RESULTS', False):
-                segment = self._extract_streaming_segment(text)
+                force_partial_translation = bool(event.force_partial_translation)
+                segment = text if force_partial_translation else self._extract_streaming_segment(text)
                 if (
-                    self._should_trigger_partial_translation(segment)
+                    (force_partial_translation or self._should_trigger_partial_translation(segment))
                     and segment != self.last_partial_source_segment
                     and segment != self.pending_partial_segment
                     and self.loop

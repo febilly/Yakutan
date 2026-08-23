@@ -77,6 +77,19 @@ class CollectingCallback(SpeechRecognitionCallback):
         self.events.append(event)
 
 
+class TestLocalRecognitionEventMetadata(unittest.TestCase):
+    def test_only_interim_results_force_partial_translation(self) -> None:
+        callback = CollectingCallback()
+        recognizer = LocalSpeechRecognizer.__new__(LocalSpeechRecognizer)
+        recognizer._callback = callback
+
+        recognizer._emit_result("interim", is_final=False, raw={})
+        recognizer._emit_result("final", is_final=True, raw={})
+
+        self.assertTrue(callback.events[0].force_partial_translation)
+        self.assertFalse(callback.events[1].force_partial_translation)
+
+
 class _StubEngine:
     def __init__(self) -> None:
         self.calls = 0

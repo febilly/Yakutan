@@ -135,6 +135,48 @@ class TestShouldTriggerPartialTranslation:
         assert result is False
 
 
+class TestForcedPartialTranslation:
+    @patch("recognition_handler.config")
+    def test_default_event_without_punctuation_does_not_trigger(self, mock_config):
+        mock_config.ENABLE_TRANSLATION = True
+        mock_config.TRANSLATE_PARTIAL_RESULTS = True
+        mock_config.SHOW_PARTIAL_RESULTS = False
+        mock_config.MIN_PARTIAL_TRANSLATION_CHARS = 2
+
+        callback = VRChatRecognitionCallback(_make_mock_state())
+        callback.loop = MagicMock()
+        callback._schedule_partial_output_with_debounce = MagicMock()
+        callback._schedule_partial_translation_with_debounce = MagicMock()
+
+        callback.on_result(RecognitionEvent(text="hello", is_final=False, raw={}))
+
+        callback._schedule_partial_translation_with_debounce.assert_not_called()
+
+    @patch("recognition_handler.config")
+    def test_forced_event_triggers_full_text_without_punctuation(self, mock_config):
+        mock_config.ENABLE_TRANSLATION = True
+        mock_config.TRANSLATE_PARTIAL_RESULTS = True
+        mock_config.SHOW_PARTIAL_RESULTS = False
+        mock_config.MIN_PARTIAL_TRANSLATION_CHARS = 2
+
+        callback = VRChatRecognitionCallback(_make_mock_state())
+        callback.loop = MagicMock()
+        callback._schedule_partial_output_with_debounce = MagicMock()
+        callback._schedule_partial_translation_with_debounce = MagicMock()
+
+        callback.on_result(
+            RecognitionEvent(
+                text="a",
+                is_final=False,
+                raw={},
+                force_partial_translation=True,
+            )
+        )
+
+        assert callback.pending_partial_segment == "a"
+        assert callback._schedule_partial_translation_with_debounce.call_args.args[0] == "a"
+
+
 class TestHasErrorText:
     def test_has_error(self):
         assert VRChatRecognitionCallback._has_error_text("[ERROR] something") is True

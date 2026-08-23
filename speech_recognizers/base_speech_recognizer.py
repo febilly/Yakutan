@@ -15,6 +15,9 @@ class RecognitionEvent:
     is_final: bool
     confidence: Optional[float] = None
     raw: Optional[Any] = None
+    # Callers can opt a non-final result into streaming translation even when
+    # the ordinary punctuation-based trigger has not produced a stable segment.
+    force_partial_translation: bool = False
 
 
 class SpeechRecognitionCallback(ABC):
