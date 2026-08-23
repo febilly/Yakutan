@@ -37,6 +37,11 @@ MAX_DRAFT_CHUNK = 63
 # kept because it is free on the trajectories where it does not help.
 DEFAULT_WINDOW = 8
 
+# One batch object is reused for every token decode. Sized for the widest pass (the sampled token plus a
+# full draft chunk) at the most RoPE planes the audio path uses. Allocating one per pass would add two
+# foreign calls per forward for no benefit.
+BATCH_CAPACITY = (MAX_DRAFT_CHUNK + 1) * 4
+
 
 class DraftTracker:
     """Tracks where the model's output currently sits inside the draft.
@@ -128,6 +133,12 @@ class SpeculativeDecoder:
         self._seq_rm = seq_rm
         self._mem = llama_mod.llama_get_memory(ctx.ptr)
 
+        # Reused across passes; only token/logits/pos and n_tokens vary, the sequence assignment never does.
+        self._batch = llama_mod.LlamaBatch(BATCH_CAPACITY, 0, 1)
+        for i in range(BATCH_CAPACITY):
+            self._batch.n_seq_id[i] = 1
+            self._batch.seq_id[i][0] = 0
+
     # -- memory -----------------------------------------------------------------
 
     def seq_rm(self, p0: int, p1: int = -1) -> None:
@@ -146,12 +157,29 @@ class SpeculativeDecoder:
         With multi-plane RoPE llama.cpp reads ``n * planes`` positions laid out plane-major. The vendored
         prompt builder writes four planes (three copies of the index, then zeros); mirror that so the
         generated tokens are positioned exactly like the prompt they continue.
+
+        Narrow batches - every pass of the generation loop - are written straight into the ctypes array.
+        That skips both the numpy temporaries and the ``memmove``, and a foreign call is not free here:
+        it drops the GIL and has to queue for it again on the way back.
         """
+        n_planes = max(planes, 1)
+        if n * n_planes <= BATCH_CAPACITY:
+            pos = batch.pos
+            for p in range(max(n_planes - 1, 1)):
+                off = p * n
+                for i in range(n):
+                    pos[off + i] = pos0 + i
+            if n_planes > 1:  # the vendored layout ends with a zero plane
+                off = (n_planes - 1) * n
+                for i in range(n):
+                    pos[off + i] = 0
+            return
+
         base = np.arange(pos0, pos0 + n, dtype=np.int32)
-        if planes <= 1:
+        if n_planes <= 1:
             arr = base
         else:
-            arr = np.concatenate([base] * (planes - 1) + [np.zeros(n, dtype=np.int32)])
+            arr = np.concatenate([base] * (n_planes - 1) + [np.zeros(n, dtype=np.int32)])
         ctypes.memmove(batch.pos, arr.ctypes.data, arr.nbytes)
 
     def decode_tokens(self, tokens: Sequence[int], pos0: int, *, planes: int = 1,
@@ -160,19 +188,27 @@ class SpeculativeDecoder:
         n = len(tokens)
         if n == 0:
             return 0
-        batch = self._m.LlamaBatch(max(n * planes, n), 0, 1)
+        width = n * max(planes, 1)
+        # The generation loop always fits the reused batch; a prompt prefill (Hy-MT2 feeds whole prompts
+        # through here) can be far wider, and pays for its own allocation the way it always did.
+        scratch = None
+        if width <= BATCH_CAPACITY:
+            batch = self._batch
+        else:
+            scratch = batch = self._m.LlamaBatch(width, 0, 1)
+            for i in range(n):
+                batch.n_seq_id[i] = 1
+                batch.seq_id[i][0] = 0
         try:
             want_all = logits == "all"
             for i, tok in enumerate(tokens):
                 batch.token[i] = int(tok)
-                batch.n_seq_id[i] = 1
-                batch.seq_id[i][0] = 0
                 batch.logits[i] = 1 if (want_all or i == n - 1) else 0
             self._fill_positions(batch, pos0, n, planes)
             batch.n_tokens = n
             return self._ctx.decode(batch)
         finally:
-            del batch
+            del scratch
 
     def decode_embd(self, embd: np.ndarray, pos0: int = 0, *, planes: int = 4) -> int:
         """Decode an embedding prompt (the audio path); logits only on the last position."""
@@ -189,8 +225,14 @@ class SpeculativeDecoder:
         finally:
             del batch
 
-    def decode_one(self, token: int, pos: int) -> int:
-        return self._ctx.decode_token(int(token), pos=int(pos))
+    def decode_one(self, token: int, pos: int, *, planes: int = 1) -> int:
+        """Decode a single token through the same batch as the draft passes.
+
+        Not the vendored ``decode_token`` helper: that one allocates a one-token batch and writes a single
+        position, but this model is multi-section RoPE (``rope.dimension_sections`` is in the GGUF), so
+        llama.cpp reads ``n_tokens * planes`` positions and would read past the end of that allocation.
+        """
+        return self.decode_tokens((token,), pos, planes=planes, logits="last")
 
     # -- generation --------------------------------------------------------------
 

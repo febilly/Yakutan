@@ -6,17 +6,22 @@ logic that decides which slice of the previous output to verify, and the setting
 of the two Qwen3-ASR models runs.
 """
 
+import ctypes
+import itertools
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
 from local_inference.spec_decode import (  # noqa: E402
+    BATCH_CAPACITY,
     DraftTracker,
     MAX_DRAFT_CHUNK,
+    SpeculativeDecoder,
     common_prefix_len,
 )
 
@@ -154,6 +159,47 @@ class TestLocalEngineDisposalDropsEveryReference:
         assert ctx_ref() is None, "上下文仍被引用，llama_free 不会执行，显存不会归还"
         assert model_ref() is None, "模型仍被引用，llama_model_free 不会执行"
         assert engine._cached_tokens == []
+
+
+class TestFillPositions:
+    """位置缓冲的内存布局。
+
+    多平面 RoPE 下 llama.cpp 按 plane-major 读 ``n * planes`` 个位置，写错了不会报错，
+    只会安静地把 RoPE 算歪。窄批走直写、宽批走 memmove，两条分支必须给出同一块内存。
+    """
+
+    class _FakeBatch:
+        def __init__(self, capacity: int) -> None:
+            self.pos = (ctypes.c_int32 * capacity)()
+
+    @staticmethod
+    def _reference(pos0: int, n: int, planes: int) -> list[int]:
+        base = np.arange(pos0, pos0 + n, dtype=np.int32)
+        if planes <= 1:
+            return list(base)
+        return list(np.concatenate([base] * (planes - 1) + [np.zeros(n, dtype=np.int32)]))
+
+    @pytest.mark.parametrize("planes", [1, 2, 4])
+    @pytest.mark.parametrize("n", [1, 2, 24, 63, 64, 65, 200])
+    def test_matches_reference_layout(self, n, planes):
+        width = n * max(planes, 1)
+        batch = self._FakeBatch(width + 8)
+        SpeculativeDecoder._fill_positions(batch, 137, n, planes)
+        assert list(batch.pos[:width]) == self._reference(137, n, planes)
+
+    def test_both_branches_are_exercised(self):
+        """参数里得同时有落在直写和 memmove 两侧的宽度，否则这个测试是摆设。"""
+        widths = {n * p for n, p in itertools.product([1, 2, 24, 63, 64, 65, 200], [1, 2, 4])}
+        assert any(w <= BATCH_CAPACITY for w in widths)
+        assert any(w > BATCH_CAPACITY for w in widths)
+
+    def test_single_token_writes_every_plane(self):
+        """无草稿时每个 token 都走这条路；vendor 的单 token 构造只写了 pos[0]。"""
+        batch = self._FakeBatch(16)
+        for i in range(16):
+            batch.pos[i] = -1
+        SpeculativeDecoder._fill_positions(batch, 42, 1, 4)
+        assert list(batch.pos[:4]) == [42, 42, 42, 0]
 
 
 class TestEncoderDeviceSetting:
