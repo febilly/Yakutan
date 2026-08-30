@@ -37,3 +37,11 @@ local_inference/vendor/qwen_asr_gguf/inference_old/
 
 local_asr_models/
 /.sisyphus
+
+# 本机工具配置与远程推理部署文件（可能含服务器路径或连接信息）
+.claude/settings.local.json
+remote_inference_service/README.md
+remote_inference_service/run_*.sh
+remote_inference_service/tunnel_to_*.bat
+remote_inference_service/*.sbatch
+remote_inference_service/*.service
