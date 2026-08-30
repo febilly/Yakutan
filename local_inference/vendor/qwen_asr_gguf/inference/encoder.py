@@ -122,6 +122,9 @@ class QwenAudioEncoder:
     def __init__(self, frontend_path: str, backend_path: str, use_dml: bool = True, pad_to: int = 30, verbose: bool = True):
         self.verbose = verbose
         self.active_dml = False
+        self.active_cuda = False
+        self.active_gpu = False
+        self.provider = 'CPUExecutionProvider'
         self.pad_to = pad_to
         # 预计算目标长度：每 1 秒对应 13 帧 hidden_states
         self.h_target_len = self.pad_to * 13
@@ -132,19 +135,46 @@ class QwenAudioEncoder:
         sess_opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
         sess_opts.add_session_config_entry("session.inter_op.allow_spinning", "0")
         sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        thread_limit = int(os.getenv("YAKUTAN_ONNX_THREADS", "0") or 0)
+        if thread_limit > 0:
+            sess_opts.intra_op_num_threads = thread_limit
+            sess_opts.inter_op_num_threads = 1
 
         providers = ['CPUExecutionProvider']
-        if use_dml and 'DmlExecutionProvider' in ort.get_available_providers():
+        available = ort.get_available_providers()
+        # Windows desktop builds use DirectML. Linux inference servers should use
+        # CUDA EP when it is installed; a CPU encoder would otherwise dominate
+        # short streaming ASR requests even though the decoder is on the GPU.
+        prefer_cuda = (
+            os.getenv('YAKUTAN_ONNX_PROVIDER', '').strip().lower() == 'cuda'
+            or (os.name != 'nt' and 'CUDAExecutionProvider' in available)
+        )
+        if use_dml and prefer_cuda and 'CUDAExecutionProvider' in available:
+            providers.insert(0, ('CUDAExecutionProvider', {
+                'device_id': os.getenv('YAKUTAN_ONNX_CUDA_DEVICE', '0'),
+            }))
+            self.active_cuda = True
+            self.active_gpu = True
+            self.provider = 'CUDAExecutionProvider'
+        elif use_dml and 'DmlExecutionProvider' in available:
             providers.insert(0, 'DmlExecutionProvider')
             self.active_dml = True
+            self.active_gpu = True
+            self.provider = 'DmlExecutionProvider'
 
         if self.verbose:
-            logger.info(f"Encoder ONNX (DML: {self.active_dml}, Pad: {pad_to}s) "
+            logger.info(f"Encoder ONNX ({self.provider}, Pad: {pad_to}s) "
                        f"Frontend: {os.path.basename(frontend_path)}, Backend: {os.path.basename(backend_path)}")
 
         # 加载两个 Session
         self.sess_fe = ort.InferenceSession(frontend_path, sess_options=sess_opts, providers=providers)
         self.sess_be = ort.InferenceSession(backend_path, sess_options=sess_opts, providers=providers)
+        # The shipped frontend is currently exported with batch=1.  Keep the
+        # microbatch caller correct on that artifact instead of discovering the
+        # constraint under live traffic; a later dynamic-batch export can flip
+        # this path without changing its API.
+        fe_batch_dim = self.sess_fe.get_inputs()[0].shape[0]
+        self.supports_batch = fe_batch_dim is None or isinstance(fe_batch_dim, str)
 
         self.mel_extractor = FastWhisperMel()
 
@@ -249,3 +279,57 @@ class QwenAudioEncoder:
 
         elapsed = time.time() - t0
         return audio_embd, elapsed
+
+    def encode_batch(self, audios: list[np.ndarray]) -> tuple[list[np.ndarray], float]:
+        """Encode a micro-batch of variable-length utterances in one ONNX pass.
+
+        Streaming server requests usually contain similarly sized VAD snapshots.
+        Running them one by one makes the CUDA kernels memory-bandwidth bound;
+        stacking their frontend chunks and backend attention work lets ORT use a
+        real batch dimension.  Every output is sliced back to its own valid
+        frame length, so padding never changes the embedding seen by Qwen.
+        """
+        if not audios:
+            return [], 0.0
+        if len(audios) == 1:
+            embd, elapsed = self.encode(audios[0])
+            return [embd], elapsed
+        if not self.supports_batch:
+            t0 = time.time()
+            embeddings = [self.encode(audio)[0] for audio in audios]
+            return embeddings, time.time() - t0
+
+        t0 = time.time()
+        mels = [self.mel_extractor(audio, dtype=self.input_dtype) for audio in audios]
+        original_lengths = [mel.shape[1] for mel in mels]
+        padded_lengths = [length + ((100 - length % 100) % 100) for length in original_lengths]
+        max_length = max(padded_lengths)
+        batch_size = len(mels)
+
+        # Frontend is exported with a dynamic batch dimension.  Pad only the
+        # chunk axis; all-zero tail chunks are removed before the backend.
+        mel_input = np.zeros((batch_size, 128, max_length), dtype=self.input_dtype)
+        for index, mel in enumerate(mels):
+            mel_input[index, :, :mel.shape[1]] = mel
+
+        frontend_parts = []
+        for start in range(0, max_length, 100):
+            frontend_parts.append(self.sess_fe.run(
+                None, {"chunk_mel": mel_input[:, :, start:start + 100]}
+            )[0])
+        hidden = np.concatenate(frontend_parts, axis=1)
+        output_lengths = [get_feat_extract_output_lengths(length) for length in original_lengths]
+        max_output = max(output_lengths)
+        hidden_input = np.zeros((batch_size, max_output, hidden.shape[2]), dtype=hidden.dtype)
+        mask = np.zeros((batch_size, 1, max_output, max_output), dtype=self.input_dtype)
+        for index, output_length in enumerate(output_lengths):
+            hidden_input[index, :output_length] = hidden[index, :output_length]
+            if output_length < max_output:
+                mask[index, :, :, output_length:] = -10000.0
+
+        encoded = self.sess_be.run(None, {
+            "hidden_states": hidden_input,
+            "attention_mask": mask,
+        })[0]
+        return [encoded[index, :output_length].copy()
+                for index, output_length in enumerate(output_lengths)], time.time() - t0

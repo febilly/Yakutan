@@ -39,17 +39,39 @@ LLAMA_SPLIT_MODE_LAYER = 1  # 按层切分到多张 GPU（llama.cpp 默认）
 LLAMA_SPLIT_MODE_ROW = 2
 
 
-class llama_model_params(ctypes.Structure):
-    _fields_ = [
-        ("devices", ctypes.POINTER(ctypes.c_void_p)),
-        ("tensor_buft_overrides", ctypes.POINTER(ctypes.c_void_p)),
-        ("n_gpu_layers", ctypes.c_int32),
-        ("split_mode", ctypes.c_int32),
-        ("main_gpu", ctypes.c_int32),
-        ("tensor_split", ctypes.POINTER(ctypes.c_float)),
-        ("progress_callback", ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_float, ctypes.c_void_p)),
-        ("progress_callback_user_data", ctypes.c_void_p),
-        ("kv_overrides", ctypes.POINTER(ctypes.c_void_p)),
+# The desktop Vulkan bundle and the Linux CUDA build deployed on gpu4038 come
+# from different llama.cpp ABI revisions. Keep the bundled desktop ABI as the
+# default and opt in to the server build's current structs from the service.
+_ABI_PROFILE = os.getenv("YAKUTAN_LLAMA_ABI_PROFILE", "").strip().lower()
+_CUDA_2026_ABI = _ABI_PROFILE == "cuda-2026-08"
+
+
+_model_params_fields = [
+    ("devices", ctypes.POINTER(ctypes.c_void_p)),
+    ("tensor_buft_overrides", ctypes.POINTER(ctypes.c_void_p)),
+    ("n_gpu_layers", ctypes.c_int32),
+    ("split_mode", ctypes.c_int32),
+]
+if _CUDA_2026_ABI:
+    _model_params_fields.append(("load_mode", ctypes.c_int32))
+_model_params_fields.extend([
+    ("main_gpu", ctypes.c_int32),
+    ("tensor_split", ctypes.POINTER(ctypes.c_float)),
+    ("progress_callback", ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_float, ctypes.c_void_p)),
+    ("progress_callback_user_data", ctypes.c_void_p),
+    ("kv_overrides", ctypes.POINTER(ctypes.c_void_p)),
+])
+if _CUDA_2026_ABI:
+    _model_params_fields.extend([
+        ("vocab_only", ctypes.c_bool),
+        ("check_tensors", ctypes.c_bool),
+        ("use_extra_bufts", ctypes.c_bool),
+        ("no_host", ctypes.c_bool),
+        ("no_alloc", ctypes.c_bool),
+        ("load_mtp", ctypes.c_bool),
+    ])
+else:
+    _model_params_fields.extend([
         ("vocab_only", ctypes.c_bool),
         ("use_mmap", ctypes.c_bool),
         ("use_direct_io", ctypes.c_bool),
@@ -58,43 +80,64 @@ class llama_model_params(ctypes.Structure):
         ("use_extra_bufts", ctypes.c_bool),
         ("no_host", ctypes.c_bool),
         ("no_alloc", ctypes.c_bool),
-    ]
+    ])
+
+
+class llama_model_params(ctypes.Structure):
+    _fields_ = _model_params_fields
+
+
+_context_params_fields = [
+    ("n_ctx", ctypes.c_uint32),
+    ("n_batch", ctypes.c_uint32),
+    ("n_ubatch", ctypes.c_uint32),
+    ("n_seq_max", ctypes.c_uint32),
+]
+if _CUDA_2026_ABI:
+    _context_params_fields.extend([
+        ("n_rs_seq", ctypes.c_uint32),
+        ("n_outputs_max", ctypes.c_uint32),
+        ("n_outputs_max_per_seq", ctypes.c_uint32),
+    ])
+_context_params_fields.extend([
+    ("n_threads", ctypes.c_int32),
+    ("n_threads_batch", ctypes.c_int32),
+])
+if _CUDA_2026_ABI:
+    _context_params_fields.append(("ctx_type", ctypes.c_int32))
+_context_params_fields.extend([
+    ("rope_scaling_type", ctypes.c_int32),
+    ("pooling_type", ctypes.c_int32),
+    ("attention_type", ctypes.c_int32),
+    ("flash_attn_type", ctypes.c_int32),
+    ("rope_freq_base", ctypes.c_float),
+    ("rope_freq_scale", ctypes.c_float),
+    ("yarn_ext_factor", ctypes.c_float),
+    ("yarn_attn_factor", ctypes.c_float),
+    ("yarn_beta_fast", ctypes.c_float),
+    ("yarn_beta_slow", ctypes.c_float),
+    ("yarn_orig_ctx", ctypes.c_uint32),
+    ("defrag_thold", ctypes.c_float),
+    ("cb_eval", ctypes.c_void_p),
+    ("cb_eval_user_data", ctypes.c_void_p),
+    ("type_k", ctypes.c_int32),
+    ("type_v", ctypes.c_int32),
+    ("abort_callback", ctypes.c_void_p),
+    ("abort_callback_data", ctypes.c_void_p),
+    ("embeddings", ctypes.c_bool),
+    ("offload_kqv", ctypes.c_bool),
+    ("no_perf", ctypes.c_bool),
+    ("op_offload", ctypes.c_bool),
+    ("swa_full", ctypes.c_bool),
+    ("kv_unified", ctypes.c_bool),
+    ("samplers", ctypes.POINTER(ctypes.c_void_p)),
+    ("n_samplers", ctypes.c_size_t),
+])
+if _CUDA_2026_ABI:
+    _context_params_fields.append(("ctx_other", ctypes.c_void_p))
 
 class llama_context_params(ctypes.Structure):
-    _fields_ = [
-        ("n_ctx", ctypes.c_uint32),
-        ("n_batch", ctypes.c_uint32),
-        ("n_ubatch", ctypes.c_uint32),
-        ("n_seq_max", ctypes.c_uint32),
-        ("n_threads", ctypes.c_int32),
-        ("n_threads_batch", ctypes.c_int32),
-        ("rope_scaling_type", ctypes.c_int32),
-        ("pooling_type", ctypes.c_int32),
-        ("attention_type", ctypes.c_int32),
-        ("flash_attn_type", ctypes.c_int32),
-        ("rope_freq_base", ctypes.c_float),
-        ("rope_freq_scale", ctypes.c_float),
-        ("yarn_ext_factor", ctypes.c_float),
-        ("yarn_attn_factor", ctypes.c_float),
-        ("yarn_beta_fast", ctypes.c_float),
-        ("yarn_beta_slow", ctypes.c_float),
-        ("yarn_orig_ctx", ctypes.c_uint32),
-        ("defrag_thold", ctypes.c_float),
-        ("cb_eval", ctypes.c_void_p),
-        ("cb_eval_user_data", ctypes.c_void_p),
-        ("type_k", ctypes.c_int32),
-        ("type_v", ctypes.c_int32),
-        ("abort_callback", ctypes.c_void_p),
-        ("abort_callback_data", ctypes.c_void_p),
-        ("embeddings", ctypes.c_bool),
-        ("offload_kqv", ctypes.c_bool),
-        ("no_perf", ctypes.c_bool),
-        ("op_offload", ctypes.c_bool),
-        ("swa_full", ctypes.c_bool),
-        ("kv_unified", ctypes.c_bool),
-        ("samplers", ctypes.POINTER(ctypes.c_void_p)),
-        ("n_samplers", ctypes.c_size_t),
-    ]
+    _fields_ = _context_params_fields
 
 class llama_sampler_chain_params(ctypes.Structure):
     _fields_ = [

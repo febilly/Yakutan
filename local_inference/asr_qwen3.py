@@ -112,11 +112,12 @@ class Qwen3ASREngine:
         self._corpus_text = (corpus_text or "").strip()
         self.model_dir = resolved_model_dir
         self.device = effective_device
-        self._encoder_on_gpu = bool(getattr(self._engine.encoder, "active_dml", False))
+        self._encoder_on_gpu = bool(getattr(self._engine.encoder, "active_gpu", False))
         # 上一次中间结果的 token，作为下一次的推测解码草稿；整句结束后清空。
         self._draft_tokens: list[int] = []
         self._spec = None
-        encoder_actual = "DirectML(GPU)" if self._encoder_on_gpu else "CPU"
+        provider = getattr(self._engine.encoder, 'provider', '')
+        encoder_actual = provider if self._encoder_on_gpu else "CPU"
         logger.info(
             "Qwen3-ASR loaded: %s (device=%s -> %s, GGUF: %s 层卸载到该卡, ONNX 编码器实际=%s)",
             resolved_model_dir,
@@ -125,6 +126,20 @@ class Qwen3ASREngine:
             n_gpu_layers if n_gpu_layers > 0 else 0,
             encoder_actual,
         )
+
+    def create_shared_context_worker(self):
+        """Create a server worker with its own KV/speculative state, not weights."""
+        worker = object.__new__(Qwen3ASREngine)
+        worker._engine = self._engine.create_context_worker()
+        worker.language = None
+        worker._context = ""
+        worker._corpus_text = ""
+        worker.model_dir = self.model_dir
+        worker.device = self.device
+        worker._encoder_on_gpu = self._encoder_on_gpu
+        worker._draft_tokens = []
+        worker._spec = None
+        return worker
 
     @staticmethod
     def _want_encoder_on_gpu(effective_device: str) -> bool:
@@ -357,6 +372,18 @@ class Qwen3ASREngine:
                 (gen_s - dec_s - wait_s - vfy_s) * 1000,
             )
         text = result["text"].strip()
+        # Kept on the worker rather than in the desktop-facing result schema.
+        # The remote service exposes this as its optional timing payload so a
+        # capacity run can prove that successive partials really reuse drafts.
+        self._last_metrics = {
+            "encoder_ms": round(enc_s * 1000, 3),
+            "prefill_ms": round(float(result["t_prefill"]) * 1000, 3),
+            "generate_ms": round(float(result["t_generate"]) * 1000, 3),
+            "n_prefill": int(result["n_prefill"]),
+            "n_passes": int(result["n_passes"]),
+            "n_drafted": int(result["n_drafted"]),
+            "n_accepted": int(result["n_accepted"]),
+        }
         if not text:
             self._draft_tokens = []
             return None

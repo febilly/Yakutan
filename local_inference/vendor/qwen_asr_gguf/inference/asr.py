@@ -67,14 +67,41 @@ class QwenASREngine:
         self.ID_AUDIO_END = self.model.token_to_id("<|audio_end|>")
         self.ID_ASR_TEXT = self.model.token_to_id("<asr_text>")
 
+    def create_context_worker(self):
+        """Create an independent KV context while sharing immutable model weights.
+
+        llama.cpp supports several contexts over one model.  That is the useful
+        shape for a server: each live user needs isolated KV/draft state, but
+        duplicating a 1.7B GGUF per worker wastes VRAM and lowers throughput.
+        The ONNX sessions and embedding table are also read-only during infer.
+        """
+        worker = object.__new__(QwenASREngine)
+        worker.config = self.config
+        worker.verbose = self.verbose
+        worker.llama_mod = self.llama_mod
+        worker.encoder = self.encoder
+        worker.aligner = None
+        worker.model = self.model
+        worker.embedding_table = self.embedding_table
+        worker.ctx = llama.LlamaContext(
+            worker.model, n_ctx=self.config.n_ctx, n_batch=4096, embeddings=False
+        )
+        worker.ID_IM_START = self.ID_IM_START
+        worker.ID_IM_END = self.ID_IM_END
+        worker.ID_AUDIO_START = self.ID_AUDIO_START
+        worker.ID_AUDIO_END = self.ID_AUDIO_END
+        worker.ID_ASR_TEXT = self.ID_ASR_TEXT
+        worker._shared_resources = True
+        return worker
+
     def shutdown(self):
         if hasattr(self, 'ctx') and self.ctx is not None:
             del self.ctx
             self.ctx = None
-        if hasattr(self, 'model') and self.model is not None:
+        if not getattr(self, '_shared_resources', False) and hasattr(self, 'model') and self.model is not None:
             del self.model
             self.model = None
-        if hasattr(self, 'encoder') and self.encoder is not None:
+        if not getattr(self, '_shared_resources', False) and hasattr(self, 'encoder') and self.encoder is not None:
             self.encoder = None
         if hasattr(self, 'aligner') and self.aligner is not None:
             self.aligner = None
