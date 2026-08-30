@@ -97,7 +97,14 @@ class LocalSpeechRecognizer(SpeechRecognizer):
     def _ensure_engine(self):
         if self._engine is not None:
             return self._engine
-        if not is_asr_cached(self._engine_name):
+        remote = (
+            getattr(config, "LOCAL_INFERENCE_BACKEND", "local") == "remote"
+        )
+        if not is_silero_cached():
+            raise RuntimeError(
+                "本地 VAD（Silero ONNX）未就绪。远端推理仍需要本机 VAD 做实时音频切段。"
+            )
+        if not remote and not is_asr_cached(self._engine_name):
             if not is_silero_cached():
                 raise RuntimeError(
                     "本地 VAD（Silero ONNX）未就绪。请在「本地音频识别」中点击下载，或检查 local_inference/models 下是否有 silero_vad。"
@@ -113,7 +120,18 @@ class LocalSpeechRecognizer(SpeechRecognizer):
                 f"本地识别主模型未就绪。请在「本地音频识别」中点击下载 {self._engine_name} 所需资源。"
             )
 
-        if self._engine_name == "sensevoice":
+        if remote:
+            from local_inference.remote_client import RemoteASREngine
+
+            engine = RemoteASREngine(
+                self._engine_name,
+                getattr(config, "LOCAL_INFERENCE_SERVER_URL", ""),
+                timeout=float(getattr(
+                    config, "LOCAL_INFERENCE_REMOTE_TIMEOUT_SECONDS", 60,
+                )),
+                corpus_text=build_asr_context_text(self._corpus_text) or None,
+            )
+        elif self._engine_name == "sensevoice":
             from local_inference.asr_sensevoice import SenseVoiceEngine
 
             engine = SenseVoiceEngine()

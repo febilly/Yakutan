@@ -531,6 +531,7 @@ class HyMT2API(BaseTranslationAPI):
                 ws = _sync_ws_connect(self.websocket_url, **connect_kwargs)
                 init_payload = {
                     "type": "init",
+                    "service": "hymt2",
                     "protocol_version": PROTOCOL_VERSION,
                     "source_lang": source_lang or self.DEFAULT_SOURCE_LANG,
                     "target_lang": target_lang or self.DEFAULT_TARGET_LANG,

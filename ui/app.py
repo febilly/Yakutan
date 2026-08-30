@@ -211,6 +211,10 @@ def _get_feature_flags() -> dict:
 def _local_inference_config_dict() -> dict:
     return {
         'engine': getattr(config, 'LOCAL_INFERENCE_ENGINE', 'sensevoice'),
+        'backend': config.sanitize_local_inference_backend(
+            getattr(config, 'LOCAL_INFERENCE_BACKEND', 'local')
+        ),
+        'server_url': getattr(config, 'LOCAL_INFERENCE_SERVER_URL', ''),
         'device': config.sanitize_local_device(getattr(config, 'LOCAL_INFERENCE_DEVICE', 'auto')),
         'encoder_device': config.sanitize_qwen_encoder_device(
             getattr(config, 'LOCAL_QWEN_ENCODER_DEVICE', 'auto')
@@ -456,11 +460,14 @@ def get_config_dict():
             'llm_parallel_fastest_mode': getattr(
                 config, 'LLM_PARALLEL_FASTEST_MODE', 'off'
             ),
-            'hymt2_backend': getattr(config, 'HYMT2_BACKEND', 'api'),
+            'hymt2_backend': (
+                'api' if getattr(config, 'LOCAL_INFERENCE_BACKEND', 'local') == 'remote'
+                else 'local'
+            ),
             'hymt2_local_device': config.sanitize_local_device(
                 getattr(config, 'HYMT2_LOCAL_DEVICE', 'auto')
             ),
-            'hymt2_websocket_url': getattr(config, 'HYMT2_WEBSOCKET_URL', ''),
+            'hymt2_websocket_url': getattr(config, 'LOCAL_INFERENCE_SERVER_URL', ''),
             'enable_llm_parallel_fastest': (
                 getattr(config, 'LLM_PARALLEL_FASTEST_MODE', 'off')
                 not in ('off', None, '')
@@ -730,6 +737,21 @@ def update_config(config_data):
                 if _eng not in LOCAL_INFERENCE_ENGINES:
                     _eng = 'sensevoice'
                 config.LOCAL_INFERENCE_ENGINE = _eng
+            if 'backend' in local_inference:
+                config.LOCAL_INFERENCE_BACKEND = config.sanitize_local_inference_backend(
+                    local_inference['backend']
+                )
+            if 'server_url' in local_inference:
+                config.LOCAL_INFERENCE_SERVER_URL = (
+                    str(local_inference['server_url'] or '').strip()
+                )
+            # Hy-MT2 follows the same execution switch and endpoint. Keep the old
+            # fields synchronized for TranslationConfig and older callers.
+            if config.LOCAL_INFERENCE_BACKEND == 'remote':
+                config.HYMT2_BACKEND = 'api'
+                config.HYMT2_WEBSOCKET_URL = config.LOCAL_INFERENCE_SERVER_URL
+            else:
+                config.HYMT2_BACKEND = 'local'
             if 'vad_mode' in local_inference and 'vad' not in config_data:
                 mode = str(local_inference['vad_mode'] or 'silero')
                 config.LOCAL_VAD_MODE = mode if mode in ('silero', 'energy') else 'silero'
@@ -900,6 +922,42 @@ def get_local_inference_status():
         return jsonify({'success': False, 'message': 'Local inference is disabled in this build'}), 404
 
     models_status = get_all_local_models_status()
+    backend = config.sanitize_local_inference_backend(
+        getattr(config, 'LOCAL_INFERENCE_BACKEND', 'local')
+    )
+    remote_status = None
+    if backend == 'remote':
+        from local_inference.remote_client import probe_remote_server
+
+        remote_status = probe_remote_server(
+            getattr(config, 'LOCAL_INFERENCE_SERVER_URL', ''), timeout=5.0
+        )
+        remote_models = remote_status.get('models') if isinstance(remote_status, dict) else {}
+        vad_ready = is_silero_cached()
+        remote_engines = {}
+        for engine in LOCAL_INFERENCE_ENGINES:
+            row = dict((remote_models or {}).get(engine) or {})
+            row.update({
+                'engine': engine,
+                'display_name': LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine),
+                'model_cached': bool(row.get('ready')),
+                'runtime_issues': [] if remote_status.get('ready') else [
+                    remote_status.get('error') or 'remote service unavailable'
+                ],
+                'ready': bool(remote_status.get('ready') and row.get('ready') and vad_ready),
+                'remote': True,
+                'vad_ready': vad_ready,
+            })
+            remote_engines[engine] = row
+        models_status['asr'] = remote_engines
+        remote_hymt2 = dict((remote_models or {}).get('hymt2') or {})
+        models_status['translation']['hymt2'] = {
+            **remote_hymt2,
+            'engine': 'hymt2',
+            'display_name': LOCAL_INFERENCE_DISPLAY_NAMES.get('hymt2', 'hymt2'),
+            'ready': bool(remote_status.get('ready') and remote_hymt2.get('ready')),
+            'remote': True,
+        }
     hymt2_status = dict(models_status['translation'].get('hymt2') or {})
     # 进程内本地模型运行时状态（服务启动/切换本地后端时加载，停止时卸载）
     try:
@@ -910,6 +968,8 @@ def get_local_inference_status():
     return jsonify({
         'success': True,
         'ui_enabled': is_local_inference_ui_enabled(),
+        'backend': backend,
+        'remote': remote_status,
         'engines': models_status['asr'],
         'models': models_status,
         'hymt2': hymt2_status,

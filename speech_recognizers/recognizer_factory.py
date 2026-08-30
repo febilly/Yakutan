@@ -12,12 +12,16 @@ from .dashscope_speech_recognizer import DashscopeSpeechRecognizer
 from .doubao_file_speech_recognizer import DoubaoFileSpeechRecognizer
 try:
     from local_inference import is_local_inference_build_enabled
-    from local_inference.model_manager import is_asr_cached as is_local_inference_cached
+    from local_inference.model_manager import (
+        is_asr_cached as is_local_inference_cached,
+        is_silero_cached as is_local_vad_cached,
+    )
     from .local_speech_recognizer import LocalSpeechRecognizer
 except ImportError:  # pragma: no cover
     LocalSpeechRecognizer = None  # type: ignore[assignment]
     is_local_inference_build_enabled = lambda: False  # type: ignore[assignment]
     is_local_inference_cached = lambda *args, **kwargs: False  # type: ignore[assignment]
+    is_local_vad_cached = lambda: False  # type: ignore[assignment]
 
 try:
     from .qwen_speech_recognizer import QwenSpeechRecognizer
@@ -416,6 +420,11 @@ def is_backend_available(backend: str) -> bool:
         if LocalSpeechRecognizer is None or not is_local_inference_build_enabled():
             return False
         engine = getattr(config, 'LOCAL_INFERENCE_ENGINE', 'sensevoice')
+        if getattr(config, 'LOCAL_INFERENCE_BACKEND', 'local') == 'remote':
+            return bool(
+                str(getattr(config, 'LOCAL_INFERENCE_SERVER_URL', '') or '').strip()
+                and is_local_vad_cached()
+            )
         return bool(is_local_inference_cached(engine))
     else:
         return False

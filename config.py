@@ -110,6 +110,16 @@ _VALID_LOCAL_INFERENCE_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
 if LOCAL_INFERENCE_ENGINE not in _VALID_LOCAL_INFERENCE_ENGINES:
     LOCAL_INFERENCE_ENGINE = 'sensevoice'
 
+# 所有可选本地模型共用的运行方式与服务地址。remote 模式下 SenseVoice、Qwen3-ASR
+# 与 Hy-MT2 都连接同一个 WebSocket 端点；Silero VAD 仍留在客户端做低延迟切段。
+LOCAL_INFERENCE_BACKEND = 'local'  # 'local' | 'remote'
+LOCAL_INFERENCE_SERVER_URL = ''
+LOCAL_INFERENCE_REMOTE_TIMEOUT_SECONDS = 60
+
+
+def sanitize_local_inference_backend(value) -> str:
+    return 'remote' if str(value or '').strip().lower() == 'remote' else 'local'
+
 # ============================================================================
 # 统一 VAD 配置（同时控制在线 API 与本地 ASR）
 # ============================================================================
@@ -268,7 +278,7 @@ def bump_config_applied_at_ms() -> int:
 # 翻译 API 类型
 # 可选: 'google_web', 'google_dictionary', 'deepl', 'openrouter',
 #      'openrouter_streaming', 'openrouter_streaming_deepl_hybrid', 'qwen_mt',
-#      'hymt2'（Hy-MT2 WebSocket 流式修订翻译，需自行填写 HYMT2_WEBSOCKET_URL）
+#      'hymt2'（Hy-MT2 流式修订翻译；远端地址与其他本地模型共用）
 # 注意:
 # - openrouter / openrouter_streaming 表示基于 OpenAI 兼容接口的 LLM 翻译
 # - openrouter_streaming 是 LLM 翻译的流式模式，支持翻译部分结果
@@ -320,9 +330,7 @@ HYMT2_BACKEND = 'api'
 # 或 'vulkan:N'（指定第 N 张 GPU）。仅在 HYMT2_BACKEND = 'local' 时有意义。
 HYMT2_LOCAL_DEVICE = 'auto'
 
-# Hy-MT2 服务的 WebSocket 地址。该地址**不内置默认值**——服务属于用户自托管/
-# 内网部署，必须由用户自行填写（网页「翻译API设置」或 .env 的 HYMT2_WEBSOCKET_URL）。
-# 例如：ws://127.0.0.1:18765
+# 兼容旧配置；新 UI 使用 LOCAL_INFERENCE_SERVER_URL，并在运行时同步到这里。
 HYMT2_WEBSOCKET_URL = ''
 
 # 单次请求/建连超时（秒）
@@ -625,7 +633,8 @@ def apply_cli_env() -> None:
     """
     global VAD_ENABLED
     global LOCAL_QWEN_LOG_PIPELINE_TIMING
-    global LOCAL_INFERENCE_DEVICE
+    global LOCAL_INFERENCE_DEVICE, LOCAL_INFERENCE_BACKEND
+    global LOCAL_INFERENCE_SERVER_URL, LOCAL_INFERENCE_REMOTE_TIMEOUT_SECONDS
     global SAVE_POST_RESAMPLE_AUDIO, SAVE_PRE_RESAMPLE_AUDIO
     global DEBUG_AUDIO_OUTPUT_DIR, ENABLE_VAD_GATING_VERBOSE
     global TRANSLATION_API_TYPE, LLM_BASE_URL, LLM_MODEL, LLM_TEMPLATE
@@ -648,6 +657,20 @@ def apply_cli_env() -> None:
     )
     LOCAL_INFERENCE_DEVICE = sanitize_local_device(
         _read_first_env('LOCAL_INFERENCE_DEVICE', default=LOCAL_INFERENCE_DEVICE)
+    )
+    LOCAL_INFERENCE_BACKEND = sanitize_local_inference_backend(
+        _read_first_env('LOCAL_INFERENCE_BACKEND', default=LOCAL_INFERENCE_BACKEND)
+    )
+    LOCAL_INFERENCE_SERVER_URL = _read_first_env(
+        'LOCAL_INFERENCE_SERVER_URL', 'HYMT2_WEBSOCKET_URL',
+        default=LOCAL_INFERENCE_SERVER_URL,
+    ).strip()
+    LOCAL_INFERENCE_REMOTE_TIMEOUT_SECONDS = max(
+        1, _read_env_int(
+            'LOCAL_INFERENCE_REMOTE_TIMEOUT_SECONDS',
+            LOCAL_INFERENCE_REMOTE_TIMEOUT_SECONDS,
+            max_v=600,
+        )
     )
     SAVE_POST_RESAMPLE_AUDIO = _read_env_bool(
         'SAVE_POST_RESAMPLE_AUDIO', SAVE_POST_RESAMPLE_AUDIO
@@ -706,6 +729,9 @@ def apply_cli_env() -> None:
     HYMT2_WEBSOCKET_URL = _read_first_env(
         'HYMT2_WEBSOCKET_URL', default=HYMT2_WEBSOCKET_URL
     )
+    if LOCAL_INFERENCE_BACKEND == 'remote':
+        HYMT2_BACKEND = 'api'
+        HYMT2_WEBSOCKET_URL = LOCAL_INFERENCE_SERVER_URL
     HYMT2_TIMEOUT_SECONDS = max(
         1, _read_env_int('HYMT2_TIMEOUT_SECONDS', HYMT2_TIMEOUT_SECONDS, max_v=600)
     )

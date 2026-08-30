@@ -135,7 +135,8 @@ function updateQwen3ModelPlacement() {
     const vramGroup = document.getElementById('local-qwen3-vram-group');
     const encoderGroup = document.getElementById('local-encoder-device-group');
     const isQwen3 = (document.getElementById('local-inference-engine')?.value || '') === 'qwen3-asr';
-    const show = isQwen3 && isLocalInferenceUiEnabled();
+    const remote = (document.getElementById('local-inference-backend')?.value || 'local') === 'remote';
+    const show = isQwen3 && isLocalInferenceUiEnabled() && !remote;
 
     if (encoderGroup) encoderGroup.style.display = show ? '' : 'none';
     if (vramGroup) vramGroup.style.display = show ? '' : 'none';
@@ -305,6 +306,8 @@ async function loadLocalModelDevices() {
 function getLocalInferenceConfigFromForm() {
     return {
         engine: document.getElementById('local-inference-engine')?.value || 'sensevoice',
+        backend: document.getElementById('local-inference-backend')?.value || 'local',
+        server_url: (document.getElementById('local-inference-server-url')?.value || '').trim(),
         device: getDeviceSelectValue('local-inference-device'),
         encoder_device: document.getElementById('local-encoder-device')?.value || 'auto',
         incremental_asr: document.getElementById('local-incremental-asr')?.checked ?? true,
@@ -322,6 +325,12 @@ function applyLocalInferenceConfig(config) {
     if (!config) return;
     if (document.getElementById('local-inference-engine')) {
         document.getElementById('local-inference-engine').value = config.engine || 'sensevoice';
+    }
+    if (document.getElementById('local-inference-backend')) {
+        document.getElementById('local-inference-backend').value = config.backend || 'local';
+    }
+    if (document.getElementById('local-inference-server-url')) {
+        document.getElementById('local-inference-server-url').value = config.server_url || '';
     }
     setDeviceSelectValue(document.getElementById('local-inference-device'), config.device);
     const encoderSelect = document.getElementById('local-encoder-device');
@@ -351,6 +360,23 @@ function applyLocalInferenceConfig(config) {
     }
     updateLocalInferenceEngineHint();
     updateLocalInferenceDeviceState();
+    updateLocalInferenceExecutionMode();
+}
+
+function updateLocalInferenceExecutionMode() {
+    const remote = (document.getElementById('local-inference-backend')?.value || 'local') === 'remote';
+    const serverGroup = document.getElementById('local-inference-server-group');
+    if (serverGroup) serverGroup.style.display = remote ? '' : 'none';
+    for (const id of ['local-inference-device', 'local-encoder-device', 'hymt2-local-device']) {
+        const element = document.getElementById(id);
+        if (!element) continue;
+        element.disabled = remote || (id === 'local-inference-device'
+            && (document.getElementById('local-inference-engine')?.value || '') !== 'qwen3-asr');
+    }
+    for (const id of ['local-inference-download-btn', 'local-hymt2-download-btn']) {
+        const button = document.getElementById(id);
+        if (button) button.style.display = remote ? 'none' : '';
+    }
 }
 
 function getVadConfigFromForm() {
@@ -685,6 +711,7 @@ function updateLocalInferenceUiVisibility() {
         updateQwen3ModelPlacement();
         void loadLocalModelDevices();
         void refreshLocalInferenceStatus();
+        updateLocalInferenceExecutionMode();
     } else {
         card.style.display = 'none';
     }
@@ -699,9 +726,14 @@ function onLocalInferenceSettingChange(changedElement = null) {
     }
     // 引擎/运行位置/编码器位置任一变化都会改变显存分布，重画那张分项表
     if (changedElement && ['local-inference-engine', 'local-inference-device',
-        'local-encoder-device'].includes(changedElement.id)) {
+        'local-encoder-device', 'local-inference-backend'].includes(changedElement.id)) {
         updateQwen3ModelPlacement();
     }
+    if (changedElement && ['local-inference-backend', 'local-inference-server-url'].includes(changedElement.id)) {
+        updateLocalInferenceExecutionMode();
+        void refreshLocalInferenceStatus();
+    }
+    updateLocalInferenceExecutionMode();
     onSettingChange(changedElement);
 }
 
@@ -3033,14 +3065,10 @@ function loadDefaultConfig() {
         streamingModeEl.checked = true;
         streamingModeEl.disabled = false;
     }
-    const hymt2BackendDefault = document.getElementById('hymt2-backend-mode');
-    if (hymt2BackendDefault) {
-        hymt2BackendDefault.value = 'api';
-    }
-    const hymt2WsUrlDefault = document.getElementById('hymt2-ws-url');
-    if (hymt2WsUrlDefault) {
-        hymt2WsUrlDefault.value = '';
-    }
+    const localBackendDefault = document.getElementById('local-inference-backend');
+    if (localBackendDefault) localBackendDefault.value = 'local';
+    const localServerDefault = document.getElementById('local-inference-server-url');
+    if (localServerDefault) localServerDefault.value = '';
     for (const deviceSelectId of DEVICE_SELECT_IDS) {
         // 默认尽量选中自动挑出的独显；枚举不可用时退回「自动」
         setDeviceSelectValue(document.getElementById(deviceSelectId), getDefaultDeviceValue());
@@ -3437,9 +3465,9 @@ function saveConfigToLocalStorage() {
                 ),
                 openai_compat_extra_body_json: openaiExtraBodyJson,
                 llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
-                hymt2_backend: document.getElementById('hymt2-backend-mode')?.value || 'api',
+                hymt2_backend: (document.getElementById('local-inference-backend')?.value || 'local') === 'remote' ? 'api' : 'local',
                 hymt2_local_device: getDeviceSelectValue('hymt2-local-device'),
-                hymt2_websocket_url: (document.getElementById('hymt2-ws-url')?.value || '').trim(),
+                hymt2_websocket_url: (document.getElementById('local-inference-server-url')?.value || '').trim(),
                 source_language: getSourceLanguageEffective(),
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
@@ -3690,9 +3718,9 @@ async function saveConfig(autoSave = false) {
                 ),
                 openai_compat_extra_body_json: openaiExtraBodyJson,
                 llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
-                hymt2_backend: document.getElementById('hymt2-backend-mode')?.value || 'api',
+                hymt2_backend: (document.getElementById('local-inference-backend')?.value || 'local') === 'remote' ? 'api' : 'local',
                 hymt2_local_device: getDeviceSelectValue('hymt2-local-device'),
-                hymt2_websocket_url: (document.getElementById('hymt2-ws-url')?.value || '').trim(),
+                hymt2_websocket_url: (document.getElementById('local-inference-server-url')?.value || '').trim(),
                 source_language: getSourceLanguageEffective(),
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
@@ -4081,19 +4109,15 @@ async function startService() {
             }
 
             if (enableTranslation && translationApiType === 'hymt2') {
-                const hymt2Backend = document.getElementById('hymt2-backend-mode')?.value || 'api';
-                if (hymt2Backend === 'api') {
-                    const hymt2Url = (document.getElementById('hymt2-ws-url')?.value || '').trim();
-                    if (!hymt2Url) {
-                        showMessage('❌ ' + t('msg.hyMt2WsUrlRequired'), 'error');
+                const inferenceBackend = document.getElementById('local-inference-backend')?.value || 'local';
+                if (inferenceBackend === 'remote') {
+                    const inferenceUrl = (document.getElementById('local-inference-server-url')?.value || '').trim();
+                    if (!inferenceUrl) {
+                        showMessage('❌ ' + t('msg.localInferenceServerUrlRequired'), 'error');
                         startBtn.disabled = false;
                         startBtn.textContent = t('btn.startService');
-                        const hymt2Group = document.getElementById('hymt2-settings');
-                        if (hymt2Group) {
-                            hymt2Group.style.display = 'block';
-                            ensureCollapsibleExpanded('translation-api');
-                        }
-                        highlightInput('hymt2-ws-url');
+                        focusLocalModelsCard();
+                        highlightInput('local-inference-server-url');
                         return;
                     }
                 }

@@ -285,31 +285,10 @@
                         </div>
 
                         <div class="form-group" id="hymt2-settings" style="display: none;">
-                            <label for="hymt2-backend-mode" data-i18n="label.hymt2Backend">Hy-MT2 接入方式</label>
-                            <select id="hymt2-backend-mode" class="form-control" onchange="onHymt2BackendModeChange()">
-                                <option value="api" data-i18n="option.hymt2BackendApi">外部 API（WebSocket 独立服务）</option>
-                                <option value="local" data-i18n="option.hymt2BackendLocal">本地模型（GGUF 进程内推理）</option>
-                            </select>
-
-                            <div id="hymt2-api-subgroup" style="margin-top: 10px;">
-                                <label for="hymt2-ws-url" data-i18n="label.hyMt2WsUrl">Hy-MT2 WebSocket 地址</label>
-                                <input type="text" id="hymt2-ws-url" class="form-control"
-                                    placeholder="ws://127.0.0.1:18765"
-                                    autocomplete="off"
-                                    onblur="onSettingChange()">
-                                <small class="form-text">
-                                    <span data-i18n="hint.hyMt2WsUrl">填写 Hy-MT2 流式修订翻译服务的 WebSocket 地址（例如 ws://127.0.0.1:18765）。</span>
-                                    <a href="#" target="_blank" rel="noopener noreferrer" id="hymt2-deploy-guide-link" data-i18n="link.hyMt2DeployGuide" onclick="return false;">查看外部服务部署指南 →</a>
-                                </small>
-                            </div>
-
-                            <div id="hymt2-local-subgroup" style="margin-top: 10px; display: none;">
-                                <small class="form-text">
-                                    <span id="hymt2-local-status" data-i18n="status.hymt2LocalChecking">正在检测本地模型...</span>
-                                    <a href="#" id="hymt2-local-manage-link" data-i18n="link.manageInLocalModels"
-                                        onclick="focusLocalModelsCard(); return false;">前往「本地模型」下载与管理 →</a>
-                                </small>
-                            </div>
+                            <small class="form-text">
+                                <span data-i18n="hint.hymt2UsesUnifiedInference">Hy-MT2 跟随「本地模型」中的统一运行方式与服务器地址。</span>
+                                <a href="#" onclick="focusLocalModelsCard(); return false;" data-i18n="link.manageInLocalModels">前往「本地模型」设置 →</a>
+                            </small>
                         </div>
 
                         <div class="form-group" id="openrouter-streaming-mode-group" style="display: none;">
@@ -658,6 +637,23 @@
                         <span class="collapse-icon collapsed" id="local-inference-settings-icon">▶</span>
                     </div>
                     <div class="collapsible-content collapsed" id="local-inference-settings">
+                        <div class="local-inference-grid" style="margin-bottom: 18px;">
+                            <div class="form-group">
+                                <label for="local-inference-backend" data-i18n="label.localInferenceBackend">模型运行方式</label>
+                                <select id="local-inference-backend" class="form-control"
+                                    onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
+                                    <option value="local" data-i18n="option.localInferenceLocal">本机运行</option>
+                                    <option value="remote" data-i18n="option.localInferenceRemote">远程服务器运行</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="local-inference-server-group" style="display: none;">
+                                <label for="local-inference-server-url" data-i18n="label.localInferenceServerUrl">统一推理服务器地址</label>
+                                <input type="text" id="local-inference-server-url" class="form-control"
+                                    placeholder="ws://127.0.0.1:18775" autocomplete="off"
+                                    onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
+                                <small class="form-text" data-i18n="hint.localInferenceServerUrl">SenseVoice、Qwen3-ASR 与 Hy-MT2 共用这个 WebSocket 地址。</small>
+                            </div>
+                        </div>
                         <!-- 语音识别模型 -->
                         <div class="local-models-group">
                             <h3 class="subsection-title" style="margin-top: 0; font-size: 15px;" data-i18n="label.localInferenceModels">🎙️ 语音识别模型（ASR）</h3>

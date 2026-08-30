@@ -103,6 +103,7 @@ class TestInitHandshake:
         assert len(ws.sent) == 2
         init = _decoded(ws, 0)
         assert init["type"] == "init"
+        assert init["service"] == "hymt2"
         assert init["protocol_version"] == 1
         assert init["hypothesis_mode"] == "sentence_revision"
         assert init["source_token_join_mode"] == "verbatim"

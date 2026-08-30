@@ -203,6 +203,32 @@ def test_web_config_update_hymt2_streaming_toggle(monkeypatch):
     assert config.TRANSLATE_PARTIAL_RESULTS is True
 
 
+def test_unified_remote_inference_config_routes_hymt2_to_same_endpoint(monkeypatch):
+    from ui import app as ui_app
+
+    monkeypatch.setattr(config, "LOCAL_INFERENCE_BACKEND", "local")
+    monkeypatch.setattr(config, "LOCAL_INFERENCE_SERVER_URL", "")
+    monkeypatch.setattr(config, "HYMT2_BACKEND", "local")
+    monkeypatch.setattr(config, "HYMT2_WEBSOCKET_URL", "legacy")
+
+    success, _message_id, _ = ui_app.update_config({
+        "local_inference": {
+            "engine": "qwen3-asr",
+            "backend": "remote",
+            "server_url": "ws://127.0.0.1:18775",
+        },
+    })
+
+    assert success is True
+    assert config.LOCAL_INFERENCE_BACKEND == "remote"
+    assert config.LOCAL_INFERENCE_SERVER_URL == "ws://127.0.0.1:18775"
+    assert config.HYMT2_BACKEND == "api"
+    assert config.HYMT2_WEBSOCKET_URL == "ws://127.0.0.1:18775"
+    payload = ui_app._local_inference_config_dict()
+    assert payload["backend"] == "remote"
+    assert payload["server_url"] == "ws://127.0.0.1:18775"
+
+
 def test_recognizer_credentials_ignore_inherited_environment(monkeypatch):
     from speech_recognizers import recognizer_factory
 
