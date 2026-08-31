@@ -474,3 +474,72 @@ def test_download_endpoint_marks_running_before_it_returns():
     assert payload["right_after"]["engine"] == "qwen3-asr"
     assert payload["second_code"] == 409  # 占位是原子的，第二个请求必须被挡掉
     assert payload["final"]["running"] is False
+
+
+class TestLlamaRuntimeUrl:
+    """llama.cpp 运行时地址要按资产名找，不能拿 releases/latest 的 tag 去拼。"""
+
+    @staticmethod
+    def _fake_api(payload):
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            @staticmethod
+            def read():
+                return json.dumps(payload).encode()
+
+        return lambda request, timeout=None: _Response()
+
+    def test_picks_the_first_release_that_actually_has_the_vulkan_zip(self, monkeypatch):
+        # 真实情况：latest 是只放 nightly-tag.txt 的标记版，构建挂在后面的 b##### 上
+        monkeypatch.setattr(mm, "urlopen", self._fake_api([
+            {"tag_name": "v0.3.0", "assets": [{"name": "nightly-tag.txt", "browser_download_url": "x"}]},
+            {"tag_name": "b10728", "assets": [
+                {"name": "llama-b10728-bin-win-cpu-x64.zip", "browser_download_url": "cpu"},
+                {"name": "llama-b10728-bin-win-vulkan-x64.zip", "browser_download_url": "vulkan"},
+            ]},
+        ]))
+
+        assert mm._resolve_llama_cpp_vulkan_url() == ("vulkan", "b10728")
+
+    def test_falls_back_to_pinned_tag_when_api_unavailable(self, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise OSError("api 不可达")
+
+        monkeypatch.setattr(mm, "urlopen", _boom)
+
+        url, label = mm._resolve_llama_cpp_vulkan_url()
+        assert label == mm.LLAMA_CPP_FALLBACK_TAG
+        assert url == mm.LLAMA_CPP_DLL_URL_TEMPLATE.format(tag=mm.LLAMA_CPP_FALLBACK_TAG)
+
+    def test_falls_back_when_no_release_has_the_asset(self, monkeypatch):
+        monkeypatch.setattr(mm, "urlopen", self._fake_api([
+            {"tag_name": "v0.3.0", "assets": [{"name": "nightly-tag.txt", "browser_download_url": "x"}]},
+        ]))
+
+        assert mm._resolve_llama_cpp_vulkan_url()[1] == mm.LLAMA_CPP_FALLBACK_TAG
+
+    def test_bundled_runtime_skips_the_download(self, tmp_path, monkeypatch):
+        """打包版自带运行时时不该再去 GitHub 拉一份（拉不到会让整个下载算失败）。"""
+        if sys.platform != "win32":
+            pytest.skip("只有 Windows 走 DLL 下载分支")
+        vendor_bin = tmp_path / "vendor_bin"
+        vendor_bin.mkdir()
+        for name in ("llama.dll", "ggml.dll", "ggml-base.dll", "libomp140.x86_64.dll"):
+            (vendor_bin / name).write_bytes(b"MZ")
+        monkeypatch.setattr(mm, "_qwen_llama_vulkan_vendor_bin", lambda: vendor_bin)
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("不应触发下载")
+
+        monkeypatch.setattr(mm, "_resolve_llama_cpp_vulkan_url", _boom)
+        mm._ensure_llama_cpp_vulkan_to(tmp_path / "user_bin")
+
+        # 打包资源 zip 需要 DLL 真的落在 bin_dir 里，这条路径必须忽略 vendor 那份
+        monkeypatch.setattr(mm, "_download_file", _boom)
+        with pytest.raises(AssertionError):
+            mm._ensure_llama_cpp_vulkan_to(tmp_path / "user_bin", allow_vendor_copy=False)

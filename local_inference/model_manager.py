@@ -163,7 +163,10 @@ LLAMA_CPP_DLL_URL_TEMPLATE = (
     "https://github.com/ggml-org/llama.cpp/releases/download/{tag}/"
     "llama-{tag}-bin-win-vulkan-x64.zip"
 )
-LLAMA_CPP_LATEST_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+LLAMA_CPP_RELEASES_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10"
+LLAMA_CPP_VULKAN_ASSET_SUFFIX = "-bin-win-vulkan-x64.zip"
+# API 查不到时用的兜底版本（该 tag 的 zip 已确认仍可下载）
+LLAMA_CPP_FALLBACK_TAG = "b8391"
 
 SILERO_VAD_DIR_NAME = "silero_vad"
 SILERO_VAD_ONNX_NAME = "silero_vad_16k_op15.onnx"
@@ -287,9 +290,37 @@ def sensevoice_onnx_model_dir() -> Path | None:
     return None
 
 
-def _ensure_llama_cpp_vulkan_to(bin_dir: Path, progress_callback=None) -> None:
-    """若 bin_dir 中缺少 llama/ggml 主库，则从 ggml-org llama.cpp win-vulkan x64 release 解压写入。"""
+def _resolve_llama_cpp_vulkan_url() -> tuple[str, str]:
+    """在最近的 release 里找 Windows Vulkan 包，返回 (下载地址, 版本名)。
+
+    不能再拿 releases/latest 的 tag 去拼文件名：ggml-org/llama.cpp 的 latest 现在是
+    v0.3.0 这种只放 nightly-tag.txt 的标记版，拼出来的 zip 是 404；真正的 Windows 构建挂在
+    b##### 标签下。所以直接按资产名找，找不到再退回内置版本。
+    """
     import json
+
+    try:
+        request = Request(LLAMA_CPP_RELEASES_API, headers={"User-Agent": "Yakutan"})
+        with urlopen(request, timeout=15) as response:
+            releases = json.loads(response.read())
+        for release in releases:
+            for asset in release.get("assets", []):
+                name = asset.get("name", "")
+                if name.startswith("llama-") and name.endswith(LLAMA_CPP_VULKAN_ASSET_SUFFIX):
+                    return asset["browser_download_url"], release.get("tag_name") or name
+    except Exception as exc:
+        logger.info("查询 llama.cpp release 失败，改用内置版本 %s: %s", LLAMA_CPP_FALLBACK_TAG, exc)
+
+    return LLAMA_CPP_DLL_URL_TEMPLATE.format(tag=LLAMA_CPP_FALLBACK_TAG), LLAMA_CPP_FALLBACK_TAG
+
+
+def _ensure_llama_cpp_vulkan_to(bin_dir: Path, progress_callback=None, *,
+                                allow_vendor_copy: bool = True) -> None:
+    """若 bin_dir 中缺少 llama/ggml 主库，则从 ggml-org llama.cpp win-vulkan x64 release 解压写入。
+
+    ``allow_vendor_copy=False`` 时忽略包内 vendor/bin 那份：打包资源 zip 需要 DLL 实际落在
+    bin_dir 里，不能因为本机 vendor 目录里有一份就跳过。
+    """
     import zipfile
 
     if sys.platform != "win32":
@@ -300,19 +331,16 @@ def _ensure_llama_cpp_vulkan_to(bin_dir: Path, progress_callback=None) -> None:
     runtime_dlls = required_dlls + ["libomp140.x86_64.dll"]
     if all((bin_dir / filename).is_file() for filename in runtime_dlls):
         return
+    if allow_vendor_copy and _llama_vulkan_bin_has_core_dlls(_qwen_llama_vulkan_vendor_bin()):
+        # 打包版可能把运行时放在包内 vendor/bin：那份 _qwen3_llama_bin_dir() 已经会用，
+        # 不必再从 GitHub 拉一份（那边被墙时还会让整个下载算作失败）
+        logger.info("llama.cpp Vulkan 运行时已随程序打包，跳过下载")
+        return
 
     bin_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        request = Request(LLAMA_CPP_LATEST_API, headers={"User-Agent": "Yakutan"})
-        with urlopen(request, timeout=15) as response:
-            tag = json.loads(response.read())["tag_name"]
-    except Exception:
-        tag = "b8391"
+    url, label = _resolve_llama_cpp_vulkan_url()
     dll_zip = MODELS_DIR / "llama-cpp-vulkan.zip"
-    _download_file(
-        LLAMA_CPP_DLL_URL_TEMPLATE.format(tag=tag), dll_zip,
-        f"llama.cpp Vulkan 运行时 {tag}", progress_callback,
-    )
+    _download_file(url, dll_zip, f"llama.cpp Vulkan 运行时 {label}", progress_callback)
     _report(progress_callback, "解压 llama.cpp Vulkan 运行时", 0, None)
     with zipfile.ZipFile(str(dll_zip), "r") as archive:
         for member in archive.namelist():
@@ -332,7 +360,8 @@ def prefetch_llama_cpp_vulkan_for_pyinstaller_bundle() -> None:
     """将 llama.cpp Vulkan DLL 写入 local_inference/models/qwen_llama_vulkan_bin，供 Qwen3 资源 zip（手动 workflow）或本机缓存。"""
     apply_cache_env()
     ensure_vendor_sources("qwen3-asr")
-    _ensure_llama_cpp_vulkan_to(_qwen_llama_vulkan_user_bin())
+    # 资源 zip 是按 local_asr_models/qwen_llama_vulkan_bin 打的，必须真的下到那里
+    _ensure_llama_cpp_vulkan_to(_qwen_llama_vulkan_user_bin(), allow_vendor_copy=False)
 
 
 def prefetch_sensevoice_for_pyinstaller_bundle() -> None:
