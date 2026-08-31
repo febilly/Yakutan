@@ -74,7 +74,16 @@ except ImportError:  # pragma: no cover
     def download_local_inference_model(*args, **kwargs):
         raise RuntimeError('Local inference runtime unavailable')
 
+    def download_hymt2(*args, **kwargs):
+        raise RuntimeError('Local inference runtime unavailable')
+
     def get_engine_status(*args, **kwargs):
+        raise RuntimeError('Local inference runtime unavailable')
+
+    def get_hymt2_status(*args, **kwargs):
+        raise RuntimeError('Local inference runtime unavailable')
+
+    def get_all_local_models_status(*args, **kwargs):
         raise RuntimeError('Local inference runtime unavailable')
 from resource_path import get_resource_path
 

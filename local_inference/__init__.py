@@ -19,10 +19,12 @@ LOCAL_INFERENCE_DISPLAY_NAMES: Dict[str, str] = {
     "hymt2": "Hy-MT2 1.8B",
 }
 
+# 缺任何一个都算引擎未就绪。只列真正 import 的库：模型下载已改为直接走 HTTP，
+# 不再依赖 huggingface_hub——留着它会让打包版（没人 import 就不会被 PyInstaller 收进去）
+# 误报缺依赖，从而所有本地引擎都显示未就绪。
 COMMON_RUNTIME_MODULES = (
     "numpy",
     "onnxruntime",
-    "huggingface_hub",
     "soundfile",
     "sentencepiece",
 )

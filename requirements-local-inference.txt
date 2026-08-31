@@ -8,7 +8,6 @@ kaldi_native_fbank
 protobuf>=3.19.6
 sentencepiece>=0.2.0
 soundfile>=0.12.0
-huggingface_hub>=0.20.0
 gguf>=0.18.0
 onnxruntime-directml>=1.19.0
 pydub>=0.25.1
