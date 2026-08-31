@@ -5,9 +5,12 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.request import Request, urlopen, urlretrieve
+from urllib.error import HTTPError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from . import (
     LOCAL_INFERENCE_DISPLAY_NAMES,
@@ -177,9 +180,13 @@ _MODEL_SIZE_BYTES = {
 }
 
 HYMT2_DIR_NAME = "hymt2"
-HYMT2_MODEL_PLACEHOLDER_URL = (
-    "https://huggingface.co/Tencent-Hunyuan/HunYuan-MT-1.8B"
-)
+HYMT2_REPO_ID = "febilly/Hy-MT2-1.8B-StreamRevise-v4-GGUF"
+# 仓库里还有 .imatrix.gguf（量化用的校准数据），推理只需要这一个权重
+HYMT2_MODEL_FILE = "Hy-MT2-1.8B-StreamRevise-v4-Q4_K_M.gguf"
+
+HF_ENDPOINT_OFFICIAL = "https://huggingface.co"
+# huggingface.co 不通时按顺序回退的镜像站（与官方站同构，resolve 路径一致）
+HF_ENDPOINT_MIRRORS = ("https://hf-mirror.com",)
 
 _QWEN3_VENDOR_URLS = {
     "asr_engine.py": "https://raw.githubusercontent.com/TheDeathDragon/LiveTranslate/main/qwen_asr_gguf/asr_engine.py",
@@ -529,10 +536,161 @@ def download_silero() -> None:
     logger.info("Silero VAD downloaded to %s", dest)
 
 
-def _download_file(url: str, dest: Path, desc: str = "") -> None:
+def _download_file(url: str, dest: Path, desc: str = "", progress_callback=None) -> None:
+    _stream_download(url, dest, desc or dest.name, progress_callback)
+
+
+_DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+_PROGRESS_INTERVAL_SEC = 0.5
+
+# 下载完成后按扩展名核对文件头：拿到的若是错误页面或半截文件，宁可当场失败也不要留到加载模型时
+_FILE_MAGIC = {".gguf": b"GGUF", ".zip": b"PK"}
+
+
+def _report(progress_callback, stage: str, done: int, total: int | None) -> None:
+    """进度回调统一入口：progress_callback(阶段名, 已下载字节, 总字节或 None)。"""
+    if progress_callback is None:
+        return
+    try:
+        progress_callback(stage, done, total)
+    except Exception:
+        # 进度只是展示，回调里的问题不该中断下载
+        logger.debug("进度回调失败", exc_info=True)
+
+
+def _hf_endpoints() -> list[str]:
+    """HuggingFace 下载端点的尝试顺序：环境变量覆盖 > 官方站 > 镜像站。"""
+    endpoints: list[str] = []
+    for value in (
+        os.environ.get("YAKUTAN_HF_ENDPOINT"),
+        os.environ.get("HF_ENDPOINT"),
+        HF_ENDPOINT_OFFICIAL,
+        *HF_ENDPOINT_MIRRORS,
+    ):
+        endpoint = (value or "").strip().rstrip("/")
+        if endpoint and endpoint not in endpoints:
+            endpoints.append(endpoint)
+    return endpoints
+
+
+def _hf_file_url(endpoint: str, repo_id: str, filename: str, revision: str = "main") -> str:
+    return f"{endpoint}/{repo_id}/resolve/{revision}/{filename}"
+
+
+def _hf_endpoint_reachable(url: str, timeout: float = 8.0) -> bool:
+    """只取首字节探测端点：既验证站点本身，也验证它重定向到的 CDN（国内常见只有后者被墙）。"""
+    try:
+        request = Request(url, headers={"User-Agent": "Yakutan", "Range": "bytes=0-0"})
+        with urlopen(request, timeout=timeout) as response:
+            response.read(1)
+        return True
+    except Exception as exc:
+        logger.info("HuggingFace 端点探测失败 %s: %s", url, exc)
+        return False
+
+
+def _ordered_hf_endpoints(repo_id: str, filename: str) -> list[str]:
+    """把首个探测可达的端点排到最前；探测失败的端点仍留在末尾兜底（探测本身也可能误判）。"""
+    endpoints = _hf_endpoints()
+    unreachable: list[str] = []
+    for index, endpoint in enumerate(endpoints):
+        remaining = endpoints[index + 1:]
+        if not remaining:
+            # 已经是最后一个候选，没必要再多花一次探测的超时
+            return [endpoint, *unreachable]
+        if _hf_endpoint_reachable(_hf_file_url(endpoint, repo_id, filename)):
+            return [endpoint, *remaining, *unreachable]
+        logger.warning("%s 不可达，改用后备端点", endpoint)
+        unreachable.append(endpoint)
+    return unreachable
+
+
+def _parse_content_range_total(headers) -> int | None:
+    """从 Content-Range 头里取出资源总长度（"bytes 0-3/1069288640" / "bytes */1069288640"）。"""
+    value = headers.get("Content-Range") if headers else None
+    if not value or "/" not in value:
+        return None
+    total = value.rsplit("/", 1)[1].strip()
+    return int(total) if total.isdigit() else None
+
+
+def _verify_download(path: Path, expected_bytes: int | None, magic: bytes | None) -> None:
+    """校验下载结果。magic 取自最终文件名的扩展名——path 本身是 .part，看它的后缀没意义。"""
+    actual = path.stat().st_size
+    if expected_bytes is not None and actual != expected_bytes:
+        raise OSError(f"文件大小不符：期望 {expected_bytes} 字节，实际 {actual} 字节")
+    if magic:
+        with open(path, "rb") as handle:
+            if handle.read(len(magic)) != magic:
+                raise OSError("文件头不对（可能是错误页面或被网关拦截）")
+
+
+def _stream_download(url: str, dest: Path, desc: str, progress_callback=None,
+                     timeout: float = 30.0) -> None:
+    """流式下载到 dest.part（支持断点续传），校验通过后再改名到 dest。
+
+    progress_callback(阶段名, 已下载字节, 总字节或 None) 最多每 0.5s 调一次，另在结束时补一次。
+    中断留下的 .part 会在下次调用（含换用镜像端点）时续传；只有校验失败才删掉重来。
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
-    logger.info("Downloading %s", desc or url)
-    urlretrieve(url, str(dest))
+    part = dest.with_name(dest.name + ".part")
+    done = part.stat().st_size if part.is_file() else 0
+    magic = _FILE_MAGIC.get(dest.suffix.lower())
+
+    headers = {"User-Agent": "Yakutan"}
+    if done:
+        headers["Range"] = f"bytes={done}-"
+        logger.info("%s 续传：已有 %.1f MB", desc, done / (1024 * 1024))
+
+    try:
+        response = urlopen(Request(url, headers=headers), timeout=timeout)
+    except HTTPError as exc:
+        if exc.code == 416 and done:
+            # 请求范围越界：.part 要么已经是完整文件，要么比远端还长（坏了）。
+            # 416 的 Content-Range 形如 "bytes */<total>"，用它判断是哪一种。
+            _verify_or_discard(part, _parse_content_range_total(exc.headers), magic)
+            os.replace(part, dest)
+            _report(progress_callback, desc, done, done)
+            return
+        raise
+
+    with response:
+        status = getattr(response, "status", None) or response.getcode()
+        if done and status != 206:
+            logger.info("%s 服务端不支持断点续传，从头下载", desc)
+            done = 0
+        if (response.headers.get_content_type() or "") == "text/html":
+            # 二进制权重不会以 HTML 返回：这是门户/网关的拦截页
+            raise OSError(f"{desc} 返回的是 HTML 页面（可能被网络网关拦截）")
+        length = response.headers.get("Content-Length")
+        total = done + int(length) if length and length.isdigit() else None
+
+        _report(progress_callback, desc, done, total)
+        last_report = time.monotonic()
+        with open(part, "ab" if done else "wb") as handle:
+            while True:
+                chunk = response.read(_DOWNLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                done += len(chunk)
+                now = time.monotonic()
+                if now - last_report >= _PROGRESS_INTERVAL_SEC:
+                    last_report = now
+                    _report(progress_callback, desc, done, total)
+
+    _report(progress_callback, desc, done, total)
+    _verify_or_discard(part, total, magic)
+    os.replace(part, dest)
+
+
+def _verify_or_discard(part: Path, expected_bytes: int | None, magic: bytes | None) -> None:
+    try:
+        _verify_download(part, expected_bytes, magic)
+    except OSError:
+        # 内容坏了就没法续传，删掉让下一次从头下
+        part.unlink(missing_ok=True)
+        raise
 
 
 def download_qwen3_asr() -> None:
@@ -619,14 +777,36 @@ def is_hymt2_cached() -> bool:
 
 
 def download_hymt2(progress_callback=None) -> None:
-    """下载或初始化本地 Hy-MT2 模型（支持占位下载）。"""
+    """下载本地 Hy-MT2 GGUF 权重；huggingface.co 不可达时自动改用镜像站。"""
     apply_cache_env()
     hymt2_dir = MODELS_DIR / HYMT2_DIR_NAME
     hymt2_dir.mkdir(parents=True, exist_ok=True)
     if is_hymt2_cached():
         logger.info("Hy-MT2 GGUF model already present: %s", get_hymt2_model_path())
-        return
-    logger.info("Hy-MT2 model download placeholder triggered for %s", hymt2_dir)
+    else:
+        _download_hymt2_weights(hymt2_dir / HYMT2_MODEL_FILE, progress_callback)
+
+    # 本地 Hy-MT2 和 Qwen3-ASR 共用同一套 llama.cpp 运行时。只装翻译模型的用户机器上
+    # 这些库还不存在，缺了就只能在加载模型时报 ctypes 错误，所以随权重一起备好。
+    _ensure_llama_cpp_vulkan_to(_qwen_llama_vulkan_user_bin())
+
+
+def _download_hymt2_weights(dest: Path, progress_callback=None) -> None:
+    """按端点优先级依次尝试，全部失败才抛错（错误信息里带上每个端点的原因）。"""
+    failures: list[str] = []
+    for endpoint in _ordered_hf_endpoints(HYMT2_REPO_ID, HYMT2_MODEL_FILE):
+        host = urlparse(endpoint).netloc or endpoint
+        url = _hf_file_url(endpoint, HYMT2_REPO_ID, HYMT2_MODEL_FILE)
+        try:
+            logger.info("从 %s 下载 Hy-MT2 模型（%s）", host, HYMT2_MODEL_FILE)
+            _stream_download(url, dest, f"Hy-MT2 模型（{host}）", progress_callback)
+            logger.info("Hy-MT2 模型已下载到 %s", dest)
+            return
+        except Exception as exc:
+            logger.warning("从 %s 下载 Hy-MT2 模型失败: %s", host, exc)
+            failures.append(f"{host}: {exc}")
+
+    raise RuntimeError("Hy-MT2 模型下载失败（" + "；".join(failures) + "）")
 
 
 def get_hymt2_status() -> dict:
