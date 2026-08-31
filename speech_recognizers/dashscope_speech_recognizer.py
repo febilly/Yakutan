@@ -47,9 +47,25 @@ class _DashscopeCallbackAdapter(RecognitionCallback):
         self._notify_stopped_once()
 
     def on_error(self, message) -> None:  # type: ignore[override]
-        description = getattr(message, "message", str(message))
-        request_id = getattr(message, "request_id", None)
-        error_message = description if request_id is None else f"{description} (request_id={request_id})"
+        # DashScope 1.25.24's RecognitionResult.__str__() may itself fail on
+        # error responses because it expects a ``headers`` attribute. Never
+        # stringify the SDK object as a fallback from this callback thread.
+        def safe_attr(name: str):
+            try:
+                return getattr(message, name, None)
+            except Exception:
+                return None
+
+        description = safe_attr("message") or safe_attr("error_message")
+        code = safe_attr("code")
+        request_id = safe_attr("request_id")
+        if description is None:
+            description = code or type(message).__name__
+        error_message = str(description)
+        if code is not None and str(code) not in error_message:
+            error_message = f"{code}: {error_message}"
+        if request_id is not None:
+            error_message = f"{error_message} (request_id={request_id})"
         self._user_callback.on_error(RuntimeError(error_message))
 
     def on_event(self, result: RecognitionResult) -> None:
