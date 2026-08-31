@@ -130,8 +130,12 @@ jobs:
           if (-not $qwenBinSrc) {
             throw "缺少 Qwen Vulkan DLL 目录（已检查 local_asr_models/qwen_llama_vulkan_bin 与 local_inference/models/qwen_llama_vulkan_bin）"
           }
-          foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll", "libomp140.x86_64.dll")) {
+          foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll")) {
             if (-not (Test-Path (Join-Path $qwenBinSrc $f))) { throw "缺少 llama Vulkan DLL: $f" }
+          }
+          # 新版 llama.cpp 把 libomp140.x86_64.dll 换成了 libomp.dll，两种都算数
+          if (-not (Get-ChildItem -Path $qwenBinSrc -Filter "libomp*.dll")) {
+            throw "缺少 OpenMP 运行时 DLL（libomp140.x86_64.dll 或 libomp.dll）"
           }
           $stageRoot = Join-Path "./dist" "_qwen_pack_layout"
           $bundleRoot = Join-Path $stageRoot "zip_root"
@@ -159,8 +163,11 @@ jobs:
             throw "缺少 Hy-MT2 权重: $modelFile"
           }
           $hymt2BinSrc = "./local_asr_models/qwen_llama_vulkan_bin"
-          foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll", "libomp140.x86_64.dll")) {
+          foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll")) {
             if (-not (Test-Path (Join-Path $hymt2BinSrc $f))) { throw "缺少 llama Vulkan DLL: $f" }
+          }
+          if (-not (Get-ChildItem -Path $hymt2BinSrc -Filter "libomp*.dll")) {
+            throw "缺少 OpenMP 运行时 DLL（libomp140.x86_64.dll 或 libomp.dll）"
           }
           $stageRoot = Join-Path "./dist" "_hymt2_pack_layout"
           $bundleRoot = Join-Path $stageRoot "zip_root"

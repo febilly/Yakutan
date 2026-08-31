@@ -43,7 +43,9 @@ def _llama_vulkan_bin_has_core_dlls(path: Path) -> bool:
         return False
     if sys.platform == "win32":
         # Windows: ggml CPU backend depends on OpenMP runtime in this folder.
-        names = ("llama.dll", "ggml.dll", "ggml-base.dll", "libomp140.x86_64.dll")
+        if not any((path / name).is_file() for name in LLAMA_CPP_OPENMP_DLLS):
+            return False
+        names = ("llama.dll", "ggml.dll", "ggml-base.dll")
     else:
         # Linux: OpenMP runtime (libgomp/libomp) is expected from system packages.
         # We only require llama/ggml core .so files here for readiness checks.
@@ -163,10 +165,12 @@ LLAMA_CPP_DLL_URL_TEMPLATE = (
     "https://github.com/ggml-org/llama.cpp/releases/download/{tag}/"
     "llama-{tag}-bin-win-vulkan-x64.zip"
 )
-LLAMA_CPP_RELEASES_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10"
-LLAMA_CPP_VULKAN_ASSET_SUFFIX = "-bin-win-vulkan-x64.zip"
-# API 查不到时用的兜底版本（该 tag 的 zip 已确认仍可下载）
-LLAMA_CPP_FALLBACK_TAG = "b8391"
+# 固定版本，不跟随最新 nightly：vendor 下的 ctypes 绑定是照这一版的 ABI 写的，llama.cpp
+# 的 struct 布局隔几百个构建就会变，跟着 latest 走等于把静默传错参数的风险留给实时链路。
+# 升级要连同 vendor/qwen_asr_gguf 一起验证后再改这里。
+LLAMA_CPP_PINNED_TAG = "b8391"
+# 新版 llama.cpp 把 MSVC 的 libomp140.x86_64.dll 换成了 LLVM 的 libomp.dll，两种都认
+LLAMA_CPP_OPENMP_DLLS = ("libomp140.x86_64.dll", "libomp.dll")
 
 SILERO_VAD_DIR_NAME = "silero_vad"
 SILERO_VAD_ONNX_NAME = "silero_vad_16k_op15.onnx"
@@ -290,28 +294,15 @@ def sensevoice_onnx_model_dir() -> Path | None:
     return None
 
 
-def _resolve_llama_cpp_vulkan_url() -> tuple[str, str]:
-    """在最近的 release 里找 Windows Vulkan 包，返回 (下载地址, 版本名)。
+def _llama_cpp_vulkan_url() -> str:
+    """固定版本的下载地址。
 
-    不能再拿 releases/latest 的 tag 去拼文件名：ggml-org/llama.cpp 的 latest 现在是
-    v0.3.0 这种只放 nightly-tag.txt 的标记版，拼出来的 zip 是 404；真正的 Windows 构建挂在
-    b##### 标签下。所以直接按资产名找，找不到再退回内置版本。
+    早先这里查 releases/latest 再拿 tag 拼文件名，但 ggml-org/llama.cpp 的 latest 现在是
+    v0.3.0 这种只放 nightly-tag.txt 的标记版，拼出来的 zip 直接 404，而且 API 调用本身是
+    成功的，except 兜底根本不会触发。改成跟随最新的 b##### nightly 也不合适：绑定按固定
+    ABI 写死，附带文件名还会变（新版就把 libomp140.x86_64.dll 换成了 libomp.dll）。
     """
-    import json
-
-    try:
-        request = Request(LLAMA_CPP_RELEASES_API, headers={"User-Agent": "Yakutan"})
-        with urlopen(request, timeout=15) as response:
-            releases = json.loads(response.read())
-        for release in releases:
-            for asset in release.get("assets", []):
-                name = asset.get("name", "")
-                if name.startswith("llama-") and name.endswith(LLAMA_CPP_VULKAN_ASSET_SUFFIX):
-                    return asset["browser_download_url"], release.get("tag_name") or name
-    except Exception as exc:
-        logger.info("查询 llama.cpp release 失败，改用内置版本 %s: %s", LLAMA_CPP_FALLBACK_TAG, exc)
-
-    return LLAMA_CPP_DLL_URL_TEMPLATE.format(tag=LLAMA_CPP_FALLBACK_TAG), LLAMA_CPP_FALLBACK_TAG
+    return LLAMA_CPP_DLL_URL_TEMPLATE.format(tag=LLAMA_CPP_PINNED_TAG)
 
 
 def _ensure_llama_cpp_vulkan_to(bin_dir: Path, progress_callback=None, *,
@@ -328,8 +319,7 @@ def _ensure_llama_cpp_vulkan_to(bin_dir: Path, progress_callback=None, *,
         return
 
     required_dlls = ["llama.dll", "ggml.dll", "ggml-base.dll"]
-    runtime_dlls = required_dlls + ["libomp140.x86_64.dll"]
-    if all((bin_dir / filename).is_file() for filename in runtime_dlls):
+    if _llama_vulkan_bin_has_core_dlls(bin_dir):
         return
     if allow_vendor_copy and _llama_vulkan_bin_has_core_dlls(_qwen_llama_vulkan_vendor_bin()):
         # 打包版可能把运行时放在包内 vendor/bin：那份 _qwen3_llama_bin_dir() 已经会用，
@@ -338,9 +328,9 @@ def _ensure_llama_cpp_vulkan_to(bin_dir: Path, progress_callback=None, *,
         return
 
     bin_dir.mkdir(parents=True, exist_ok=True)
-    url, label = _resolve_llama_cpp_vulkan_url()
     dll_zip = MODELS_DIR / "llama-cpp-vulkan.zip"
-    _download_file(url, dll_zip, f"llama.cpp Vulkan 运行时 {label}", progress_callback)
+    _download_file(_llama_cpp_vulkan_url(), dll_zip,
+                   f"llama.cpp Vulkan 运行时 {LLAMA_CPP_PINNED_TAG}", progress_callback)
     _report(progress_callback, "解压 llama.cpp Vulkan 运行时", 0, None)
     with zipfile.ZipFile(str(dll_zip), "r") as archive:
         for member in archive.namelist():
@@ -481,16 +471,7 @@ def is_qwen3_asr_ready() -> bool:
     for filename in QWEN3_ASR_FILES:
         if not (model_dir / filename).exists():
             return False
-    bin_dir = _qwen3_llama_bin_dir()
-    if not bin_dir.exists():
-        return False
-    # Keep platform-specific runtime checks aligned with _llama_vulkan_bin_has_core_dlls().
-    required = ["llama.dll", "ggml.dll", "ggml-base.dll", "libomp140.x86_64.dll"] if sys.platform == "win32" else [
-        "libllama.so",
-        "libggml.so",
-        "libggml-base.so",
-    ]
-    return all((bin_dir / filename).exists() for filename in required)
+    return _llama_vulkan_bin_has_core_dlls(_qwen3_llama_bin_dir())
 
 
 def is_asr_models_ready(engine: str) -> bool:

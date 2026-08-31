@@ -476,52 +476,37 @@ def test_download_endpoint_marks_running_before_it_returns():
     assert payload["final"]["running"] is False
 
 
-class TestLlamaRuntimeUrl:
-    """llama.cpp 运行时地址要按资产名找，不能拿 releases/latest 的 tag 去拼。"""
+class TestLlamaRuntime:
+    """运行时版本必须是固定的，且新旧两种 OpenMP 运行时名都要认。"""
 
-    @staticmethod
-    def _fake_api(payload):
-        class _Response:
-            def __enter__(self):
-                return self
+    def test_download_url_is_pinned(self):
+        # 早先这里查 releases/latest 拼文件名，而 latest 现在是只放 nightly-tag.txt 的
+        # 标记版（拼出来 404）；跟随最新 nightly 又会撞上 ABI 与附带文件改名
+        assert mm._llama_cpp_vulkan_url() == (
+            mm.LLAMA_CPP_DLL_URL_TEMPLATE.format(tag=mm.LLAMA_CPP_PINNED_TAG)
+        )
+        assert mm.LLAMA_CPP_PINNED_TAG.startswith("b")
 
-            def __exit__(self, *exc):
-                return False
+    @pytest.mark.parametrize("openmp_dll", ["libomp140.x86_64.dll", "libomp.dll"])
+    def test_either_openmp_runtime_counts_as_complete(self, tmp_path, openmp_dll):
+        if sys.platform != "win32":
+            pytest.skip("只有 Windows 检查 OpenMP DLL")
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        for name in ("llama.dll", "ggml.dll", "ggml-base.dll", openmp_dll):
+            (bin_dir / name).write_bytes(b"MZ")
 
-            @staticmethod
-            def read():
-                return json.dumps(payload).encode()
+        assert mm._llama_vulkan_bin_has_core_dlls(bin_dir) is True
 
-        return lambda request, timeout=None: _Response()
+    def test_missing_openmp_runtime_is_incomplete(self, tmp_path):
+        if sys.platform != "win32":
+            pytest.skip("只有 Windows 检查 OpenMP DLL")
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        for name in ("llama.dll", "ggml.dll", "ggml-base.dll"):
+            (bin_dir / name).write_bytes(b"MZ")
 
-    def test_picks_the_first_release_that_actually_has_the_vulkan_zip(self, monkeypatch):
-        # 真实情况：latest 是只放 nightly-tag.txt 的标记版，构建挂在后面的 b##### 上
-        monkeypatch.setattr(mm, "urlopen", self._fake_api([
-            {"tag_name": "v0.3.0", "assets": [{"name": "nightly-tag.txt", "browser_download_url": "x"}]},
-            {"tag_name": "b10728", "assets": [
-                {"name": "llama-b10728-bin-win-cpu-x64.zip", "browser_download_url": "cpu"},
-                {"name": "llama-b10728-bin-win-vulkan-x64.zip", "browser_download_url": "vulkan"},
-            ]},
-        ]))
-
-        assert mm._resolve_llama_cpp_vulkan_url() == ("vulkan", "b10728")
-
-    def test_falls_back_to_pinned_tag_when_api_unavailable(self, monkeypatch):
-        def _boom(*args, **kwargs):
-            raise OSError("api 不可达")
-
-        monkeypatch.setattr(mm, "urlopen", _boom)
-
-        url, label = mm._resolve_llama_cpp_vulkan_url()
-        assert label == mm.LLAMA_CPP_FALLBACK_TAG
-        assert url == mm.LLAMA_CPP_DLL_URL_TEMPLATE.format(tag=mm.LLAMA_CPP_FALLBACK_TAG)
-
-    def test_falls_back_when_no_release_has_the_asset(self, monkeypatch):
-        monkeypatch.setattr(mm, "urlopen", self._fake_api([
-            {"tag_name": "v0.3.0", "assets": [{"name": "nightly-tag.txt", "browser_download_url": "x"}]},
-        ]))
-
-        assert mm._resolve_llama_cpp_vulkan_url()[1] == mm.LLAMA_CPP_FALLBACK_TAG
+        assert mm._llama_vulkan_bin_has_core_dlls(bin_dir) is False
 
     def test_bundled_runtime_skips_the_download(self, tmp_path, monkeypatch):
         """打包版自带运行时时不该再去 GitHub 拉一份（拉不到会让整个下载算失败）。"""
@@ -536,10 +521,9 @@ class TestLlamaRuntimeUrl:
         def _boom(*args, **kwargs):
             raise AssertionError("不应触发下载")
 
-        monkeypatch.setattr(mm, "_resolve_llama_cpp_vulkan_url", _boom)
+        monkeypatch.setattr(mm, "_download_file", _boom)
         mm._ensure_llama_cpp_vulkan_to(tmp_path / "user_bin")
 
         # 打包资源 zip 需要 DLL 真的落在 bin_dir 里，这条路径必须忽略 vendor 那份
-        monkeypatch.setattr(mm, "_download_file", _boom)
         with pytest.raises(AssertionError):
             mm._ensure_llama_cpp_vulkan_to(tmp_path / "user_bin", allow_vendor_copy=False)
