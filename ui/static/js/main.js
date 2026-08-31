@@ -82,73 +82,325 @@ let runtimeCredentialStatus = {
 };
 
 let featureFlags = {
-    local_asr_build_enabled: false,
-    local_asr_ui_enabled: false,
+    local_inference_build_enabled: false,
+    local_inference_ui_enabled: false,
     engines: {},
 };
 
-let localAsrStatus = {
+let localInferenceStatus = {
     running: false,
     engine: null,
     status: '',
     error: null,
+    stage: null,
+    downloaded_bytes: 0,
+    total_bytes: null,
+    percent: null,
 };
 
-function updateLocalAsrEngineHint() {
-    const el = document.getElementById('local-asr-engine-hint');
-    const engine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
+function updateLocalInferenceEngineHint() {
+    const el = document.getElementById('local-inference-engine-hint');
+    const nameEl = document.getElementById('local-inference-engine-name');
+    const engine = document.getElementById('local-inference-engine')?.value || 'sensevoice';
     if (!el) return;
-    if (!isLocalAsrUiEnabled()) {
+    if (!isLocalInferenceUiEnabled()) {
         el.textContent = '';
         return;
     }
     const t = window.i18n ? window.i18n.t : (key) => key;
-    const key =
-        engine === 'qwen3-asr' ? 'localAsr.engine.qwen3Hint' : 'localAsr.engine.sensevoiceHint';
-    el.textContent = t(key);
+    const suffix = engine === 'qwen3-asr' ? 'qwen3' : 'sensevoice';
+    el.textContent = t(`localInference.engine.${suffix}Hint`);
+    el.setAttribute('data-i18n', `localInference.engine.${suffix}Hint`);
+    if (nameEl) {
+        nameEl.textContent = t(`localInference.engine.${suffix}Name`);
+        nameEl.setAttribute('data-i18n', `localInference.engine.${suffix}Name`);
+    }
 }
 
-function isLocalAsrUiEnabled() {
-    return !!featureFlags.local_asr_ui_enabled;
+function isLocalInferenceUiEnabled() {
+    return !!featureFlags.local_inference_ui_enabled;
 }
 
-function getLocalAsrConfigFromForm() {
+// Qwen3-ASR 由两个独立模型组成，可以分别放在 CPU 或显卡上，所以显存要分项显示，
+// 而不是笼统给一个总数。数值随 /api/features 下发（实测值）——它是模型的固有属性而非
+// 用户设置，走 config 会在 localStorage 存取那一趟里被丢掉。
+function getQwen3VramMb() {
+    const v = featureFlags?.qwen3_vram_mb || {};
+    return { decoder: Number(v.decoder) || 0, encoder: Number(v.encoder) || 0 };
+}
+
+function formatVramMb(mb) {
+    const value = Number(mb) || 0;
+    return value >= 1024 ? `${(value / 1024).toFixed(1)} GB` : `${Math.round(value)} MB`;
+}
+
+function updateQwen3ModelPlacement() {
+    const box = document.getElementById('local-qwen3-vram');
+    const vramGroup = document.getElementById('local-qwen3-vram-group');
+    const encoderGroup = document.getElementById('local-encoder-device-group');
+    const isQwen3 = (document.getElementById('local-inference-engine')?.value || '') === 'qwen3-asr';
+    const remote = (document.getElementById('local-inference-backend')?.value || 'local') === 'remote';
+    const show = isQwen3 && isLocalInferenceUiEnabled() && !remote;
+
+    if (encoderGroup) encoderGroup.style.display = show ? '' : 'none';
+    if (vramGroup) vramGroup.style.display = show ? '' : 'none';
+    if (!box || !show) return;
+
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const decoderOnGpu = getDeviceSelectValue('local-inference-device') !== 'cpu';
+    const encoderChoice = document.getElementById('local-encoder-device')?.value || 'auto';
+    const encoderOnGpu = encoderChoice === 'gpu'
+        || (encoderChoice === 'auto' && decoderOnGpu);
+
+    const onGpu = t('localInference.placement.gpu');
+    const onCpu = t('localInference.placement.cpu');
+    const vram = getQwen3VramMb();
+    const rows = [
+        {
+            name: t('localInference.part.decoder'),
+            where: decoderOnGpu ? onGpu : onCpu,
+            vram: decoderOnGpu ? formatVramMb(vram.decoder) : '—',
+        },
+        {
+            name: t('localInference.part.encoder'),
+            where: encoderOnGpu ? onGpu : onCpu,
+            vram: encoderOnGpu ? formatVramMb(vram.encoder) : '—',
+        },
+    ];
+    const totalMb = (decoderOnGpu ? vram.decoder : 0) + (encoderOnGpu ? vram.encoder : 0);
+
+    box.innerHTML = rows
+        .map((r) => `<div>${r.name} — ${r.where}，${t('localInference.vramLabel')} ${r.vram}</div>`)
+        .join('')
+        + `<div style="margin-top:4px;"><strong>${t('localInference.vramTotal')} ${
+            totalMb > 0 ? formatVramMb(totalMb) : '—'}</strong></div>`;
+}
+
+// ===================== 本地推理设备（GPU/CPU） =====================
+//
+// 设备值是扁平字符串：'auto' | 'cpu' | 'vulkan:N'，与后端 / .env 共用。
+// 列表由 /api/local-models/devices 枚举得到（后端跑在子进程里）。
+
+const DEVICE_SELECT_IDS = ['local-inference-device', 'hymt2-local-device'];
+let localModelDevices = [];
+let localModelAutoDeviceIndex = null;
+
+function sanitizeDeviceValue(value) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (normalized === 'cpu') return 'cpu';
+    if (/^vulkan:\d+$/.test(normalized)) return normalized;
+    return 'auto';  // 含旧值 'gpu'
+}
+
+/** 该设备值当前是否可用（'vulkan:N' 需要 N 真的存在）。 */
+function isDeviceAvailable(value) {
+    const normalized = sanitizeDeviceValue(value);
+    if (normalized === 'auto' || normalized === 'cpu') return true;
+    const index = parseInt(normalized.split(':')[1], 10);
+    return localModelDevices.some((d) => Number(d.index) === index);
+}
+
+/** 保存的设备已经不在了就退回「自动」，避免一直指向一张拔掉的卡。 */
+function resolveStoredDevice(value) {
+    const normalized = sanitizeDeviceValue(value);
+    if (isDeviceAvailable(normalized)) return normalized;
+    console.warn(`保存的推理设备 ${normalized} 当前不可用，已回退到自动选择`);
+    return 'auto';
+}
+
+/**
+ * 设置下拉框的设备值。
+ *
+ * 设备选项是异步枚举出来的，配置加载往往早于枚举完成，这时直接赋值会因为没有
+ * 对应 <option> 而被浏览器丢成空值。因此先记在 dataset.pendingDevice 上，等
+ * renderDeviceOptions() 建好选项后再落到 value。
+ */
+function setDeviceSelectValue(select, value) {
+    if (!select) return;
+    const normalized = sanitizeDeviceValue(value);
+    const hasOption = Array.from(select.options).some((opt) => opt.value === normalized);
+    if (hasOption) {
+        select.value = normalized;
+        delete select.dataset.pendingDevice;
+    } else {
+        select.dataset.pendingDevice = normalized;
+    }
+}
+
+/** 读取下拉框的设备值（选项还没枚举出来时读待定值，避免把用户的选择存丢）。 */
+function getDeviceSelectValue(id) {
+    const select = document.getElementById(id);
+    if (!select) return 'auto';
+    return sanitizeDeviceValue(select.dataset.pendingDevice ?? select.value);
+}
+
+/** 「载入默认设置」时优先选中自动挑出的独显，枚举不可用时退回 'auto'。 */
+function getDefaultDeviceValue() {
+    if (localModelAutoDeviceIndex === null || localModelAutoDeviceIndex === undefined) {
+        return 'auto';
+    }
+    return `vulkan:${localModelAutoDeviceIndex}`;
+}
+
+function formatDeviceLabel(device) {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const gb = Number(device.total_bytes || 0) / (1024 ** 3);
+    const size = gb >= 0.1 ? ` · ${gb.toFixed(1)} GB` : '';
+    const tag = device.discrete ? '' : ` · ${t('label.deviceIntegrated')}`;
+    return `GPU ${device.index} — ${device.description}${size}${tag}`;
+}
+
+/** 把枚举到的 GPU 选项塞进两个下拉框（保持当前选中值）。 */
+function renderDeviceOptions() {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    for (const id of DEVICE_SELECT_IDS) {
+        const select = document.getElementById(id);
+        if (!select) continue;
+        const previous = select.dataset.pendingDevice ?? select.value;
+        select.innerHTML = '';
+
+        const autoOpt = document.createElement('option');
+        autoOpt.value = 'auto';
+        autoOpt.setAttribute('data-i18n', 'option.deviceAuto');
+        autoOpt.textContent = t('option.deviceAuto');
+        select.appendChild(autoOpt);
+
+        for (const device of localModelDevices) {
+            const opt = document.createElement('option');
+            opt.value = `vulkan:${device.index}`;
+            opt.textContent = formatDeviceLabel(device);
+            select.appendChild(opt);
+        }
+
+        const cpuOpt = document.createElement('option');
+        cpuOpt.value = 'cpu';
+        cpuOpt.setAttribute('data-i18n', 'option.deviceCpu');
+        cpuOpt.textContent = t('option.deviceCpu');
+        select.appendChild(cpuOpt);
+
+        setDeviceSelectValue(select, resolveStoredDevice(previous));
+    }
+    updateLocalInferenceDeviceState();
+}
+
+/** SenseVoice 固定 CPU，选它时禁用 ASR 的设备下拉框。 */
+function updateLocalInferenceDeviceState() {
+    const select = document.getElementById('local-inference-device');
+    if (!select) return;
+    const engine = document.getElementById('local-inference-engine')?.value || 'sensevoice';
+    select.disabled = engine !== 'qwen3-asr';
+}
+
+async function loadLocalModelDevices() {
+    if (!isLocalInferenceUiEnabled()) return;
+    try {
+        const response = await fetch(`${API_BASE}/local-models/devices`);
+        if (!response.ok) return;
+        const payload = await response.json();
+        localModelDevices = Array.isArray(payload.devices) ? payload.devices : [];
+        localModelAutoDeviceIndex = payload.auto_index ?? null;
+    } catch (error) {
+        console.warn('获取本地推理设备列表失败:', error);
+        localModelDevices = [];
+        localModelAutoDeviceIndex = null;
+    }
+    renderDeviceOptions();
+}
+
+function getLocalInferenceConfigFromForm() {
     return {
-        engine: document.getElementById('local-asr-engine')?.value || 'sensevoice',
+        engine: document.getElementById('local-inference-engine')?.value || 'sensevoice',
+        backend: document.getElementById('local-inference-backend')?.value || 'local',
+        server_url: (document.getElementById('local-inference-server-url')?.value || '').trim(),
+        device: getDeviceSelectValue('local-inference-device'),
+        encoder_device: document.getElementById('local-encoder-device')?.value || 'auto',
         incremental_asr: document.getElementById('local-incremental-asr')?.checked ?? true,
-        interim_interval: parseFloat(document.getElementById('local-interim-interval')?.value || '2'),
+        incremental_trigger_silence:
+            parseInt(document.getElementById('local-incremental-trigger-silence')?.value || '10', 10) / 1000,
+        // 表单以毫秒为单位；对外配置接口沿用秒，在此换算
+        incremental_min_interval:
+            parseFloat(document.getElementById('local-incremental-min-interval')?.value || '3000') / 1000,
+        incremental_fallback_interval:
+            parseFloat(document.getElementById('local-incremental-fallback-interval')?.value || '4000') / 1000,
     };
 }
 
-function applyLocalAsrConfig(config) {
+function applyLocalInferenceConfig(config) {
     if (!config) return;
-    if (document.getElementById('local-asr-engine')) {
-        document.getElementById('local-asr-engine').value = config.engine || 'sensevoice';
+    if (document.getElementById('local-inference-engine')) {
+        document.getElementById('local-inference-engine').value = config.engine || 'sensevoice';
     }
+    if (document.getElementById('local-inference-backend')) {
+        document.getElementById('local-inference-backend').value = config.backend || 'local';
+    }
+    if (document.getElementById('local-inference-server-url')) {
+        document.getElementById('local-inference-server-url').value = config.server_url || '';
+    }
+    setDeviceSelectValue(document.getElementById('local-inference-device'), config.device);
+    const encoderSelect = document.getElementById('local-encoder-device');
+    if (encoderSelect) {
+        const encDev = String(config.encoder_device || 'auto');
+        encoderSelect.value = ['auto', 'cpu', 'gpu'].includes(encDev) ? encDev : 'auto';
+    }
+    updateQwen3ModelPlacement();
     if (document.getElementById('local-incremental-asr')) {
         document.getElementById('local-incremental-asr').checked = config.incremental_asr ?? true;
     }
-    if (document.getElementById('local-interim-interval')) {
-        document.getElementById('local-interim-interval').value = config.interim_interval ?? 2.0;
+    if (document.getElementById('local-incremental-trigger-silence')) {
+        // 新接口为秒；旧保存值 incremental_trigger_silence_ms 为毫秒，兼容迁移
+        const triggerMs = config.incremental_trigger_silence != null
+            ? config.incremental_trigger_silence * 1000
+            : (config.incremental_trigger_silence_ms ?? 10);
+        document.getElementById('local-incremental-trigger-silence').value = triggerMs;
     }
-    updateLocalAsrEngineHint();
+    // 表单以毫秒为单位展示；配置接口沿用秒
+    if (document.getElementById('local-incremental-min-interval')) {
+        document.getElementById('local-incremental-min-interval').value =
+            (config.incremental_min_interval ?? 3.0) * 1000;
+    }
+    if (document.getElementById('local-incremental-fallback-interval')) {
+        document.getElementById('local-incremental-fallback-interval').value =
+            (config.incremental_fallback_interval ?? 4.0) * 1000;
+    }
+    updateLocalInferenceEngineHint();
+    updateLocalInferenceDeviceState();
+    updateLocalInferenceExecutionMode();
+}
+
+function updateLocalInferenceExecutionMode() {
+    const remote = (document.getElementById('local-inference-backend')?.value || 'local') === 'remote';
+    const serverGroup = document.getElementById('local-inference-server-group');
+    if (serverGroup) serverGroup.style.display = remote ? '' : 'none';
+    for (const id of ['local-inference-device', 'local-encoder-device', 'hymt2-local-device']) {
+        const element = document.getElementById(id);
+        if (!element) continue;
+        element.disabled = remote || (id === 'local-inference-device'
+            && (document.getElementById('local-inference-engine')?.value || '') !== 'qwen3-asr');
+    }
+    for (const id of ['local-inference-download-btn', 'local-hymt2-download-btn']) {
+        const button = document.getElementById(id);
+        if (button) button.style.display = remote ? 'none' : '';
+    }
 }
 
 function getVadConfigFromForm() {
+    // 表单以毫秒为单位；对外配置接口沿用秒，在此换算
+    const secondsFromMs = (id, defaultMs) =>
+        parseFloat(document.getElementById(id)?.value || String(defaultMs)) / 1000;
     return {
         enabled: document.getElementById('vad-enabled')?.checked ?? true,
         mode: document.getElementById('vad-mode')?.value || 'silero',
         threshold: parseFloat(document.getElementById('vad-threshold')?.value || '0.5'),
-        min_speech_duration: parseFloat(document.getElementById('vad-min-speech-duration')?.value || '1'),
-        max_speech_duration: parseFloat(document.getElementById('vad-max-speech-duration')?.value || '30'),
-        silence_duration: parseFloat(document.getElementById('vad-silence-duration')?.value || '0.8'),
-        pre_speech_duration: parseFloat(document.getElementById('vad-pre-speech-duration')?.value || '0.2'),
+        min_speech_duration: secondsFromMs('vad-min-speech-duration', 1000),
+        max_speech_duration: secondsFromMs('vad-max-speech-duration', 30000),
+        silence_duration: secondsFromMs('vad-silence-duration', 800),
+        pre_speech_duration: secondsFromMs('vad-pre-speech-duration', 500),
     };
 }
 
 function resolveVadConfig(config = {}) {
     const legacyAsr = config.asr || {};
-    const legacyLocalAsr = config.local_asr || {};
+    const legacyLocalInference = config.local_asr || {};
     const legacyMic = config.mic_control || {};
     const vad = config.vad || {};
     const hasUnifiedVadEnabled = Object.prototype.hasOwnProperty.call(vad, 'enabled');
@@ -157,28 +409,28 @@ function resolveVadConfig(config = {}) {
             (hasUnifiedVadEnabled ? vad.enabled : undefined) ??
             (legacyMic.enable_vad_gating === true ? true : undefined) ??
             true,
-        mode: vad.mode || legacyLocalAsr.vad_mode || 'silero',
+        mode: vad.mode || legacyLocalInference.vad_mode || 'silero',
         threshold:
             vad.threshold ??
-            legacyLocalAsr.vad_threshold ??
+            legacyLocalInference.vad_threshold ??
             legacyAsr.vad_threshold ??
             0.5,
         min_speech_duration:
             vad.min_speech_duration ??
-            legacyLocalAsr.min_speech_duration ??
+            legacyLocalInference.min_speech_duration ??
             1.0,
         max_speech_duration:
             vad.max_speech_duration ??
-            legacyLocalAsr.max_speech_duration ??
+            legacyLocalInference.max_speech_duration ??
             30.0,
         silence_duration:
             vad.silence_duration ??
-            legacyLocalAsr.silence_duration ??
+            legacyLocalInference.silence_duration ??
             ((legacyAsr.vad_silence_duration_ms ?? 800) / 1000),
         pre_speech_duration:
             vad.pre_speech_duration ??
-            legacyLocalAsr.pre_speech_duration ??
-            0.2,
+            legacyLocalInference.pre_speech_duration ??
+            0.5,
     };
 }
 
@@ -193,112 +445,326 @@ function applyVadConfig(config) {
     if (document.getElementById('vad-threshold')) {
         document.getElementById('vad-threshold').value = vad.threshold ?? 0.5;
     }
+    // 表单以毫秒为单位展示；配置接口沿用秒
     if (document.getElementById('vad-min-speech-duration')) {
-        document.getElementById('vad-min-speech-duration').value = vad.min_speech_duration ?? 1.0;
+        document.getElementById('vad-min-speech-duration').value = (vad.min_speech_duration ?? 1.0) * 1000;
     }
     if (document.getElementById('vad-max-speech-duration')) {
-        document.getElementById('vad-max-speech-duration').value = vad.max_speech_duration ?? 30.0;
+        document.getElementById('vad-max-speech-duration').value = (vad.max_speech_duration ?? 30.0) * 1000;
     }
     if (document.getElementById('vad-silence-duration')) {
-        document.getElementById('vad-silence-duration').value = vad.silence_duration ?? 0.8;
+        document.getElementById('vad-silence-duration').value = (vad.silence_duration ?? 0.8) * 1000;
     }
     if (document.getElementById('vad-pre-speech-duration')) {
-        document.getElementById('vad-pre-speech-duration').value = vad.pre_speech_duration ?? 0.2;
+        document.getElementById('vad-pre-speech-duration').value = (vad.pre_speech_duration ?? 0.5) * 1000;
     }
 }
 
-function ensureLocalAsrBackendOption() {
+function ensureLocalInferenceBackendOption() {
     const select = document.getElementById('asr-backend');
     if (!select) return;
     const t = window.i18n ? window.i18n.t : (key) => key;
     let option = select.querySelector('option[value="local"]');
-    if (isLocalAsrUiEnabled()) {
-        if (!option) {
-            option = document.createElement('option');
-            option.value = 'local';
-            option.setAttribute('data-i18n', 'asr.local');
-            select.appendChild(option);
-        }
+    if (!option) {
+        option = document.createElement('option');
+        option.value = 'local';
+        select.appendChild(option);
+    }
+    if (isLocalInferenceUiEnabled()) {
+        option.disabled = false;
+        option.setAttribute('data-i18n', 'asr.local');
         option.textContent = t('asr.local');
-    } else if (option) {
+    } else {
         if (select.value === 'local') {
             select.value = 'qwen';
         }
-        option.remove();
+        option.disabled = true;
+        // 去掉 data-i18n，避免切语言时被覆盖成不带「需要 Local 版本」的原始文案
+        option.removeAttribute('data-i18n');
+        option.textContent = t('asr.local') + ' ' + t('local.needsLocalVersion');
     }
+}
+
+function ensureHymt2LocalBackendOption() {
+    const select = document.getElementById('hymt2-backend-mode');
+    if (!select) return;
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const option = select.querySelector('option[value="local"]');
+    if (!option) return;
+    if (isLocalInferenceUiEnabled()) {
+        option.disabled = false;
+        option.setAttribute('data-i18n', 'option.hymt2BackendLocal');
+        option.textContent = t('option.hymt2BackendLocal');
+        return;
+    }
+    if (select.value === 'local') {
+        select.value = 'api';
+        onHymt2BackendModeChange(false);
+    }
+    option.disabled = true;
+    option.removeAttribute('data-i18n');
+    option.textContent = t('option.hymt2BackendLocal') + ' ' + t('local.needsLocalVersion');
 }
 
 function sanitizeAsrBackendValue(value) {
     const normalized = value || 'qwen';
-    if (normalized === 'local' && !isLocalAsrUiEnabled()) {
+    if (normalized === 'local' && !isLocalInferenceUiEnabled()) {
         return 'qwen';
     }
     return normalized;
 }
 
-function renderLocalAsrStatus(payload) {
-    const box = document.getElementById('local-asr-status');
-    const button = document.getElementById('local-asr-download-btn');
-    if (!box || !button) return;
+function setLocalModelBadge(badge, state) {
+    if (!badge) return;
     const t = window.i18n ? window.i18n.t : (key) => key;
-    const engine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
-    const engineStatus = payload?.engines?.[engine];
-    localAsrStatus = payload?.download || localAsrStatus;
+    const key = {
+        ready: 'status.localModelReady',
+        missing: 'status.localModelMissing',
+        downloading: 'status.localModelDownloading',
+        unknown: 'status.localModelChecking',
+    }[state] || 'status.localModelChecking';
+    badge.textContent = t(key);
+    badge.setAttribute('data-i18n', key);
+    badge.classList.toggle('is-ready', state === 'ready');
+    badge.classList.toggle('is-missing', state === 'missing');
+}
 
-    if (!payload || !engineStatus) {
-        box.textContent = t('hint.localAsrNotChecked');
-        button.disabled = false;
-        return;
+/**
+ * 下载期间把 3 秒的常规轮询提到 1 秒，下载一结束立刻再查一次。
+ *
+ * 常规轮询用来看「模型在不在」，3 秒足够；但下载时它同时也是进度来源，而且下载完成那一刻
+ * 若不马上复查，界面会在「已经下完了」和「显示未就绪」之间干等好几秒。
+ */
+const LOCAL_DOWNLOAD_POLL_MS = 1000;
+let localDownloadPollTimer = null;
+
+function syncDownloadPolling(wasRunning, isRunning) {
+    if (isRunning && !localDownloadPollTimer) {
+        localDownloadPollTimer = setInterval(() => {
+            void refreshLocalInferenceStatus();
+        }, LOCAL_DOWNLOAD_POLL_MS);
+    } else if (!isRunning && localDownloadPollTimer) {
+        clearInterval(localDownloadPollTimer);
+        localDownloadPollTimer = null;
     }
-
-    if (localAsrStatus.running) {
-        box.textContent = `${t('status.downloading')}: ${localAsrStatus.status || ''}`;
-        button.disabled = true;
-        return;
-    }
-
-    if (engineStatus.ready) {
-        box.textContent = t('status.localAsrReady', { engine: engineStatus.display_name || engine });
-    } else {
-        const issues = [];
-        if (Array.isArray(engineStatus.runtime_issues) && engineStatus.runtime_issues.length) {
-            issues.push(`${t('label.dependencies')}: ${engineStatus.runtime_issues.join(', ')}`);
-        }
-        if (engineStatus.error) {
-            issues.push(engineStatus.error);
-        }
-        if (Array.isArray(engineStatus.missing) && engineStatus.missing.length) {
-            issues.push(t('hint.localAsrNeedsDownload'));
-        }
-        box.textContent = issues.length
-            ? issues.join(' | ')
-            : t('hint.localAsrNeedsDownload');
-        button.disabled = false;
+    if (wasRunning && !isRunning) {
+        // 刚下完：本次响应里的模型状态是下载结束前扫的，立刻重扫一次拿到「已就绪」
+        void refreshLocalInferenceStatus();
     }
 }
 
-async function refreshLocalAsrStatus() {
-    if (!isLocalAsrUiEnabled()) return;
+/**
+ * 把下载进度画进某个状态框：一行文字 + 一条进度条。
+ *
+ * 后端拿不到 Content-Length 时 percent 为 null，此时画不确定态（来回滑动），
+ * 而不是让进度条停在 0% 上，看起来像卡住了。
+ */
+function renderDownloadProgress(box, state) {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    box.textContent = '';
+    // 内容是动态拼的，留着 data-i18n 会在切换语言时被静态译文覆盖掉
+    box.removeAttribute('data-i18n');
+
+    const line = document.createElement('div');
+    line.className = 'local-download-line';
+    line.textContent = state.stage
+        ? `${state.stage}${state.percent === null || state.percent === undefined ? '' : ` · ${state.percent}%`}`
+        : (state.status || t('status.downloading'));
+    box.appendChild(line);
+
+    if (state.total_bytes) {
+        const size = document.createElement('div');
+        size.className = 'local-download-size';
+        const mb = (value) => `${Math.round((value || 0) / (1024 * 1024))} MB`;
+        size.textContent = `${mb(state.downloaded_bytes)} / ${mb(state.total_bytes)}`;
+        box.appendChild(size);
+    }
+
+    const track = document.createElement('div');
+    track.className = 'local-download-bar';
+    const fill = document.createElement('span');
+    if (typeof state.percent === 'number') {
+        fill.style.width = `${Math.max(0, Math.min(100, state.percent))}%`;
+    } else {
+        track.classList.add('is-indeterminate');
+    }
+    track.appendChild(fill);
+    box.appendChild(track);
+}
+
+function renderLocalInferenceStatus(payload) {
+    const box = document.getElementById('local-inference-status');
+    const button = document.getElementById('local-inference-download-btn');
+    const badge = document.getElementById('local-inference-badge');
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const engine = document.getElementById('local-inference-engine')?.value || 'sensevoice';
+    const engineStatus = payload?.engines?.[engine] || payload?.models?.asr?.[engine];
+    const wasRunning = localInferenceStatus.running;
+    localInferenceStatus = payload?.download || localInferenceStatus;
+    syncDownloadPolling(wasRunning, localInferenceStatus.running);
+
+    // 下载状态只画在正在下载的那张卡片上：ASR 卡片认当前选中的引擎，Hy-MT2 卡片认 'hymt2'
+    const downloadingThisEngine = localInferenceStatus.running
+        && localInferenceStatus.engine === engine;
+
+    if (box && button) {
+        if (!payload || !engineStatus) {
+            box.textContent = t('hint.localInferenceNotChecked');
+            setLocalModelBadge(badge, 'unknown');
+            button.disabled = false;
+        } else if (downloadingThisEngine) {
+            renderDownloadProgress(box, localInferenceStatus);
+            setLocalModelBadge(badge, 'downloading');
+            button.disabled = true;
+        } else if (engineStatus.ready) {
+            box.textContent = t('status.localInferenceReady', { engine: engineStatus.display_name || engine });
+            setLocalModelBadge(badge, 'ready');
+            button.disabled = false;
+        } else {
+            const issues = [];
+            if (Array.isArray(engineStatus.runtime_issues) && engineStatus.runtime_issues.length) {
+                issues.push(`${t('label.dependencies')}: ${engineStatus.runtime_issues.join(', ')}`);
+            }
+            if (engineStatus.error) {
+                issues.push(engineStatus.error);
+            }
+            if (Array.isArray(engineStatus.missing) && engineStatus.missing.length) {
+                issues.push(t('hint.localInferenceNeedsDownload'));
+            }
+            box.textContent = issues.length
+                ? issues.join(' | ')
+                : t('hint.localInferenceNeedsDownload');
+            setLocalModelBadge(badge, 'missing');
+            button.disabled = false;
+        }
+        // 后端一次只跑一个下载任务，别的模型在下时这个按钮点了也只会拿到 409
+        if (localInferenceStatus.running) {
+            button.disabled = true;
+        }
+    }
+
+    // 渲染 Hy-MT2 本地模型状态：完整管理在「本地模型」卡片，翻译API设置里只显示一行简要状态
+    const hymt2Status = payload?.hymt2 || payload?.models?.translation?.hymt2;
+    const hymt2Badge = document.getElementById('local-hymt2-badge');
+    const hymt2CardStatusBox = document.getElementById('local-hymt2-status-box');
+    const hymt2SettingsStatusBox = document.getElementById('hymt2-local-status');
+
+    if (hymt2Status) {
+        const isReady = !!hymt2Status.ready;
+        const modelName = hymt2Status.model_file || '';
+        const engine = hymt2Status.engine || null;
+        const engineKey = engine
+            ? (engine.loading ? 'status.hymt2EngineLoading'
+              : engine.loaded ? 'status.hymt2EngineLoaded' : null)
+            : null;
+        const engineText = engineKey ? t(engineKey) : '';
+
+        const hymt2Downloading = localInferenceStatus.running
+            && localInferenceStatus.engine === 'hymt2';
+
+        setLocalModelBadge(hymt2Badge, hymt2Downloading ? 'downloading' : (isReady ? 'ready' : 'missing'));
+        if (hymt2CardStatusBox) {
+            if (hymt2Downloading) {
+                renderDownloadProgress(hymt2CardStatusBox, localInferenceStatus);
+            } else {
+                hymt2CardStatusBox.textContent = isReady
+                    ? (engineText || t('status.localModelReady')) + (modelName ? ` (${modelName})` : '')
+                    : t('status.hymt2Missing');
+            }
+        }
+        const hymt2Button = document.getElementById('local-hymt2-download-btn');
+        if (hymt2Button) {
+            hymt2Button.disabled = localInferenceStatus.running;
+        }
+        if (hymt2SettingsStatusBox) {
+            const key = isReady
+                ? (engineKey || 'status.hymt2LocalReady')
+                : 'status.hymt2LocalMissing';
+            hymt2SettingsStatusBox.textContent = t(key);
+            hymt2SettingsStatusBox.setAttribute('data-i18n', key);
+        }
+    }
+}
+
+function focusLocalModelsCard() {
+    const card = document.getElementById('local-inference-card');
+    const content = document.getElementById('local-inference-settings');
+    if (!card) return;
+    if (content && content.classList.contains('collapsed')) {
+        toggleCollapsible('local-inference-settings');
+    }
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function downloadHymt2Model() {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    const button = document.getElementById('local-hymt2-download-btn');
+    if (button) button.disabled = true;
     try {
-        const response = await fetch(`${API_BASE}/local-asr/status`);
+        const response = await fetch(`${API_BASE}/local-models/download`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                engine: 'hymt2',
+            }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'download failed');
+        }
+        showMessage(t('msg.localInferenceDownloadStarted'), 'success');
+        await refreshLocalInferenceStatus();
+    } catch (error) {
+        console.error('下载本地 Hy-MT2 失败:', error);
+        showMessage(t('msg.localInferenceDownloadFailed') + ': ' + error.message, 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+/**
+ * 同步 Hy-MT2 接入方式对应的子分组显示。
+ *
+ * persist 仅在用户手动改动下拉框时为 true；配置加载/回填阶段必须传 false，否则一次
+ * 页面刷新就会被记成「用户编辑」，让本地配置在与后端对账时无条件覆盖服务器。
+ */
+function onHymt2BackendModeChange(persist = true) {
+    const mode = document.getElementById('hymt2-backend-mode')?.value || 'api';
+    const apiSubgroup = document.getElementById('hymt2-api-subgroup');
+    const localSubgroup = document.getElementById('hymt2-local-subgroup');
+    if (apiSubgroup) apiSubgroup.style.display = mode === 'api' ? 'block' : 'none';
+    if (localSubgroup) localSubgroup.style.display = mode === 'local' ? 'block' : 'none';
+    if (mode === 'local') {
+        void refreshLocalInferenceStatus();
+    }
+    if (persist) {
+        onSettingChange();
+    }
+}
+
+async function refreshLocalInferenceStatus() {
+    try {
+        const response = await fetch(`${API_BASE}/local-models/status`);
         if (!response.ok) return;
         const payload = await response.json();
-        renderLocalAsrStatus(payload);
+        renderLocalInferenceStatus(payload);
     } catch (error) {
-        console.warn('获取本地 ASR 状态失败:', error);
+        console.warn('获取本地模型状态失败:', error);
     }
 }
 
-async function downloadLocalAsrModels() {
+async function downloadLocalInferenceModels() {
     const t = window.i18n ? window.i18n.t : (key) => key;
-    if (!isLocalAsrUiEnabled()) return;
-    const localConfig = getLocalAsrConfigFromForm();
-    const button = document.getElementById('local-asr-download-btn');
+    if (!isLocalInferenceUiEnabled()) return;
+    const localConfig = getLocalInferenceConfigFromForm();
+    const button = document.getElementById('local-inference-download-btn');
     if (button) {
         button.disabled = true;
     }
     try {
-        const response = await fetch(`${API_BASE}/local-asr/download`, {
+        const response = await fetch(`${API_BASE}/local-inference/download`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -311,36 +777,51 @@ async function downloadLocalAsrModels() {
         if (!response.ok || !result.success) {
             throw new Error(result.message || 'download failed');
         }
-        showMessage(t('msg.localAsrDownloadStarted'), 'success');
-        await refreshLocalAsrStatus();
+        showMessage(t('msg.localInferenceDownloadStarted'), 'success');
+        await refreshLocalInferenceStatus();
     } catch (error) {
         console.error('下载本地 ASR 失败:', error);
-        showMessage(t('msg.localAsrDownloadFailed') + ': ' + error.message, 'error');
+        showMessage(t('msg.localInferenceDownloadFailed') + ': ' + error.message, 'error');
         if (button) {
             button.disabled = false;
         }
     }
 }
 
-function updateLocalAsrUiVisibility() {
-    const card = document.getElementById('local-asr-card');
+function updateLocalInferenceUiVisibility() {
+    const card = document.getElementById('local-inference-card');
     if (!card) return;
-    ensureLocalAsrBackendOption();
-    if (isLocalAsrUiEnabled()) {
+    ensureLocalInferenceBackendOption();
+    ensureHymt2LocalBackendOption();
+    if (isLocalInferenceUiEnabled()) {
         card.style.display = 'block';
-        updateLocalAsrEngineHint();
-        void refreshLocalAsrStatus();
+        updateLocalInferenceEngineHint();
+        updateQwen3ModelPlacement();
+        void loadLocalModelDevices();
+        void refreshLocalInferenceStatus();
+        updateLocalInferenceExecutionMode();
     } else {
         card.style.display = 'none';
     }
 }
 
-function onLocalAsrSettingChange(changedElement = null) {
-    if (!isLocalAsrUiEnabled()) return;
-    if (changedElement && changedElement.id === 'local-asr-engine') {
-        updateLocalAsrEngineHint();
-        void refreshLocalAsrStatus();
+function onLocalInferenceSettingChange(changedElement = null) {
+    if (!isLocalInferenceUiEnabled()) return;
+    if (changedElement && changedElement.id === 'local-inference-engine') {
+        updateLocalInferenceEngineHint();
+        updateLocalInferenceDeviceState();
+        void refreshLocalInferenceStatus();
     }
+    // 引擎/运行位置/编码器位置任一变化都会改变显存分布，重画那张分项表
+    if (changedElement && ['local-inference-engine', 'local-inference-device',
+        'local-encoder-device', 'local-inference-backend'].includes(changedElement.id)) {
+        updateQwen3ModelPlacement();
+    }
+    if (changedElement && ['local-inference-backend', 'local-inference-server-url'].includes(changedElement.id)) {
+        updateLocalInferenceExecutionMode();
+        void refreshLocalInferenceStatus();
+    }
+    updateLocalInferenceExecutionMode();
     onSettingChange(changedElement);
 }
 
@@ -349,7 +830,7 @@ async function loadServerFeatures() {
         const response = await fetch(`${API_BASE}/features`);
         if (!response.ok) return;
         featureFlags = await response.json();
-        updateLocalAsrUiVisibility();
+        updateLocalInferenceUiVisibility();
     } catch (error) {
         console.warn('加载功能开关失败:', error);
     }
@@ -1237,36 +1718,74 @@ function isLLMConnectionFieldsComplete() {
     return !!(base && model && hasKey);
 }
 
-/** 同步「流式翻译模式」分组：仅普通 LLM 显示开关；混合模式固定流式（由 api_type），不显示开关且不改动开关状态，避免影响切回 LLM 时的偏好。 */
+/** 记录不同翻译模型各自的流式偏好（默认初始化时均为 true） */
+const modelStreamingPreferences = {
+    openrouter: true,
+    hymt2: true,
+};
+
+/** 同步「流式翻译模式」分组：普通 LLM 及 Hy-MT2 显示开关；混合模式固定流式，不显示开关。切换时恢复各自保存的流式偏好。 */
 function updateOpenRouterStreamingUi() {
     const apiSelect = document.getElementById('translation-api-type');
     const streamingModeGroup = document.getElementById('openrouter-streaming-mode-group');
     const streamingMode = document.getElementById('openrouter-streaming-mode');
+    const streamingHint = document.getElementById('streaming-mode-hint');
     if (!apiSelect || !streamingModeGroup || !streamingMode) return;
 
     const v = apiSelect.value;
+    const t = window.i18n ? window.i18n.t : (k) => k;
     if (v === 'openrouter_streaming_deepl_hybrid') {
         streamingModeGroup.style.display = 'none';
         streamingMode.disabled = false;
         updateLLMStreamingPromoState();
         return;
     }
+    if (v === 'hymt2') {
+        streamingModeGroup.style.display = 'block';
+        streamingMode.disabled = false;
+        streamingMode.checked = modelStreamingPreferences.hymt2 ?? true;
+        if (streamingHint) {
+            streamingHint.setAttribute('data-i18n', 'hint.streamingModeHymt');
+            streamingHint.textContent = t('hint.streamingModeHymt');
+        }
+        updateLLMStreamingPromoState();
+        return;
+    }
     if (v === 'openrouter') {
         streamingModeGroup.style.display = 'block';
         streamingMode.disabled = false;
+        streamingMode.checked = modelStreamingPreferences.openrouter ?? true;
+        if (streamingHint) {
+            streamingHint.setAttribute('data-i18n', 'hint.streamingMode');
+            streamingHint.textContent = t('hint.streamingMode');
+        }
         updateLLMStreamingPromoState();
         return;
     }
     streamingModeGroup.style.display = 'none';
-    streamingMode.checked = false;
     streamingMode.disabled = false;
     updateLLMStreamingPromoState();
+}
+
+/** 同步「Hy-MT2」设置分组（WebSocket 地址与本地推理切换）的显示。 */
+function updateHymt2SettingsVisibility(apiType = null) {
+    const actualApiType = apiType || (document.getElementById('translation-api-type')
+        ? document.getElementById('translation-api-type').value
+        : '');
+    const group = document.getElementById('hymt2-settings');
+    if (group) {
+        group.style.display = actualApiType === 'hymt2' ? 'block' : 'none';
+        if (actualApiType === 'hymt2') {
+            onHymt2BackendModeChange(false);
+        }
+    }
 }
 
 function isUsingLLMStreamingTranslation() {
     const apiType = document.getElementById('translation-api-type')?.value ?? '';
     const streamingMode = document.getElementById('openrouter-streaming-mode');
     return apiType === 'openrouter_streaming_deepl_hybrid'
+        || (apiType === 'hymt2' && !!streamingMode?.checked)
         || (apiType === 'openrouter' && !!streamingMode?.checked);
 }
 
@@ -1995,8 +2514,8 @@ document.addEventListener('DOMContentLoaded', async function () {
     setInterval(updateIpcStatus, 2500);
     setInterval(refreshVrcxBridgeStatus, 5000);
     setInterval(() => {
-        if (isLocalAsrUiEnabled()) {
-            void refreshLocalAsrStatus();
+        if (isLocalInferenceUiEnabled()) {
+            void refreshLocalInferenceStatus();
         }
     }, 3000);
 
@@ -2012,8 +2531,10 @@ document.addEventListener('DOMContentLoaded', async function () {
 document.addEventListener('i18n:languageChanged', function () {
     const useInternational = document.getElementById('use-international-endpoint')?.checked ?? false;
     updateAsrOptionsForInternational(useInternational);
-    updateLocalAsrEngineHint();
-    updateLocalAsrUiVisibility();
+    updateLocalInferenceEngineHint();
+    updateQwen3ModelPlacement();
+    renderDeviceOptions();
+    updateLocalInferenceUiVisibility();
     renderLanguageComboMenus();
     refreshLanguageComboClearLabels();
     refreshMicDevices(true);
@@ -2329,6 +2850,7 @@ function applyAsrBackendLocks() {
         && (
             (apiTypeVal === 'openrouter' && streamingModeToggle.checked)
             || apiTypeVal === 'openrouter_streaming_deepl_hybrid'
+            || (apiTypeVal === 'hymt2' && streamingModeToggle.checked)
         );
 
     if (isDoubaoFile) {
@@ -2372,19 +2894,55 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('target-language').value = config.translation.target_language || 'ja';
                 document.getElementById('secondary-target-language').value = config.translation.secondary_target_language || '';
                 document.getElementById('fallback-language').value = config.translation.fallback_language || '';
-                // 处理 LLM 流式模式的特殊情况
                 const apiType = config.translation.api_type || 'openrouter_streaming';
+                // 加载各模型的流式翻译偏好
+                if (typeof config.translation.llm_streaming === 'boolean') {
+                    modelStreamingPreferences.openrouter = config.translation.llm_streaming;
+                } else if (apiType === 'openrouter_streaming') {
+                    modelStreamingPreferences.openrouter = true;
+                } else if (apiType === 'openrouter') {
+                    modelStreamingPreferences.openrouter = false;
+                }
+
+                if (typeof config.translation.hymt2_streaming === 'boolean') {
+                    modelStreamingPreferences.hymt2 = config.translation.hymt2_streaming;
+                } else if (apiType === 'hymt2') {
+                    modelStreamingPreferences.hymt2 = config.translation.translate_partial_results ?? true;
+                }
+
+                // 处理 LLM 流式模式及 Hy-MT2
                 if (apiType === 'openrouter_streaming') {
                     document.getElementById('translation-api-type').value = 'openrouter';
                     document.getElementById('openrouter-streaming-mode').checked = true;
                     document.getElementById('openrouter-streaming-mode').disabled = false;
                 } else if (apiType === 'openrouter_streaming_deepl_hybrid') {
                     document.getElementById('translation-api-type').value = 'openrouter_streaming_deepl_hybrid';
+                } else if (apiType === 'hymt2') {
+                    document.getElementById('translation-api-type').value = 'hymt2';
+                    document.getElementById('openrouter-streaming-mode').checked = modelStreamingPreferences.hymt2 ?? true;
+                    document.getElementById('openrouter-streaming-mode').disabled = false;
                 } else {
                     document.getElementById('translation-api-type').value = apiType;
-                    document.getElementById('openrouter-streaming-mode').checked = false;
+                    document.getElementById('openrouter-streaming-mode').checked = modelStreamingPreferences.openrouter ?? true;
                     document.getElementById('openrouter-streaming-mode').disabled = false;
                 }
+                const hymt2BackendEl = document.getElementById('hymt2-backend-mode');
+                if (hymt2BackendEl) {
+                    const hymt2BackendValue = config.translation.hymt2_backend || 'api';
+                    // 标准版无本地推理运行时：后端配置里的 'local' 回退到 'api'
+                    hymt2BackendEl.value = (hymt2BackendValue === 'local' && !isLocalInferenceUiEnabled())
+                        ? 'api'
+                        : hymt2BackendValue;
+                }
+                const hymt2WsUrlEl = document.getElementById('hymt2-ws-url');
+                if (hymt2WsUrlEl) {
+                    hymt2WsUrlEl.value = config.translation.hymt2_websocket_url || '';
+                }
+                setDeviceSelectValue(
+                    document.getElementById('hymt2-local-device'),
+                    config.translation.hymt2_local_device,
+                );
+                onHymt2BackendModeChange(false);
                 if (document.body.classList.contains('mode-simple')) {
                     document.getElementById('llm-base-url').value = SIMPLE_MODE_LLM_BASE_URL;
                     document.getElementById('llm-model').value = SIMPLE_MODE_LLM_TEMPLATE_NAME;
@@ -2442,7 +3000,7 @@ function loadConfigFromLocalStorage() {
 
             if (config.mic_control) {
                 document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control ?? false;
-                document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds || 0.2;
+                document.getElementById('mute-delay').value = (config.mic_control.mute_delay_seconds || 0.2) * 1000;
                 document.getElementById('enable-double-mute-clear').checked = config.mic_control.enable_double_mute_clear ?? true;
 
                 const micSelect = document.getElementById('mic-device');
@@ -2465,8 +3023,8 @@ function loadConfigFromLocalStorage() {
 
             applyVadConfig(resolveVadConfig(config));
 
-            if (isLocalAsrUiEnabled()) {
-                applyLocalAsrConfig(config.local_asr || {});
+            if (isLocalInferenceUiEnabled()) {
+                applyLocalInferenceConfig(config.local_inference || {});
             }
 
             if (config.language_detector) {
@@ -2542,6 +3100,7 @@ function loadConfigFromLocalStorage() {
         updateFuriganaVisibility();
         updateLLMSettingsVisibility();
         updateSensitiveWordsHint();
+        updateHymt2SettingsVisibility();
         applyAsrBackendLocks();
         updateOscCompatModeUi();
         ensureSelectedLLMTemplate();
@@ -2549,7 +3108,7 @@ function loadConfigFromLocalStorage() {
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
         applyStoredExtraBodyForActiveLLMTemplate();
-        updateLocalAsrUiVisibility();
+        updateLocalInferenceUiVisibility();
 
     } catch (error) {
         console.error('加载本地配置失败:', error);
@@ -2559,6 +3118,7 @@ function loadConfigFromLocalStorage() {
         updateFuriganaVisibility();
         updateLLMSettingsVisibility();
         updateSensitiveWordsHint();
+        updateHymt2SettingsVisibility();
         applyAsrBackendLocks();
         updateOscCompatModeUi();
         ensureSelectedLLMTemplate();
@@ -2566,7 +3126,7 @@ function loadConfigFromLocalStorage() {
         syncAllLanguageComboClearButtons();
         updateDashscopeKeyFieldState();
         applyStoredExtraBodyForActiveLLMTemplate();
-        updateLocalAsrUiVisibility();
+        updateLocalInferenceUiVisibility();
     }
 }
 
@@ -2586,10 +3146,20 @@ function loadDefaultConfig() {
     document.getElementById('remove-trailing-period').checked = false;
     document.getElementById('text-fancy-style').value = 'none';
     document.getElementById('enable-reverse-translation').checked = false;
+    modelStreamingPreferences.openrouter = true;
+    modelStreamingPreferences.hymt2 = true;
     const streamingModeEl = document.getElementById('openrouter-streaming-mode');
     if (streamingModeEl) {
         streamingModeEl.checked = true;
         streamingModeEl.disabled = false;
+    }
+    const localBackendDefault = document.getElementById('local-inference-backend');
+    if (localBackendDefault) localBackendDefault.value = 'local';
+    const localServerDefault = document.getElementById('local-inference-server-url');
+    if (localServerDefault) localServerDefault.value = '';
+    for (const deviceSelectId of DEVICE_SELECT_IDS) {
+        // 默认尽量选中自动挑出的独显；枚举不可用时退回「自动」
+        setDeviceSelectValue(document.getElementById(deviceSelectId), getDefaultDeviceValue());
     }
     setLLMParallelFastestModeSelect('off');
     document.getElementById('llm-base-url').value = SIMPLE_MODE_LLM_BASE_URL;
@@ -2603,7 +3173,7 @@ function loadDefaultConfig() {
 
     // 麦克风控制
     document.getElementById('enable-mic-control').checked = false;
-    document.getElementById('mute-delay').value = 0.2;
+    document.getElementById('mute-delay').value = 200;
     document.getElementById('enable-double-mute-clear').checked = true;
 
     // 麦克风设备
@@ -2622,14 +3192,17 @@ function loadDefaultConfig() {
         min_speech_duration: 1.0,
         max_speech_duration: 30.0,
         silence_duration: 0.8,
-        pre_speech_duration: 0.2,
+        pre_speech_duration: 0.5,
     });
 
-    if (isLocalAsrUiEnabled()) {
-        applyLocalAsrConfig({
+    if (isLocalInferenceUiEnabled()) {
+        applyLocalInferenceConfig({
             engine: 'sensevoice',
+            device: getDefaultDeviceValue(),
             incremental_asr: true,
-            interim_interval: 2.0,
+            incremental_trigger_silence: 0.01,
+            incremental_min_interval: 3.0,
+            incremental_fallback_interval: 4.0,
         });
     }
 
@@ -2667,12 +3240,13 @@ function loadDefaultConfig() {
     updateFuriganaVisibility();
     updateLLMSettingsVisibility();
     updateSensitiveWordsHint();
+    updateHymt2SettingsVisibility();
     applyAsrBackendLocks();
     updateOscCompatModeUi();
     syncLLMTemplateKeySourceHintFromInputs();
     syncAllLanguageComboClearButtons();
     updateDashscopeKeyFieldState();
-    updateLocalAsrUiVisibility();
+    updateLocalInferenceUiVisibility();
 }
 
 function refreshUiAfterServerConfigApply() {
@@ -2681,13 +3255,14 @@ function refreshUiAfterServerConfigApply() {
     updateFuriganaVisibility();
     updateLLMSettingsVisibility();
     updateSensitiveWordsHint();
+    updateHymt2SettingsVisibility();
     applyAsrBackendLocks();
     updateOscCompatModeUi();
     syncLLMTemplateKeySourceHintFromInputs();
     syncAllLanguageComboClearButtons();
     updateDashscopeKeyFieldState();
     applyStoredExtraBodyForActiveLLMTemplate();
-    updateLocalAsrUiVisibility();
+    updateLocalInferenceUiVisibility();
     renderLanguageComboMenus();
 }
 
@@ -2696,24 +3271,56 @@ function applyServerConfigPayload(config) {
     if (config.features) {
         featureFlags = config.features;
     }
-    updateLocalAsrUiVisibility();
+    updateLocalInferenceUiVisibility();
 
     document.getElementById('enable-translation').checked = config.translation.enable_translation;
     document.getElementById('target-language').value = config.translation.target_language;
     document.getElementById('secondary-target-language').value = config.translation.secondary_target_language || '';
     document.getElementById('fallback-language').value = config.translation.fallback_language || '';
     const serverApiType = config.translation.api_type;
+    // 加载各模型的流式翻译偏好
+    if (typeof config.translation.llm_streaming === 'boolean') {
+        modelStreamingPreferences.openrouter = config.translation.llm_streaming;
+    } else if (serverApiType === 'openrouter_streaming') {
+        modelStreamingPreferences.openrouter = true;
+    } else if (serverApiType === 'openrouter') {
+        modelStreamingPreferences.openrouter = false;
+    }
+
+    if (typeof config.translation.hymt2_streaming === 'boolean') {
+        modelStreamingPreferences.hymt2 = config.translation.hymt2_streaming;
+    } else if (serverApiType === 'hymt2') {
+        modelStreamingPreferences.hymt2 = config.translation.translate_partial_results ?? true;
+    }
+
     if (serverApiType === 'openrouter_streaming') {
         document.getElementById('translation-api-type').value = 'openrouter';
         document.getElementById('openrouter-streaming-mode').checked = true;
         document.getElementById('openrouter-streaming-mode').disabled = false;
     } else if (serverApiType === 'openrouter_streaming_deepl_hybrid') {
         document.getElementById('translation-api-type').value = 'openrouter_streaming_deepl_hybrid';
+    } else if (serverApiType === 'hymt2') {
+        document.getElementById('translation-api-type').value = 'hymt2';
+        document.getElementById('openrouter-streaming-mode').checked = modelStreamingPreferences.hymt2 ?? true;
+        document.getElementById('openrouter-streaming-mode').disabled = false;
     } else {
         document.getElementById('translation-api-type').value = serverApiType;
-        document.getElementById('openrouter-streaming-mode').checked = false;
+        document.getElementById('openrouter-streaming-mode').checked = modelStreamingPreferences.openrouter ?? true;
         document.getElementById('openrouter-streaming-mode').disabled = false;
     }
+    const hymt2BackendApply = document.getElementById('hymt2-backend-mode');
+    if (hymt2BackendApply) {
+        hymt2BackendApply.value = config.translation.hymt2_backend || 'api';
+    }
+    const hymt2WsUrlApply = document.getElementById('hymt2-ws-url');
+    if (hymt2WsUrlApply) {
+        hymt2WsUrlApply.value = config.translation.hymt2_websocket_url || '';
+    }
+    setDeviceSelectValue(
+        document.getElementById('hymt2-local-device'),
+        config.translation.hymt2_local_device,
+    );
+    onHymt2BackendModeChange(false);
     if (document.body.classList.contains('mode-simple')) {
         document.getElementById('llm-base-url').value = SIMPLE_MODE_LLM_BASE_URL;
         document.getElementById('llm-model').value = SIMPLE_MODE_LLM_TEMPLATE_NAME;
@@ -2744,7 +3351,7 @@ function applyServerConfigPayload(config) {
     }
 
     document.getElementById('enable-mic-control').checked = config.mic_control.enable_mic_control;
-    document.getElementById('mute-delay').value = config.mic_control.mute_delay_seconds;
+    document.getElementById('mute-delay').value = (config.mic_control.mute_delay_seconds ?? 0.2) * 1000;
     document.getElementById('enable-double-mute-clear').checked = config.mic_control.enable_double_mute_clear ?? true;
     const micSelect = document.getElementById('mic-device');
     if (micSelect && config.mic_control) {
@@ -2795,8 +3402,8 @@ function applyServerConfigPayload(config) {
                 : Math.max(1, Math.min(65535, parseInt(stp, 10) || 9000));
         oscPortApply.value = String(p);
     }
-    if (isLocalAsrUiEnabled()) {
-        applyLocalAsrConfig(config.local_asr || {});
+    if (isLocalInferenceUiEnabled()) {
+        applyLocalInferenceConfig(config.local_inference || {});
     }
 
     if (config.smart_target_language) {
@@ -2896,11 +3503,25 @@ function saveConfigToLocalStorage() {
 
         // 确定实际的 API 类型（LLM + 流式开关 -> openrouter_streaming；混合模式保持独立值）
         let actualApiType = document.getElementById('translation-api-type').value;
+        const isStreamingChecked = !!document.getElementById('openrouter-streaming-mode')?.checked;
+
+        if (actualApiType === 'openrouter' || actualApiType === 'openrouter_streaming') {
+            modelStreamingPreferences.openrouter = isStreamingChecked;
+        } else if (actualApiType === 'hymt2') {
+            modelStreamingPreferences.hymt2 = isStreamingChecked;
+        }
+
         if (actualApiType === 'openrouter_streaming_deepl_hybrid') {
             // 保持 hybrid
-        } else if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
+        } else if (actualApiType === 'openrouter' && isStreamingChecked) {
             actualApiType = 'openrouter_streaming';
         }
+
+        const isStreamingTranslation = actualApiType === 'openrouter_streaming_deepl_hybrid'
+            ? true
+            : (actualApiType === 'hymt2'
+                ? (modelStreamingPreferences.hymt2 ?? true)
+                : ((actualApiType === 'openrouter' || actualApiType === 'openrouter_streaming') ? (modelStreamingPreferences.openrouter ?? true) : false));
 
         const isSimpleMode = document.body.classList.contains('mode-simple');
         const simpleLLMFields = isSimpleMode ? syncSimpleModeLLMTemplateFields() : null;
@@ -2918,6 +3539,9 @@ function saveConfigToLocalStorage() {
                 secondary_target_language: document.getElementById('secondary-target-language').value || null,
                 fallback_language: document.getElementById('fallback-language').value || null,
                 api_type: actualApiType,
+                translate_partial_results: isStreamingTranslation,
+                llm_streaming: modelStreamingPreferences.openrouter ?? true,
+                hymt2_streaming: modelStreamingPreferences.hymt2 ?? true,
                 llm_template: llmTemplate,
                 llm_base_url: llmBaseUrl,
                 llm_model: llmModel,
@@ -2929,6 +3553,9 @@ function saveConfigToLocalStorage() {
                 ),
                 openai_compat_extra_body_json: openaiExtraBodyJson,
                 llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
+                hymt2_backend: (document.getElementById('local-inference-backend')?.value || 'local') === 'remote' ? 'api' : 'local',
+                hymt2_local_device: getDeviceSelectValue('hymt2-local-device'),
+                hymt2_websocket_url: (document.getElementById('local-inference-server-url')?.value || '').trim(),
                 source_language: getSourceLanguageEffective(),
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
@@ -2943,7 +3570,7 @@ function saveConfigToLocalStorage() {
             },
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
-                mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value),
+                mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value || '200') / 1000,
                 enable_double_mute_clear: document.getElementById('enable-double-mute-clear').checked,
                 mic_device_index: (() => {
                     const v = document.getElementById('mic-device') ? document.getElementById('mic-device').value : '';
@@ -2979,7 +3606,7 @@ function saveConfigToLocalStorage() {
                 exclude_self_language: document.getElementById('smart-target-exclude-self')?.checked ?? true,
                 min_samples: parseInt(document.getElementById('smart-target-min-samples')?.value || '3'),
             },
-            local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
+            local_inference: isLocalInferenceUiEnabled() ? getLocalInferenceConfigFromForm() : null,
         };
 
         localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
@@ -3028,6 +3655,7 @@ function switchToLLMStreamingTranslation() {
     if (!select || !streaming) return;
 
     select.value = 'openrouter';
+    modelStreamingPreferences.openrouter = true;
     streaming.checked = true;
     select.dispatchEvent(new Event('change', { bubbles: true }));
 }
@@ -3041,6 +3669,7 @@ function handleTranslationApiChange(event) {
         && !isLLMConnectionFieldsComplete();
     updateLLMSettingsVisibility(newApi, expandLlmPanel);
     updateSensitiveWordsHint(newApi);
+    updateHymt2SettingsVisibility(newApi);
     updateLLMStreamingPromoState();
     applyAsrBackendLocks();
 
@@ -3063,6 +3692,7 @@ document.addEventListener('DOMContentLoaded', function () {
         updateOpenRouterStreamingUi();
         updateLLMSettingsVisibility(apiSelect.value);
         updateSensitiveWordsHint(apiSelect.value);
+        updateHymt2SettingsVisibility(apiSelect.value);
         updateLLMStreamingPromoState();
         syncLLMTemplateKeySourceHintFromInputs();
     }, 100);
@@ -3126,11 +3756,25 @@ async function saveConfig(autoSave = false) {
 
         // 确定实际的 API 类型（LLM + 流式开关 -> openrouter_streaming；混合模式保持独立值）
         let actualApiType = document.getElementById('translation-api-type').value;
+        const isStreamingChecked = !!document.getElementById('openrouter-streaming-mode')?.checked;
+
+        if (actualApiType === 'openrouter' || actualApiType === 'openrouter_streaming') {
+            modelStreamingPreferences.openrouter = isStreamingChecked;
+        } else if (actualApiType === 'hymt2') {
+            modelStreamingPreferences.hymt2 = isStreamingChecked;
+        }
+
         if (actualApiType === 'openrouter_streaming_deepl_hybrid') {
             // 保持 hybrid
-        } else if (actualApiType === 'openrouter' && document.getElementById('openrouter-streaming-mode').checked) {
+        } else if (actualApiType === 'openrouter' && isStreamingChecked) {
             actualApiType = 'openrouter_streaming';
         }
+
+        const isStreamingTranslation = actualApiType === 'openrouter_streaming_deepl_hybrid'
+            ? true
+            : (actualApiType === 'hymt2'
+                ? (modelStreamingPreferences.hymt2 ?? true)
+                : ((actualApiType === 'openrouter' || actualApiType === 'openrouter_streaming') ? (modelStreamingPreferences.openrouter ?? true) : false));
 
         const isSimpleMode = document.body.classList.contains('mode-simple');
         const simpleLLMFields = isSimpleMode ? syncSimpleModeLLMTemplateFields() : null;
@@ -3148,6 +3792,9 @@ async function saveConfig(autoSave = false) {
                 secondary_target_language: document.getElementById('secondary-target-language').value || null,
                 fallback_language: document.getElementById('fallback-language').value || null,
                 api_type: actualApiType,
+                translate_partial_results: isStreamingTranslation,
+                llm_streaming: modelStreamingPreferences.openrouter ?? true,
+                hymt2_streaming: modelStreamingPreferences.hymt2 ?? true,
                 llm_template: llmTemplate,
                 llm_base_url: llmBaseUrl,
                 llm_model: llmModel,
@@ -3159,6 +3806,9 @@ async function saveConfig(autoSave = false) {
                 ),
                 openai_compat_extra_body_json: openaiExtraBodyJson,
                 llm_parallel_fastest_mode: getLLMParallelFastestModeSelect(),
+                hymt2_backend: (document.getElementById('local-inference-backend')?.value || 'local') === 'remote' ? 'api' : 'local',
+                hymt2_local_device: getDeviceSelectValue('hymt2-local-device'),
+                hymt2_websocket_url: (document.getElementById('local-inference-server-url')?.value || '').trim(),
                 source_language: getSourceLanguageEffective(),
                 show_partial_results: document.getElementById('show-partial-results').checked,
                 enable_furigana: document.getElementById('enable-furigana').checked,
@@ -3173,7 +3823,7 @@ async function saveConfig(autoSave = false) {
             },
             mic_control: {
                 enable_mic_control: document.getElementById('enable-mic-control').checked,
-                mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value),
+                mute_delay_seconds: parseFloat(document.getElementById('mute-delay').value || '200') / 1000,
                 enable_double_mute_clear: document.getElementById('enable-double-mute-clear').checked,
                 mic_device_index: (() => {
                     const v = document.getElementById('mic-device') ? document.getElementById('mic-device').value : '';
@@ -3209,7 +3859,7 @@ async function saveConfig(autoSave = false) {
                 send_error_messages:
                     document.getElementById('osc-send-error-messages')?.checked === true,
             },
-            local_asr: isLocalAsrUiEnabled() ? getLocalAsrConfigFromForm() : null,
+            local_inference: isLocalInferenceUiEnabled() ? getLocalInferenceConfigFromForm() : null,
             api_keys: {
                 dashscope: document.getElementById('dashscope-api-key')?.value.trim() || '',
                 deepl: document.getElementById('deepl-api-key')?.value.trim() || '',
@@ -3417,30 +4067,30 @@ async function startService() {
         const requiresDashscopeKey = currentConfigRequiresDashscopeKey();
 
         if (asrBackend === 'local') {
-            if (!isLocalAsrUiEnabled()) {
-                showMessage('❌ ' + t('msg.localAsrDisabledInBuild'), 'error');
+            if (!isLocalInferenceUiEnabled()) {
+                showMessage('❌ ' + t('msg.localInferenceDisabledInBuild'), 'error');
                 startBtn.disabled = false;
                 startBtn.textContent = t('btn.startService');
                 return;
             }
-            const localResponse = await fetch(`${API_BASE}/local-asr/status`);
+            const localResponse = await fetch(`${API_BASE}/local-inference/status`);
             const localPayload = await localResponse.json();
-            const localEngine = document.getElementById('local-asr-engine')?.value || 'sensevoice';
+            const localEngine = document.getElementById('local-inference-engine')?.value || 'sensevoice';
             const engineStatus = localPayload?.engines?.[localEngine];
             if (!engineStatus || !engineStatus.ready) {
                 if (!engineStatus) {
-                    showMessage('❌ ' + t('msg.localAsrNotReady'), 'error');
+                    showMessage('❌ ' + t('msg.localInferenceNotReady'), 'error');
                 } else if (engineStatus.model_cached && Array.isArray(engineStatus.runtime_issues) && engineStatus.runtime_issues.length) {
                     showMessage(
-                        '❌ ' + t('msg.localAsrNeedPythonDeps', { deps: engineStatus.runtime_issues.join(', ') }),
+                        '❌ ' + t('msg.localInferenceNeedPythonDeps', { deps: engineStatus.runtime_issues.join(', ') }),
                         'error',
                     );
                 } else if (engineStatus.model_cached === false) {
-                    showMessage('❌ ' + t('msg.localAsrNotReady'), 'error');
+                    showMessage('❌ ' + t('msg.localInferenceNotReady'), 'error');
                 } else {
-                    showMessage('❌ ' + t('msg.localAsrNeedSilero'), 'error');
+                    showMessage('❌ ' + t('msg.localInferenceNeedSilero'), 'error');
                 }
-                ensureCollapsibleExpanded('local-asr-settings');
+                ensureCollapsibleExpanded('local-inference-settings');
                 startBtn.disabled = false;
                 startBtn.textContent = t('btn.startService');
                 return;
@@ -3543,6 +4193,21 @@ async function startService() {
                     startBtn.textContent = t('btn.startService');
                     expandLLMSettingsPanel(missingFields);
                     return;
+                }
+            }
+
+            if (enableTranslation && translationApiType === 'hymt2') {
+                const inferenceBackend = document.getElementById('local-inference-backend')?.value || 'local';
+                if (inferenceBackend === 'remote') {
+                    const inferenceUrl = (document.getElementById('local-inference-server-url')?.value || '').trim();
+                    if (!inferenceUrl) {
+                        showMessage('❌ ' + t('msg.localInferenceServerUrlRequired'), 'error');
+                        startBtn.disabled = false;
+                        startBtn.textContent = t('btn.startService');
+                        focusLocalModelsCard();
+                        highlightInput('local-inference-server-url');
+                        return;
+                    }
                 }
             }
 

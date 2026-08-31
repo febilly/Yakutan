@@ -213,6 +213,32 @@ def test_dashscope_complete_and_close_notify_session_stop_once():
     assert callback.stopped == 2
 
 
+def test_dashscope_error_callback_does_not_stringify_broken_sdk_result():
+    import speech_recognizers.dashscope_speech_recognizer as dashscope_mod
+
+    class BrokenError:
+        message = 'EmptyAudio'
+        request_id = 'request-123'
+        code = '44'
+
+        def __str__(self):
+            raise AttributeError('headers')
+
+    class CollectingCallback(DummyCallback):
+        def __init__(self):
+            self.errors = []
+
+        def on_error(self, error):
+            self.errors.append(error)
+
+    callback = CollectingCallback()
+    adapter = dashscope_mod._DashscopeCallbackAdapter(callback)
+    adapter.on_error(BrokenError())
+
+    assert 'EmptyAudio' in str(callback.errors[0])
+    assert 'request-123' in str(callback.errors[0])
+
+
 def test_qwen_audio3_stop_after_pause_is_idempotent(monkeypatch):
     """闭麦（pause 已停掉会话）后关闭服务不应再抛 InvalidParameter。"""
     import speech_recognizers.dashscope_speech_recognizer as dashscope_mod

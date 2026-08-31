@@ -11,13 +11,17 @@ from .base_speech_recognizer import MonoAudioSpeechRecognizer, SpeechRecognition
 from .dashscope_speech_recognizer import DashscopeSpeechRecognizer
 from .doubao_file_speech_recognizer import DoubaoFileSpeechRecognizer
 try:
-    from local_asr import is_local_asr_build_enabled
-    from local_asr.model_manager import is_asr_cached as is_local_asr_cached
+    from local_inference import is_local_inference_build_enabled
+    from local_inference.model_manager import (
+        is_asr_cached as is_local_inference_cached,
+        is_silero_cached as is_local_vad_cached,
+    )
     from .local_speech_recognizer import LocalSpeechRecognizer
 except ImportError:  # pragma: no cover
     LocalSpeechRecognizer = None  # type: ignore[assignment]
-    is_local_asr_build_enabled = lambda: False  # type: ignore[assignment]
-    is_local_asr_cached = lambda *args, **kwargs: False  # type: ignore[assignment]
+    is_local_inference_build_enabled = lambda: False  # type: ignore[assignment]
+    is_local_inference_cached = lambda *args, **kwargs: False  # type: ignore[assignment]
+    is_local_vad_cached = lambda: False  # type: ignore[assignment]
 
 try:
     from .qwen_speech_recognizer import QwenSpeechRecognizer
@@ -36,7 +40,7 @@ except ImportError:  # pragma: no cover
     WEBSOCKETS_AVAILABLE = False
 
 
-def _normalize_local_asr_language(source_language: Optional[str]) -> str:
+def _normalize_local_inference_language(source_language: Optional[str]) -> str:
     """本地 ASR 与全局 SOURCE_LANGUAGE 一致；空或 auto 表示自动检测。"""
     if not source_language:
         return 'auto'
@@ -69,6 +73,19 @@ def _normalize_qwen_language(lang: Optional[str]) -> Optional[str]:
     if len(lang_lower) >= 2:
         return lang_lower[:2]
     return None
+
+
+def _aligned_server_silence_ms() -> int:
+    """在线服务端断句静音阈值（毫秒）：与本地 VAD 断句静音时长对齐。
+
+    在线门控在本地 VAD 判定说完后最多再送达约 LOCAL_VAD_SILENCE_DURATION 的
+    真实静音（外加一帧合成静音 burst 吸收判定时差），因此服务端阈值取同一
+    数值，保证"本地判完 ≈ 服务端断句"，并夹到服务端支持的 [200, 6000]ms。
+    """
+    seconds = config.clamp_vad_silence_duration(
+        getattr(config, 'LOCAL_VAD_SILENCE_DURATION', 0.8)
+    )
+    return int(round(seconds * 1000))
 
 
 def _to_dashscope_language(source_language: Optional[str]) -> Optional[str]:
@@ -170,7 +187,6 @@ def create_recognizer(
     hot_words: Optional[list] = None,
     enable_vad: bool = True,
     vad_threshold: float = 0.2,
-    vad_silence_duration_ms: int = 800,
     keepalive_interval: int = 30,
     **extra_kwargs: Any
 ) -> SpeechRecognizer:
@@ -188,7 +204,6 @@ def create_recognizer(
         hot_words: 热词条目列表 [{'text': ..., 'weight': ...}]（仅 qwen_audio3 后端使用）
         enable_vad: 是否启用VAD（仅 qwen 后端使用）
         vad_threshold: VAD阈值（仅 qwen 后端使用）
-        vad_silence_duration_ms: VAD静音持续时间（仅 qwen 后端使用）
         keepalive_interval: WebSocket心跳间隔（秒，仅 qwen 后端使用，0表示禁用）
         **extra_kwargs: 其他自定义参数
     
@@ -225,7 +240,7 @@ def create_recognizer(
             'input_audio_format': audio_format,
             'enable_turn_detection': enable_vad,
             'turn_detection_threshold': vad_threshold,
-            'turn_detection_silence_duration_ms': vad_silence_duration_ms,
+            'turn_detection_silence_duration_ms': _aligned_server_silence_ms(),
             'keepalive_interval': keepalive_interval,
         }
         
@@ -254,6 +269,7 @@ def create_recognizer(
             'model': config.QWEN_AUDIO3_ASR_MODEL,
             'format': audio_format,
             'sample_rate': sample_rate,
+            'max_sentence_silence': _aligned_server_silence_ms(),
             'corpus_text': corpus_text,
             'hot_words': hot_words,
         }
@@ -276,6 +292,7 @@ def create_recognizer(
             'format': audio_format,
             'sample_rate': sample_rate,
             'semantic_punctuation_enabled': False,
+            'max_sentence_silence': _aligned_server_silence_ms(),
         }
         
         # 热词表
@@ -363,7 +380,7 @@ def create_recognizer(
         recognizer = LocalSpeechRecognizer(
             callback=callback,
             sample_rate=sample_rate,
-            source_language=_normalize_local_asr_language(source_language),
+            source_language=_normalize_local_inference_language(source_language),
             corpus_text=corpus_text,
         )
         return MonoAudioSpeechRecognizer(recognizer, input_channels=input_channels)
@@ -400,10 +417,15 @@ def is_backend_available(backend: str) -> bool:
         api_key, app_id, access_key = _resolve_doubao_credentials()
         return bool(api_key or (app_id and access_key))
     elif backend == 'local':
-        if LocalSpeechRecognizer is None or not is_local_asr_build_enabled():
+        if LocalSpeechRecognizer is None or not is_local_inference_build_enabled():
             return False
-        engine = getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice')
-        return bool(is_local_asr_cached(engine))
+        engine = getattr(config, 'LOCAL_INFERENCE_ENGINE', 'sensevoice')
+        if getattr(config, 'LOCAL_INFERENCE_BACKEND', 'local') == 'remote':
+            return bool(
+                str(getattr(config, 'LOCAL_INFERENCE_SERVER_URL', '') or '').strip()
+                and is_local_vad_cached()
+            )
+        return bool(is_local_inference_cached(engine))
     else:
         return False
 

@@ -103,11 +103,22 @@ DOUBAO_ASR_MAX_BUFFER_SECONDS = 60
 # 本地 ASR 引擎
 # 可选: 'sensevoice', 'qwen3-asr'（已移除 Fun-ASR-Nano）
 # sensevoice：INT8 ONNX，固定 CPU（约 1.5–2.5GB 内存；发布版可内置模型）
-# qwen3-asr：ONNX 编码默认 CPU；可选 DirectML（LOCAL_QWEN_ENCODER_USE_DML）。GGUF 解码可走 Vulkan，约需显存视配置而定
-LOCAL_ASR_ENGINE = 'sensevoice'
-_VALID_LOCAL_ASR_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
-if LOCAL_ASR_ENGINE not in _VALID_LOCAL_ASR_ENGINES:
-    LOCAL_ASR_ENGINE = 'sensevoice'
+# qwen3-asr：GGUF 解码跟随"运行位置"（GPU→走 Vulkan；CPU→CPU）；ONNX 音频编码见
+#            LOCAL_QWEN_ENCODER_DEVICE，可单独放 CPU 或显卡。显存占用见 QWEN3_ASR_VRAM_MB。
+LOCAL_INFERENCE_ENGINE = 'sensevoice'
+_VALID_LOCAL_INFERENCE_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
+if LOCAL_INFERENCE_ENGINE not in _VALID_LOCAL_INFERENCE_ENGINES:
+    LOCAL_INFERENCE_ENGINE = 'sensevoice'
+
+# 所有可选本地模型共用的运行方式与服务地址。remote 模式下 SenseVoice、Qwen3-ASR
+# 与 Hy-MT2 都连接同一个 WebSocket 端点；Silero VAD 仍留在客户端做低延迟切段。
+LOCAL_INFERENCE_BACKEND = 'local'  # 'local' | 'remote'
+LOCAL_INFERENCE_SERVER_URL = ''
+LOCAL_INFERENCE_REMOTE_TIMEOUT_SECONDS = 60
+
+
+def sanitize_local_inference_backend(value) -> str:
+    return 'remote' if str(value or '').strip().lower() == 'remote' else 'local'
 
 # ============================================================================
 # 统一 VAD 配置（同时控制在线 API 与本地 ASR）
@@ -120,13 +131,78 @@ LOCAL_VAD_THRESHOLD = 0.50
 LOCAL_VAD_MIN_SPEECH_DURATION = 1.0
 # 单段口语送入 VAD 的最长时长（秒）；超过后对本段仅送入静音块直至 VAD 静音或闭麦结束本段（不按时长强制切句）
 LOCAL_VAD_MAX_SPEECH_DURATION = 30.0
+# 整句结束判定静音时长（秒）：本地 VAD 断句用；在线服务端断句阈值也由本值派生
+# （会话建立时下发，见 recognizer_factory），保持在线/本地断句行为一致。
 LOCAL_VAD_SILENCE_DURATION = 0.8
-# 起声时拼接的预缓冲音频时长（秒），用于避免漏掉第一个字
-LOCAL_VAD_PRE_SPEECH_DURATION = 0.2
+# 起声预缓冲时长（秒）：统一作用于两种 VAD，用于避免漏掉第一个字。
+# - 本地 ASR 断句：开口瞬间把此前累积的静音期音频拼到语音段首
+# - 在线 API 门控：检测到开口时，先把门控期间扣留的最近音频补发给 ASR
+VAD_PRE_SPEECH_DURATION = 0.5
+# 断句静音时长的允许范围（秒）：在线服务端断句参数
+# （max_sentence_silence / silence_duration_ms）官方支持 [200, 6000]ms，
+# 本地设置统一夹到同一范围，见 clamp_vad_silence_duration()。
+VAD_SILENCE_DURATION_MIN = 0.2
+VAD_SILENCE_DURATION_MAX = 6.0
+# 在线门控：本地 VAD 判定说话结束后补发合成静音的安全余量（毫秒）。
+# Qwen-Audio-3.0 / Fun-ASR 的本地 VAD 断句会直接结束当前 Recognition task；
+# 此值仅作为结束失败时的合成静音降级余量。其他在线后端直接发送此余量。
+ONLINE_VAD_END_BURST_MS = 200
+
+
+def clamp_vad_silence_duration(seconds: float) -> float:
+    """将断句静音时长（秒）夹到在线服务端断句参数支持的范围内。"""
+    return min(VAD_SILENCE_DURATION_MAX, max(VAD_SILENCE_DURATION_MIN, float(seconds)))
+
+# 本地识别的运行位置：'auto'（自动挑一张 GPU，独显优先）、'cpu' 或 'vulkan:N'。
+# 只对 Qwen3-ASR 的 GGUF 解码器生效——SenseVoice 是 INT8 ONNX，固定跑 CPU。
+LOCAL_INFERENCE_DEVICE = 'auto'
+
+# Qwen3-ASR 的 ONNX 音频编码器跑在哪：'auto'（跟随上面的运行位置）、'cpu'、'gpu'（DirectML）。
+# 编码器和 GGUF 解码器是两个独立的模型，可以分开放：
+#   - 放显卡：24s 音频的编码 400ms → 70ms；显存多占约 0.45GB
+#   - 放 CPU：不占显存，而且完全不受显卡上其他负载（比如游戏）影响
+# 显卡满载时编码器放 CPU 的耗时几乎不变，放显卡则会跟着变慢 2.6 倍，所以边打游戏边用时 'cpu' 是合理选择。
+LOCAL_QWEN_ENCODER_DEVICE = 'auto'
+_VALID_QWEN_ENCODER_DEVICES = frozenset({'auto', 'cpu', 'gpu'})
+if LOCAL_QWEN_ENCODER_DEVICE not in _VALID_QWEN_ENCODER_DEVICES:
+    LOCAL_QWEN_ENCODER_DEVICE = 'auto'
+
+
+def sanitize_qwen_encoder_device(value) -> str:
+    """把 ONNX 音频编码器的运行位置收敛成 'auto' / 'cpu' / 'gpu'。"""
+    normalized = str(value or '').strip().lower()
+    return normalized if normalized in _VALID_QWEN_ENCODER_DEVICES else 'auto'
+
+
+# 推测解码：把上一次的识别/翻译结果当作草稿，一次前向验证掉其中模型认同的部分。
+# 验证是精确比对，输出与逐 token 解码完全一致，只是前向次数变少。
+# 实测（RTX 3080 / Vulkan）：ASR token 循环约 2.3x，Hy-MT2 按句长 1.1x–2.3x。
+LOCAL_SPECULATIVE_DECODE = True
+
+# Hy-MT2 本地推理：复用上一次 prompt 的公共前缀（背景/历史那段每次都一样），
+# 只重算发生变化的部分。GPU 上约省 5%，CPU 上 prefill 是大头、收益明显。
+LOCAL_MT_PROMPT_CACHE = True
+
+# Qwen3-ASR 由两个独立模型组成，各自的显存占用（MB，实测于 RTX 3080）。
+# 网页面板据此分项显示，而不是笼统给一个总数——因为两部分可以分开放在 CPU/显卡上。
+QWEN3_ASR_VRAM_MB = {
+    'decoder': 1612,  # 识别解码器（GGUF LLM 1.7B q4），跟随"运行位置"
+    'encoder': 465,   # 音频编码器（ONNX int4），仅在放到显卡时占显存
+}
+# Hy-MT2 本地翻译模型（GGUF q4）的显存占用（MB，实测）。
+HYMT2_VRAM_MB = 1402
 
 # 本地增量识别（中间结果）
+# 触发方式基于 VAD：说话中检测到短停顿（如逗号/分句位置）立即做一次全量本地识别，
+# 并配有限流（最小间隔）与保底（最长间隔）机制；不再使用固定间隔轮询。
 LOCAL_INCREMENTAL_ASR = True
-LOCAL_INTERIM_INTERVAL = 2.0
+# 短停顿触发：说话中出现该时长（毫秒）的连续静音时，视为一个分句位置，
+# 立即对当前累积音频做一次完整本地识别并产出中间结果。
+LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 10
+# 限流：两次增量更新之间的最小间隔（秒），短停顿触发至少间隔该时长一次。
+LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = 3.0
+# 保底：连续该时长（秒）没有任何增量更新时，强制刷新一次中间结果。
+LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 4.0
 
 # Qwen3-ASR：GGUF 解码器 KV 上下文长度（token）；增大占显存/内存。
 LOCAL_QWEN_ASR_N_CTX = 2048
@@ -135,8 +211,6 @@ LOCAL_QWEN_CONTEXT_MAX_TOKENS = 1024
 # 是否在每条识别后打印 Qwen3-ASR 各阶段耗时（ONNX 编码 / LLM prefill / 生成），使用 INFO 级别。旧版 CLI 可在 .env 中用 LOCAL_QWEN_LOG_PIPELINE_TIMING=0 关闭。
 # 需在 config.LOG_LEVEL 为 INFO/DEBUG 时才能在终端看到（默认 ERROR 时不会输出）。
 LOCAL_QWEN_LOG_PIPELINE_TIMING = True
-# ONNX 音频编码（前后端）是否使用 DirectML；False 时仅用 CPUExecutionProvider（Mel 本就为 CPU）。
-LOCAL_QWEN_ENCODER_USE_DML = False
 
 # ============================================================================
 # 音频参数配置
@@ -203,7 +277,8 @@ def bump_config_applied_at_ms() -> int:
 
 # 翻译 API 类型
 # 可选: 'google_web', 'google_dictionary', 'deepl', 'openrouter',
-#      'openrouter_streaming', 'openrouter_streaming_deepl_hybrid', 'qwen_mt'
+#      'openrouter_streaming', 'openrouter_streaming_deepl_hybrid', 'qwen_mt',
+#      'hymt2'（Hy-MT2 流式修订翻译；远端地址与其他本地模型共用）
 # 注意:
 # - openrouter / openrouter_streaming 表示基于 OpenAI 兼容接口的 LLM 翻译
 # - openrouter_streaming 是 LLM 翻译的流式模式，支持翻译部分结果
@@ -244,6 +319,43 @@ OPENAI_COMPAT_EXTRA_BODY_JSON = DEFAULT_LLM_EXTRA_BODY_JSON
 # （流式时对中间断句不双发）；all 对每个请求都双发。会增加 token 用量
 LLM_PARALLEL_FASTEST_MODE = 'off'
 
+# ============================================================================
+# Hy-MT2 流式修订翻译配置（WebSocket 无状态协议，见 Hy-MT2 INTEGRATION.md）
+# ============================================================================
+
+# Hy-MT2 接入方式：'api' (外部 WebSocket 服务) 或 'local' (本地 GGUF 模型)
+HYMT2_BACKEND = 'api'
+
+# 本地 GGUF 推理的运行位置：'auto'（自动挑一张 GPU，独显优先）、'cpu'（纯 CPU）
+# 或 'vulkan:N'（指定第 N 张 GPU）。仅在 HYMT2_BACKEND = 'local' 时有意义。
+HYMT2_LOCAL_DEVICE = 'auto'
+
+# 兼容旧配置；新 UI 使用 LOCAL_INFERENCE_SERVER_URL，并在运行时同步到这里。
+HYMT2_WEBSOCKET_URL = ''
+
+# 单次请求/建连超时（秒）
+HYMT2_TIMEOUT_SECONDS = 30
+
+# 建连失败重试次数
+HYMT2_MAX_RETRIES = 3
+
+def sanitize_local_device(value) -> str:
+    """把本地推理设备设置收敛成 'auto' / 'cpu' / 'vulkan:N'。
+
+    实现在 local_inference.gpu_devices；这里做一层薄封装，好让 config 的调用方
+    （网页后端等）不必关心 local_inference 是否可用（精简构建里可能被裁掉）。
+    """
+    try:
+        from local_inference.gpu_devices import sanitize_device
+    except Exception:
+        normalized = str(value or '').strip().lower()
+        if normalized == 'cpu':
+            return 'cpu'
+        if normalized.startswith('vulkan:') and normalized[7:].isdigit():
+            return normalized
+        return 'auto'
+    return sanitize_device(value)
+
 # 运行期凭据。WebUI 只会通过页面请求更新这些进程内字段，不会读取或写入
 # os.environ；旧版 CLI 则由 ``apply_cli_env`` 从 .env 显式填充。
 DASHSCOPE_API_KEY = ''
@@ -266,9 +378,15 @@ ENABLE_TRANSLATION = True  # True: 识别后翻译文本
                            # False: 直接发送识别结果，不翻译
 
 # 是否启用流式翻译（翻译部分结果）
-# 当 TRANSLATION_API_TYPE 为 'openrouter_streaming' 或
-# 'openrouter_streaming_deepl_hybrid' 时自动启用
+# 当 TRANSLATION_API_TYPE 为 'openrouter_streaming'、'openrouter_streaming_deepl_hybrid'
+# 或 'hymt2'（且开启流式开关）时启用
 TRANSLATE_PARTIAL_RESULTS = True
+
+# 网页「流式翻译模式」开关的**各模型独立偏好**。TRANSLATE_PARTIAL_RESULTS 只记录当前
+# 生效模型的状态，切换模型后另一个模型的偏好需要单独记住，否则重启/对账后会被重置。
+# 仅供 WebUI 往返保存，识别与翻译流程不读取这两个值。
+LLM_STREAMING_PREF = True
+HYMT2_STREAMING_PREF = True
 
 # 触发流式中间翻译所需的最小文本长度（字符数）
 # 仅影响中间翻译触发，不影响最终整句翻译
@@ -376,14 +494,14 @@ HOT_WORDS_PRIVATE_DIR = 'hot_words_private'
 ENABLE_VAD = True  # True: 启用VAD，服务器自动检测语音结束并断句
                    # False: 禁用VAD，需要手动调用commit()来触发断句
                    # 注意：VAD和手动commit不能同时使用
-                   # - 启用VAD时，pause()会发送静音音频触发断句，而不是调用commit()
-                   # - 禁用VAD时，pause()会调用commit()手动断句
+                   # - 启用VAD时，由服务端按静音阈值自动断句
+                   # - 禁用VAD时，stop()会调用commit()手动冲出当前句
 
 # VAD阈值（0.0-1.0），值越小越敏感
 VAD_THRESHOLD = 0.2
 
-# VAD静音持续时间（毫秒），检测到此时长的静音后触发断句
-VAD_SILENCE_DURATION_MS = 800
+# 服务端断句静音时长没有独立配置：会话建立时由 LOCAL_VAD_SILENCE_DURATION
+# 派生（夹到 [200, 6000]ms 后下发），保证在线/本地断句静音一致。
 
 # ============================================================================
 # WebSocket 保活配置（仅 Qwen 后端）
@@ -403,6 +521,10 @@ PANEL_WIDTH = 600
 # 是否显示识别中的部分结果（ongoing）
 SHOW_PARTIAL_RESULTS = False  # True: 显示部分识别结果到聊天框（可能覆盖掉之前的翻译结果）
                                # False: 只显示完整识别结果
+
+# 部分结果消抖窗口（毫秒）：收到新更新后重启计时，窗口内无新更新才真正
+# 送去流式翻译 / 输出（终端打印 + OSC 发送）。翻译与输出共用此值。
+PARTIAL_DEBOUNCE_MS = 20
 
 # ============================================================================
 # 语言检测器配置
@@ -510,12 +632,16 @@ def apply_cli_env() -> None:
     built-in defaults until the browser submits its saved settings.
     """
     global VAD_ENABLED
-    global LOCAL_QWEN_LOG_PIPELINE_TIMING, LOCAL_QWEN_ENCODER_USE_DML
+    global LOCAL_QWEN_LOG_PIPELINE_TIMING
+    global LOCAL_INFERENCE_DEVICE, LOCAL_INFERENCE_BACKEND
+    global LOCAL_INFERENCE_SERVER_URL, LOCAL_INFERENCE_REMOTE_TIMEOUT_SECONDS
     global SAVE_POST_RESAMPLE_AUDIO, SAVE_PRE_RESAMPLE_AUDIO
     global DEBUG_AUDIO_OUTPUT_DIR, ENABLE_VAD_GATING_VERBOSE
     global TRANSLATION_API_TYPE, LLM_BASE_URL, LLM_MODEL, LLM_TEMPLATE
     global LLM_TRANSLATION_FORMALITY, LLM_TRANSLATION_STYLE
     global OPENAI_COMPAT_EXTRA_BODY_JSON, TRANSLATE_PARTIAL_RESULTS
+    global HYMT2_BACKEND, HYMT2_LOCAL_DEVICE
+    global HYMT2_WEBSOCKET_URL, HYMT2_TIMEOUT_SECONDS, HYMT2_MAX_RETRIES
     global DASHSCOPE_API_KEY, DEEPL_API_KEY, LLM_API_KEY, OPENAI_API_KEY
     global SONIOX_API_KEY, DOUBAO_API_KEY, DOUBAO_APP_ID, DOUBAO_ACCESS_KEY
     global LLM_APP_URL, LLM_APP_TITLE
@@ -529,8 +655,22 @@ def apply_cli_env() -> None:
     LOCAL_QWEN_LOG_PIPELINE_TIMING = _read_env_bool(
         'LOCAL_QWEN_LOG_PIPELINE_TIMING', LOCAL_QWEN_LOG_PIPELINE_TIMING
     )
-    LOCAL_QWEN_ENCODER_USE_DML = _read_env_bool(
-        'LOCAL_QWEN_ENCODER_USE_DML', LOCAL_QWEN_ENCODER_USE_DML
+    LOCAL_INFERENCE_DEVICE = sanitize_local_device(
+        _read_first_env('LOCAL_INFERENCE_DEVICE', default=LOCAL_INFERENCE_DEVICE)
+    )
+    LOCAL_INFERENCE_BACKEND = sanitize_local_inference_backend(
+        _read_first_env('LOCAL_INFERENCE_BACKEND', default=LOCAL_INFERENCE_BACKEND)
+    )
+    LOCAL_INFERENCE_SERVER_URL = _read_first_env(
+        'LOCAL_INFERENCE_SERVER_URL', 'HYMT2_WEBSOCKET_URL',
+        default=LOCAL_INFERENCE_SERVER_URL,
+    ).strip()
+    LOCAL_INFERENCE_REMOTE_TIMEOUT_SECONDS = max(
+        1, _read_env_int(
+            'LOCAL_INFERENCE_REMOTE_TIMEOUT_SECONDS',
+            LOCAL_INFERENCE_REMOTE_TIMEOUT_SECONDS,
+            max_v=600,
+        )
     )
     SAVE_POST_RESAMPLE_AUDIO = _read_env_bool(
         'SAVE_POST_RESAMPLE_AUDIO', SAVE_POST_RESAMPLE_AUDIO
@@ -576,7 +716,27 @@ def apply_cli_env() -> None:
         TRANSLATION_API_TYPE in (
             'openrouter_streaming',
             'openrouter_streaming_deepl_hybrid',
+            'hymt2',
         ),
+    )
+
+    HYMT2_BACKEND = _read_first_env(
+        'HYMT2_BACKEND', default=HYMT2_BACKEND
+    )
+    HYMT2_LOCAL_DEVICE = sanitize_local_device(
+        _read_first_env('HYMT2_LOCAL_DEVICE', default=HYMT2_LOCAL_DEVICE)
+    )
+    HYMT2_WEBSOCKET_URL = _read_first_env(
+        'HYMT2_WEBSOCKET_URL', default=HYMT2_WEBSOCKET_URL
+    )
+    if LOCAL_INFERENCE_BACKEND == 'remote':
+        HYMT2_BACKEND = 'api'
+        HYMT2_WEBSOCKET_URL = LOCAL_INFERENCE_SERVER_URL
+    HYMT2_TIMEOUT_SECONDS = max(
+        1, _read_env_int('HYMT2_TIMEOUT_SECONDS', HYMT2_TIMEOUT_SECONDS, max_v=600)
+    )
+    HYMT2_MAX_RETRIES = max(
+        0, _read_env_int('HYMT2_MAX_RETRIES', HYMT2_MAX_RETRIES, max_v=20)
     )
 
     DASHSCOPE_API_KEY = _read_first_env('DASHSCOPE_API_KEY')
@@ -632,7 +792,7 @@ def get_default_ui_config() -> dict:
             'min_speech_duration': 1.0,
             'max_speech_duration': 30.0,
             'silence_duration': 0.8,
-            'pre_speech_duration': 0.2,
+            'pre_speech_duration': VAD_PRE_SPEECH_DURATION,
         },
         'translation': {
             'enable_translation': True,
@@ -641,6 +801,7 @@ def get_default_ui_config() -> dict:
             'secondary_target_language': None,
             'fallback_language': 'en',
             'api_type': DEFAULT_TRANSLATION_API_TYPE,
+            'translate_partial_results': True,
             'llm_template': DEFAULT_LLM_TEMPLATE,
             'llm_base_url': DEFAULT_LLM_BASE_URL,
             'llm_model': DEFAULT_LLM_MODEL,
@@ -648,6 +809,8 @@ def get_default_ui_config() -> dict:
             'llm_translation_style': DEFAULT_LLM_TRANSLATION_STYLE,
             'openai_compat_extra_body_json': DEFAULT_LLM_EXTRA_BODY_JSON,
             'llm_parallel_fastest_mode': 'off',
+            'hymt2_backend': 'api',
+            'hymt2_websocket_url': '',
             'show_partial_results': False,
             'enable_furigana': False,
             'enable_pinyin': False,

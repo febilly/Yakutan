@@ -894,6 +894,106 @@ html[lang="en"] .language-setting-item label span[data-i18n="label.quickLangSlot
     min-height: 40px;
 }
 
+/* 本地模型卡片（ASR / MT 统一样式） */
+.local-model-card {
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: rgba(15, 23, 42, 0.02);
+}
+
+.local-model-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.local-model-card-title {
+    margin: 0;
+    font-weight: 600;
+}
+
+.local-model-badge {
+    flex: none;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--border-color);
+    color: #475569;
+    font-size: 12px;
+}
+
+.local-model-badge.is-ready {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.local-model-badge.is-missing {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.local-model-desc {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.local-model-card .local-asr-status-box {
+    background: var(--card-bg);
+}
+
+.local-model-card .local-asr-grid {
+    margin-bottom: 12px;
+}
+
+.local-model-card-actions {
+    margin-top: 10px;
+}
+
+/* 模型下载进度：一行阶段文字 + 已下载/总量 + 进度条 */
+.local-download-line {
+    font-size: 13px;
+    color: var(--text-color);
+}
+
+.local-download-size {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.local-download-bar {
+    margin-top: 8px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--border-color);
+    overflow: hidden;
+}
+
+.local-download-bar > span {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: inherit;
+    background: var(--primary-color);
+    transition: width 0.4s ease;
+}
+
+/* 拿不到总长度时（解压、无 Content-Length 的响应）用来回滑动表示“在动” */
+.local-download-bar.is-indeterminate > span {
+    width: 40%;
+    transition: none;
+    animation: local-download-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes local-download-slide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(250%); }
+}
+
 .text-post-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

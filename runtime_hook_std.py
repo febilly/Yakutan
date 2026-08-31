@@ -1,3 +1,3 @@
 import os
 
-os.environ["YAKUTAN_LOCAL_ASR_UI"] = "0"
+os.environ["YAKUTAN_LOCAL_INFERENCE_UI"] = "0"

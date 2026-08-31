@@ -275,12 +275,20 @@
                                 <option value="google_web" data-i18n="api.googleWeb">Google Web（免费，备用，请注意网络连通性）</option>
                                 <option value="openrouter" data-i18n="api.openrouter" selected>LLM（自定义兼容接口）</option>
                                 <option value="openrouter_streaming_deepl_hybrid" data-i18n="api.openrouterStreamingDeeplHybrid">LLM 流式 + DeepL 终译（混合）</option>
+                                <option value="hymt2" data-i18n="api.hyMt2">Hy-MT2（WebSocket 流式修订翻译）</option>
                             </select>
                             <small id="translation-api-warning" class="form-text"
                                 style="color: #e74c3c; display: none;"></small>
                             <small id="qwen-mt-sensitive-words-hint" class="form-text"
                                 data-i18n="hint.sensitiveWordsRisk" style="display: none;">请注意敏感词问题，必要时请切换到 DeepL 或
                                 Google 翻译</small>
+                        </div>
+
+                        <div class="form-group" id="hymt2-settings" style="display: none;">
+                            <small class="form-text">
+                                <span data-i18n="hint.hymt2UsesUnifiedInference">Hy-MT2 跟随「本地模型」中的统一运行方式与服务器地址。</span>
+                                <a href="#" onclick="focusLocalModelsCard(); return false;" data-i18n="link.manageInLocalModels">前往「本地模型」设置 →</a>
+                            </small>
                         </div>
 
                         <div class="form-group" id="openrouter-streaming-mode-group" style="display: none;">
@@ -291,7 +299,7 @@
                                     <span class="slider"></span>
                                 </label>
                             </label>
-                            <small class="form-text" data-i18n="hint.streamingMode">启用后会边说边翻译，不用等整句话说完才出结果。请注意这会大幅增加 token 用量。</small>
+                            <small class="form-text" id="streaming-mode-hint" data-i18n="hint.streamingMode">启用后会边说边翻译，不用等整句话说完才出结果。请注意这会大幅增加 token 用量。</small>
                         </div>
 
                         <div class="llm-tone-grid" id="llm-tone-grid" style="display: none;">
@@ -567,7 +575,7 @@
                                 <select id="asr-backend" class="form-control" onchange="onSettingChange()"
                                     data-restart-required="true">
                                     <option value="qwen" data-i18n="asr.qwen">Qwen3 ASR（中文最准）</option>
-                                    <option value="qwen_audio3" data-i18n="asr.qwenAudio3">Qwen-Audio-3.0 ASR（最新，支持即时热词）</option>
+                                    <option value="qwen_audio3" data-i18n="asr.qwenAudio3">Qwen-Audio-3.0 ASR（最新）</option>
                                     <option value="dashscope" data-i18n="asr.dashscope">Fun-ASR（备用）</option>
                                     <option value="doubao_file" data-i18n="asr.doubaoFile">豆包录音文件识别（必须使用切换麦，每次闭麦后进行识别）
                                     </option>
@@ -622,54 +630,143 @@
                     </div>
                 </section>
 
-                <!-- 本地音频识别 -->
-                <section class="card" id="local-asr-card" style="display: none;">
-                    <div class="collapsible-header" onclick="toggleCollapsible('local-asr-settings')">
-                        <h2 data-i18n="section.localAsrSettings">本地音频识别</h2>
-                        <span class="collapse-icon collapsed" id="local-asr-settings-icon">▶</span>
+                <!-- 本地模型管理 -->
+                <section class="card" id="local-inference-card" style="display: none;">
+                    <div class="collapsible-header" onclick="toggleCollapsible('local-inference-settings')">
+                        <h2 data-i18n="section.localModels">本地模型</h2>
+                        <span class="collapse-icon collapsed" id="local-inference-settings-icon">▶</span>
                     </div>
-                    <div class="collapsible-content collapsed" id="local-asr-settings">
-                        <div class="local-asr-grid">
+                    <div class="collapsible-content collapsed" id="local-inference-settings">
+                        <div class="local-inference-grid" style="margin-bottom: 18px;">
                             <div class="form-group">
-                                <label for="local-asr-engine" data-i18n="label.localAsrEngine">本地识别引擎</label>
-                                <select id="local-asr-engine" class="form-control" onchange="onLocalAsrSettingChange(this)"
-                                    data-restart-required="true">
-                                    <option value="sensevoice" data-i18n="localAsr.engine.sensevoice">SenseVoice Small（快速、CPU）</option>
-                                    <option value="qwen3-asr" data-i18n="localAsr.engine.qwen3">Qwen3-ASR（准确、GPU）</option>
+                                <label for="local-inference-backend" data-i18n="label.localInferenceBackend">模型运行方式</label>
+                                <select id="local-inference-backend" class="form-control"
+                                    onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
+                                    <option value="local" data-i18n="option.localInferenceLocal">本机运行</option>
+                                    <option value="remote" data-i18n="option.localInferenceRemote">远程服务器运行</option>
                                 </select>
-                                <small id="local-asr-engine-hint" class="form-text"></small>
-                                <small class="form-text" data-i18n="hint.localAsrUsesGlobalSourceLang">
-                                    识别语言与上方「语音识别」中的源语言一致；留空或 auto 为自动检测。
-                                </small>
                             </div>
-                            <div class="form-group" style="grid-column: 1 / -1;">
-                                <small class="form-text" data-i18n="hint.localVadMovedToAdvanced">VAD（语音活动检测）参数已移至「高级设置 → VAD」，对在线 API 与本地识别统一生效。</small>
+                            <div class="form-group" id="local-inference-server-group" style="display: none;">
+                                <label for="local-inference-server-url" data-i18n="label.localInferenceServerUrl">统一推理服务器地址</label>
+                                <input type="text" id="local-inference-server-url" class="form-control"
+                                    placeholder="ws://127.0.0.1:18775" autocomplete="off"
+                                    onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
+                                <small class="form-text" data-i18n="hint.localInferenceServerUrl">SenseVoice、Qwen3-ASR 与 Hy-MT2 共用这个 WebSocket 地址。</small>
                             </div>
-                            <div class="form-group">
-                                <label class="switch-label">
-                                    <span data-i18n="label.localIncrementalAsr">启用增量识别</span>
-                                    <label class="switch">
-                                        <input type="checkbox" id="local-incremental-asr" onchange="onLocalAsrSettingChange(this)"
-                                            data-restart-required="true">
-                                        <span class="slider"></span>
-                                    </label>
-                                </label>
-                            </div>
-                            <div class="form-group">
-                                <label for="local-interim-interval" data-i18n="label.localInterimInterval">中间结果间隔（秒）</label>
-                                <input type="number" id="local-interim-interval" class="form-control" min="0.5" max="20"
-                                    step="0.5" onchange="onLocalAsrSettingChange(this)" data-restart-required="true">
-                            </div>
-                            <div class="form-group" style="grid-column: 1 / -1;">
-                                <label data-i18n="label.localAsrStatus">模型状态</label>
-                                <div id="local-asr-status" class="local-asr-status-box" data-i18n="hint.localAsrNotChecked">
-                                    尚未检查本地模型状态
+                        </div>
+                        <!-- 语音识别模型 -->
+                        <div class="local-models-group">
+                            <h3 class="subsection-title" style="margin-top: 0; font-size: 15px;" data-i18n="label.localInferenceModels">🎙️ 语音识别模型（ASR）</h3>
+                            <div class="local-model-card">
+                                <div class="local-model-card-head">
+                                    <strong class="local-model-card-title" id="local-inference-engine-name" data-i18n="localInference.engine.sensevoiceName">SenseVoice Small</strong>
+                                    <span id="local-inference-badge" class="local-model-badge" data-i18n="status.localModelChecking">检测中...</span>
                                 </div>
-                                <small class="form-text" data-i18n="hint.localAsrStatus">首次使用前请先下载对应引擎模型和运行时。</small>
+                                <p class="local-model-desc" id="local-inference-engine-hint"></p>
+                                <div class="local-inference-grid">
+                                    <div class="form-group">
+                                        <label for="local-inference-engine" data-i18n="label.localInferenceEngine">本地识别引擎</label>
+                                        <select id="local-inference-engine" class="form-control" onchange="onLocalInferenceSettingChange(this)"
+                                            data-restart-required="true">
+                                            <option value="sensevoice" data-i18n="localInference.engine.sensevoice">SenseVoice Small（快速、CPU）</option>
+                                            <option value="qwen3-asr" data-i18n="localInference.engine.qwen3">Qwen3-ASR（准确、GPU）</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="local-inference-device" data-i18n="label.localDevice">运行位置</label>
+                                        <select id="local-inference-device" class="form-control"
+                                            onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
+                                            <option value="auto" data-i18n="option.deviceAuto">自动（独显优先）</option>
+                                            <option value="cpu" data-i18n="option.deviceCpu">CPU</option>
+                                        </select>
+                                        <small class="form-text" id="local-inference-device-hint" data-i18n="hint.localInferenceDevice">仅对 Qwen3-ASR 生效；SenseVoice 固定在 CPU 上运行。</small>
+                                    </div>
+                                    <div class="form-group" id="local-encoder-device-group" style="display: none;">
+                                        <label for="local-encoder-device" data-i18n="label.localEncoderDevice">音频编码器运行位置</label>
+                                        <select id="local-encoder-device" class="form-control"
+                                            onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
+                                            <option value="auto" data-i18n="option.encoderDeviceAuto">跟随上面的运行位置</option>
+                                            <option value="gpu" data-i18n="option.encoderDeviceGpu">显卡（DirectML）</option>
+                                            <option value="cpu" data-i18n="option.encoderDeviceCpu">CPU</option>
+                                        </select>
+                                        <small class="form-text" data-i18n="hint.localEncoderDevice">音频编码器放显卡上明显更快（24 秒音频约 400ms → 70ms），代价是多占显存。放 CPU 则完全不受显卡上其他负载影响，边打游戏边用时更稳。</small>
+                                    </div>
+                                    <div class="form-group" id="local-qwen3-vram-group" style="grid-column: 1 / -1; display: none;">
+                                        <div class="local-inference-status-box" id="local-qwen3-vram"></div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="local-incremental-trigger-silence" data-i18n="label.localIncrementalTriggerSilence">增量更新静音（毫秒）</label>
+<input type="number" id="local-incremental-trigger-silence" class="form-control" min="10" max="1000"
+                                             step="10" onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
+                                        <small class="form-text" data-i18n="hint.localIncrementalTriggerSilence">说话中出现该时长的短停顿即视为一个分句（逗号位置），立即触发一次增量识别。</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="local-incremental-min-interval" data-i18n="label.localIncrementalMinInterval">增量更新最小间隔（毫秒）</label>
+                                        <input type="number" id="local-incremental-min-interval" class="form-control" min="200" max="10000"
+                                            step="100" onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
+                                        <small class="form-text" data-i18n="hint.localIncrementalMinInterval">限流：两次增量更新之间的最小间隔。</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="local-incremental-fallback-interval" data-i18n="label.localIncrementalFallbackInterval">增量更新最长间隔（毫秒）</label>
+                                        <input type="number" id="local-incremental-fallback-interval" class="form-control" min="1000" max="30000"
+                                            step="500" onchange="onLocalInferenceSettingChange(this)" data-restart-required="true">
+                                        <small class="form-text" data-i18n="hint.localIncrementalFallbackInterval">兜底：连续该时长没有任何更新时，强制刷新一次中间结果。</small>
+                                    </div>
+                                    <div class="form-group" style="grid-column: 1 / -1;">
+                                        <label class="switch-label">
+                                            <span data-i18n="label.localIncrementalAsr">启用增量识别</span>
+                                            <label class="switch">
+                                                <input type="checkbox" id="local-incremental-asr" onchange="onLocalInferenceSettingChange(this)"
+                                                    data-restart-required="true">
+                                                <span class="slider"></span>
+                                            </label>
+                                        </label>
+                                    </div>
+                                    <div class="form-group" style="grid-column: 1 / -1;">
+                                        <div id="local-inference-status" class="local-inference-status-box" data-i18n="hint.localInferenceNotChecked">
+                                            尚未检查本地模型状态
+                                        </div>
+                                        <small class="form-text" data-i18n="hint.localInferenceStatus">首次使用前请先下载对应引擎模型和运行时。</small>
+                                    </div>
+                                </div>
+                                <div class="local-model-card-actions">
+                                    <button type="button" class="btn btn-secondary" id="local-inference-download-btn"
+                                        onclick="downloadLocalInferenceModels()" data-i18n="btn.downloadLocalInference">下载本地识别模型</button>
+                                </div>
                             </div>
-                            <div class="form-group" style="grid-column: 1 / -1;">
-                                <button type="button" class="btn btn-primary" id="local-asr-download-btn"
-                                    onclick="downloadLocalAsrModels()" data-i18n="btn.downloadLocalAsr">下载本地识别模型</button>
+                        </div>
+
+                        <hr style="margin: 20px 0; border: 0; border-top: 1px solid var(--border-color, #e2e8f0);">
+
+                        <!-- 机器翻译模型 -->
+                        <div class="local-models-group">
+                            <h3 class="subsection-title" style="margin-top: 0; font-size: 15px;" data-i18n="label.localMtModels">🌐 机器翻译模型（MT）</h3>
+                            <div class="local-model-card">
+                                <div class="local-model-card-head">
+                                    <strong class="local-model-card-title" data-i18n="localModels.hymt2Name">Hy-MT2 1.8B（流式修订翻译）</strong>
+                                    <span id="local-hymt2-badge" class="local-model-badge" data-i18n="status.localModelChecking">检测中...</span>
+                                </div>
+                                <p class="local-model-desc" data-i18n="localModels.hymt2Desc">
+                                    基于混元 1.8B 多语言流式修订架构，支持在说话过程中根据上下文自动修正流式译文。
+                                </p>
+                                <div class="local-inference-grid">
+                                    <div class="form-group">
+                                        <label for="hymt2-local-device" data-i18n="label.localDevice">运行位置</label>
+                                        <select id="hymt2-local-device" class="form-control"
+                                            onchange="onSettingChange(this)">
+                                            <option value="auto" data-i18n="option.deviceAuto">自动（独显优先）</option>
+                                            <option value="cpu" data-i18n="option.deviceCpu">CPU</option>
+                                        </select>
+                                        <small class="form-text" data-i18n="hint.hymt2LocalDevice">仅影响本地 Hy-MT2 模型；切换后下一次翻译会用新设置重新加载模型。</small>
+                                    </div>
+                                </div>
+                                <div id="local-hymt2-status-box" class="local-inference-status-box">
+                                    检测本地 Hy-MT2 模型状态...
+                                </div>
+                                <div class="local-model-card-actions">
+                                    <button type="button" class="btn btn-secondary" id="local-hymt2-download-btn"
+                                        onclick="downloadHymt2Model()" data-i18n="btn.downloadHymt2">一键下载本地 Hy-MT2 模型</button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -798,8 +895,8 @@
                         <div class="subsection">
                             <h3 data-i18n="subsection.micControl">麦克风控制</h3>
                             <div class="form-group">
-                                <label for="mute-delay" data-i18n="label.muteDelay">静音延迟（秒）</label>
-                                <input type="number" id="mute-delay" class="form-control" min="0" max="5" step="0.1"
+                                <label for="mute-delay" data-i18n="label.muteDelay">静音延迟（毫秒）</label>
+                                <input type="number" id="mute-delay" class="form-control" min="0" max="5000" step="100"
                                     value="0.2" onchange="onSettingChange()">
                                 <small class="form-text" data-i18n="hint.muteDelay">静音后延迟停止识别的时间，防止漏掉最后一个字</small>
                             </div>
@@ -848,27 +945,29 @@
                             </div>
 
                             <div class="form-group">
-                                <label for="vad-min-speech-duration" data-i18n="label.localMinSpeechDuration">最短语音时长（秒）</label>
-                                <input type="number" id="vad-min-speech-duration" class="form-control" min="0.1" max="30"
-                                    step="0.1" onchange="onSettingChange()" data-restart-required="true">
+                                <label for="vad-min-speech-duration" data-i18n="label.localMinSpeechDuration">最短语音时长（毫秒）</label>
+                                <input type="number" id="vad-min-speech-duration" class="form-control" min="100" max="30000"
+                                    step="100" onchange="onSettingChange()" data-restart-required="true">
                             </div>
 
                             <div class="form-group">
-                                <label for="vad-max-speech-duration" data-i18n="label.localMaxSpeechDuration">单段最长语音采集（秒）</label>
-                                <input type="number" id="vad-max-speech-duration" class="form-control" min="1" max="120"
-                                    step="0.5" onchange="onSettingChange()" data-restart-required="true">
+                                <label for="vad-max-speech-duration" data-i18n="label.localMaxSpeechDuration">单段最长语音采集（毫秒）</label>
+                                <input type="number" id="vad-max-speech-duration" class="form-control" min="1000" max="120000"
+                                    step="1000" onchange="onSettingChange()" data-restart-required="true">
                             </div>
 
                             <div class="form-group">
-                                <label for="vad-silence-duration" data-i18n="label.localSilenceDuration">静音持续时间（秒）</label>
-                                <input type="number" id="vad-silence-duration" class="form-control" min="0.1" max="5"
-                                    step="0.1" onchange="onSettingChange()" data-restart-required="true">
+                                <label for="vad-silence-duration" data-i18n="label.localSilenceDuration">句子结束静音（毫秒）</label>
+                                <input type="number" id="vad-silence-duration" class="form-control" min="200" max="6000"
+                                    step="100" onchange="onSettingChange()" data-restart-required="true">
+                                <small class="form-text" data-i18n="hint.localSilenceDuration">连续静音达到该时长时，判定整句话说完，提交最终识别结果（本地识别断句）。</small>
                             </div>
 
                             <div class="form-group">
-                                <label for="vad-pre-speech-duration" data-i18n="label.localPreSpeechDuration">起声预缓冲（秒）</label>
-                                <input type="number" id="vad-pre-speech-duration" class="form-control" min="0" max="2"
-                                    step="0.05" onchange="onSettingChange()" data-restart-required="true">
+                                <label for="vad-pre-speech-duration" data-i18n="label.localPreSpeechDuration">起声预缓冲（毫秒）</label>
+                                <input type="number" id="vad-pre-speech-duration" class="form-control" min="0" max="2000"
+                                    step="50" onchange="onSettingChange()" data-restart-required="true">
+                                <small class="form-text" data-i18n="hint.localPreSpeechDuration">开口瞬间向前回补的音频时长，统一作用于在线 API 门控与本地识别断句，避免漏掉句首第一个字。</small>
                             </div>
                         </div>
 

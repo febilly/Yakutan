@@ -10,9 +10,9 @@ from typing import Optional
 import numpy as np
 
 import config
-from local_asr import get_engine_runtime_issues
-from local_asr.model_manager import is_asr_cached, is_asr_models_ready, is_silero_cached
-from local_asr.vad_processor import VADProcessor
+from local_inference import get_engine_runtime_issues
+from local_inference.model_manager import is_asr_cached, is_asr_models_ready, is_silero_cached
+from local_inference.vad_processor import VADProcessor
 from vrcx_context_bridge import build_asr_context_text
 
 from .base_speech_recognizer import RecognitionEvent, SpeechRecognitionCallback, SpeechRecognizer
@@ -37,7 +37,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         self._callback = callback
         self._sample_rate = sample_rate
         self._source_language = source_language
-        self._engine_name = getattr(config, "LOCAL_ASR_ENGINE", "sensevoice")
+        self._engine_name = getattr(config, "LOCAL_INFERENCE_ENGINE", "sensevoice")
         self._audio_queue: queue.Queue[bytes] = queue.Queue(maxsize=128)
         self._worker: threading.Thread | None = None
         self._asr_executor: ThreadPoolExecutor | None = None
@@ -52,6 +52,13 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         self._pending_samples = np.array([], dtype=np.float32)
         self._last_partial_text = ""
         self._last_partial_time = 0.0
+        self._silence_trigger_armed = True
+        # 有声内容计数：每处理到一个有声 VAD 分块 +1。
+        # 最近一次"已完成"中间结果入队时的快照值若与当前一致，
+        # 说明该快照之后缓冲里只追加了静音——中间结果已覆盖整句。
+        self._voiced_chunk_seq = 0
+        self._last_partial_voiced_seq = -1
+        self._partial_pending_voiced_seq = -1
         self._last_request_id = f"local-{self._engine_name}"
         self._stream_id = 0
         self._corpus_text = (corpus_text or "").strip()
@@ -67,7 +74,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             threshold=float(getattr(config, "LOCAL_VAD_THRESHOLD", 0.50)),
             min_speech_duration=float(getattr(config, "LOCAL_VAD_MIN_SPEECH_DURATION", 1.0)),
             chunk_duration=LOCAL_VAD_CHUNK_DURATION,
-            pre_speech_duration=float(getattr(config, "LOCAL_VAD_PRE_SPEECH_DURATION", 0.2)),
+            pre_speech_duration=float(getattr(config, "VAD_PRE_SPEECH_DURATION", 0.5)),
         )
         vad_mode = (
             getattr(config, "LOCAL_VAD_MODE", "silero")
@@ -79,8 +86,10 @@ class LocalSpeechRecognizer(SpeechRecognizer):
                 "vad_mode": vad_mode,
                 "vad_threshold": float(getattr(config, "LOCAL_VAD_THRESHOLD", 0.50)),
                 "min_speech_duration": float(getattr(config, "LOCAL_VAD_MIN_SPEECH_DURATION", 1.0)),
-                "silence_duration": float(getattr(config, "LOCAL_VAD_SILENCE_DURATION", 0.8)),
-                "pre_speech_duration": float(getattr(config, "LOCAL_VAD_PRE_SPEECH_DURATION", 0.2)),
+                "silence_duration": config.clamp_vad_silence_duration(
+                    float(getattr(config, "LOCAL_VAD_SILENCE_DURATION", 0.8))
+                ),
+                "pre_speech_duration": float(getattr(config, "VAD_PRE_SPEECH_DURATION", 0.5)),
             }
         )
         return vad
@@ -88,28 +97,46 @@ class LocalSpeechRecognizer(SpeechRecognizer):
     def _ensure_engine(self):
         if self._engine is not None:
             return self._engine
-        if not is_asr_cached(self._engine_name):
+        remote = (
+            getattr(config, "LOCAL_INFERENCE_BACKEND", "local") == "remote"
+        )
+        if not is_silero_cached():
+            raise RuntimeError(
+                "本地 VAD（Silero ONNX）未就绪。远端推理仍需要本机 VAD 做实时音频切段。"
+            )
+        if not remote and not is_asr_cached(self._engine_name):
             if not is_silero_cached():
                 raise RuntimeError(
-                    "本地 VAD（Silero ONNX）未就绪。请在「本地音频识别」中点击下载，或检查 local_asr/models 下是否有 silero_vad。"
+                    "本地 VAD（Silero ONNX）未就绪。请在「本地音频识别」中点击下载，或检查 local_inference/models 下是否有 silero_vad。"
                 )
             if is_asr_models_ready(self._engine_name) and get_engine_runtime_issues(
                 self._engine_name
             ):
                 missing = ", ".join(get_engine_runtime_issues(self._engine_name))
                 raise RuntimeError(
-                    f"模型文件已在本地，但缺少 Python 依赖: {missing}。请安装: pip install -r requirements-local-asr.txt"
+                    f"模型文件已在本地，但缺少 Python 依赖: {missing}。请安装: pip install -r requirements-local-inference.txt"
                 )
             raise RuntimeError(
                 f"本地识别主模型未就绪。请在「本地音频识别」中点击下载 {self._engine_name} 所需资源。"
             )
 
-        if self._engine_name == "sensevoice":
-            from local_asr.asr_sensevoice import SenseVoiceEngine
+        if remote:
+            from local_inference.remote_client import RemoteASREngine
+
+            engine = RemoteASREngine(
+                self._engine_name,
+                getattr(config, "LOCAL_INFERENCE_SERVER_URL", ""),
+                timeout=float(getattr(
+                    config, "LOCAL_INFERENCE_REMOTE_TIMEOUT_SECONDS", 60,
+                )),
+                corpus_text=build_asr_context_text(self._corpus_text) or None,
+            )
+        elif self._engine_name == "sensevoice":
+            from local_inference.asr_sensevoice import SenseVoiceEngine
 
             engine = SenseVoiceEngine()
         elif self._engine_name == "qwen3-asr":
-            from local_asr.asr_qwen3 import Qwen3ASREngine
+            from local_inference.asr_qwen3 import Qwen3ASREngine
 
             engine = Qwen3ASREngine(corpus_text=build_asr_context_text(self._corpus_text) or None)
         else:
@@ -127,6 +154,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
                 text=text,
                 is_final=is_final,
                 raw=raw,
+                force_partial_translation=not is_final,
             )
         )
 
@@ -137,7 +165,13 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         kwargs = {}
         if hasattr(engine, "transcribe") and "update_context" in engine.transcribe.__code__.co_varnames:
             kwargs["update_context"] = is_final
+        recognition_started = time.monotonic()
         result = engine.transcribe(audio, **kwargs)
+        # 临时：识别完成后输出一行日志，记录本次识别耗时（毫秒）
+        print(
+            f"[本地ASR] 识别完成（{'最终' if is_final else '中间'}）: "
+            f"耗时 {(time.monotonic() - recognition_started) * 1000.0:.0f}ms"
+        )
         if not result:
             return None
         text = (result.get("text") or "").strip()
@@ -157,12 +191,18 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             text, raw = payload
             with self._lock:
                 if is_final:
-                    self._last_partial_text = ""
-                    self._stream_id += 1
-                    self._emit_result(text, is_final=True, raw=raw)
-                elif stream_id == self._stream_id and text != self._last_partial_text:
-                    self._last_partial_text = text
-                    self._emit_result(text, is_final=False, raw=raw)
+                    self._emit_final_result(text, raw)
+                elif stream_id == self._stream_id:
+                    # 中间结果完成：记录其快照对应的有声计数，供整句复用时比对。
+                    self._last_partial_voiced_seq = self._partial_pending_voiced_seq
+                    if text != self._last_partial_text:
+                        self._last_partial_text = text
+                        self._emit_result(text, is_final=False, raw=raw)
+        else:
+            with self._lock:
+                if is_final or stream_id == self._stream_id:
+                    # 空结果/失败：作废"可复用"资格，避免用上更早的旧文本。
+                    self._last_partial_voiced_seq = -1
 
         with self._lock:
             self._try_start_transcribe_locked()
@@ -187,6 +227,11 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             return
 
         stream_id = self._stream_id
+        # 临时：本地 ASR 触发时输出一行日志
+        print(
+            f"[本地ASR] 触发识别（{'最终' if is_final else '中间'}）: "
+            f"音频时长 {audio.size / LOCAL_VAD_SAMPLE_RATE:.2f}s"
+        )
         self._active_transcribe_future = self._asr_executor.submit(self._transcribe, audio, is_final=is_final)
         self._active_transcribe_future.add_done_callback(
             lambda done_future, _sid=stream_id, _fin=is_final: self._on_transcription_done(
@@ -204,12 +249,14 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             if self._asr_executor is None:
                 self._asr_executor = ThreadPoolExecutor(
                     max_workers=1,
-                    thread_name_prefix="yakutan-local-asr",
+                    thread_name_prefix="yakutan-local-inference",
                 )
             if is_final:
                 self._waiting_final_audio = copy
             else:
                 self._waiting_partial_audio = copy
+                # 记录这份快照入队时的有声计数（完成时回写到 _last_partial_voiced_seq）。
+                self._partial_pending_voiced_seq = self._voiced_chunk_seq
             self._try_start_transcribe_locked()
 
     def _maybe_emit_partial(self) -> None:
@@ -217,26 +264,102 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             return
         if self._audio_queue.qsize() >= 8:
             return
-        peek = self._vad.peek_buffer()
+        vad = self._vad
+        silence_sec = vad.current_silence_duration
+        if silence_sec <= 0.0:
+            # 正在说话（无停顿）：确保下一次停顿可以触发；继续走保底判定。
+            self._silence_trigger_armed = True
+        peek = vad.peek_buffer()
         if peek is None:
             return
         audio, duration = peek
-        if duration < 1.5:
+        if duration < 1.0:
             return
         now = time.monotonic()
-        if now - self._last_partial_time < float(getattr(config, "LOCAL_INTERIM_INTERVAL", 2.0)):
+        elapsed = now - self._last_partial_time
+        min_interval = max(0.0, float(
+            getattr(config, "LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL", 3.0),
+        ))
+        fallback_interval = max(min_interval, float(
+            getattr(config, "LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL", 4.0),
+        ))
+        trigger_silence = max(
+            0.0, float(getattr(config, "LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS", 10)),
+        ) / 1000.0
+
+        # 短停顿触发：说话中出现达到阈值的短静音视为一个分句（逗号位置），
+        # 同一次停顿只触发一次（重新开口后才会再次武装）。
+        silence_triggered = (
+            trigger_silence > 0.0
+            and self._silence_trigger_armed
+            and silence_sec >= trigger_silence
+        )
+        # 保底：连续很久没有任何增量更新时强制刷新一次（含完全无停顿的连续说话）。
+        fallback_triggered = elapsed >= fallback_interval
+        if not silence_triggered and not fallback_triggered:
             return
-        self._last_partial_time = time.monotonic()
+        # 限流：短停顿触发至少间隔 min_interval 一次。
+        if silence_triggered and elapsed < min_interval:
+            return
+        if silence_triggered:
+            self._silence_trigger_armed = False
+        self._last_partial_time = now
         self._enqueue_transcribe(audio, is_final=False)
+
+    def _try_reuse_partial_as_final(self, segment: np.ndarray) -> str | None:
+        """整句收束时，若最近一次已完成的中间结果之后没有任何新的有声内容
+        （缓冲只是又追加了静音），该中间结果已覆盖整句，直接复用它作为
+        最终结果，省掉一次重复的整句识别。"""
+        if not getattr(config, "LOCAL_INCREMENTAL_ASR", True):
+            return None
+        if self._voiced_chunk_seq != self._last_partial_voiced_seq:
+            return None
+        text = (self._last_partial_text or "").strip()
+        if not text:
+            return None
+        # print("[本地ASR] 终句复用中间结果（未出现新的有声内容，省一次识别）")
+        return text
+
+    def _emit_final_result(self, text: str, raw: dict | None) -> None:
+        # 调用方需持有 self._lock
+        self._last_partial_text = ""
+        self._last_partial_voiced_seq = -1
+        self._stream_id += 1
+        self._reset_engine_draft()
+        self._emit_result(text, is_final=True, raw=raw)
+
+    def _reset_engine_draft(self) -> None:
+        """整句翻篇：让引擎丢掉上一句的推测解码草稿，别拿它去猜下一句。"""
+        engine = self._engine
+        if engine is not None and hasattr(engine, "reset_draft"):
+            try:
+                engine.reset_draft()
+            except Exception:  # pragma: no cover - 草稿只影响速度，失败不该打断识别
+                logger.debug("reset_draft failed", exc_info=True)
 
     def _process_chunk(self, chunk: np.ndarray) -> None:
         if self._vad._is_speaking and self._vad._speech_samples >= self._input_cap_samples():
             chunk = np.zeros_like(chunk)
+        was_speaking = self._vad._is_speaking
         speech_segment = self._vad.process_chunk(chunk)
+        if self._vad._is_speaking and self._vad._silence_counter == 0:
+            # 本分块是有声内容：此后缓冲与任何既有中间结果快照不再等价。
+            self._voiced_chunk_seq += 1
         if speech_segment is not None:
-            self._enqueue_transcribe(speech_segment, is_final=True)
+            # 整句提交（断句）：下一句的保底计时与短停顿触发从此处重新计。
+            self._last_partial_time = time.monotonic()
+            self._silence_trigger_armed = True
+            reused = self._try_reuse_partial_as_final(speech_segment)
+            if reused is not None:
+                self._emit_final_result(reused, None)
+            else:
+                self._enqueue_transcribe(speech_segment, is_final=True)
             return
         if self._vad._is_speaking:
+            if not was_speaking:
+                # 新段刚进入说话状态：保底计时从"开口时刻"重新锚定，
+                # 否则开口前的长静音（> 保底间隔）会让开口瞬间被误判为"连续说话很久未更新"而立即触发。
+                self._last_partial_time = time.monotonic()
             self._maybe_emit_partial()
 
     def _feed_samples(self, samples: np.ndarray) -> None:
@@ -273,9 +396,15 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             self._pending_samples = np.array([], dtype=np.float32)
         segment = self._vad.force_flush() if self._vad._is_speaking else self._vad.flush()
         if segment is not None:
-            self._enqueue_transcribe(segment, is_final=True)
+            reused = self._try_reuse_partial_as_final(segment)
+            if reused is not None:
+                self._emit_final_result(reused, None)
+            else:
+                self._enqueue_transcribe(segment, is_final=True)
         self._last_partial_text = ""
-        self._last_partial_time = 0.0
+        # 新句子从此刻重新计时：保底间隔从新句子开始计而不是从进程启动计。
+        self._last_partial_time = time.monotonic()
+        self._silence_trigger_armed = True
 
     @staticmethod
     def _pcm_to_float32(data: bytes) -> np.ndarray:
@@ -309,14 +438,20 @@ class LocalSpeechRecognizer(SpeechRecognizer):
                 return
             self._running = True
             self._stream_id = 0
+            self._reset_engine_draft()
             self._last_partial_text = ""
+            self._last_partial_time = time.monotonic()
+            self._silence_trigger_armed = True
+            self._voiced_chunk_seq = 0
+            self._last_partial_voiced_seq = -1
+            self._partial_pending_voiced_seq = -1
             self._waiting_partial_audio = None
             self._waiting_final_audio = None
             self._active_transcribe_future = None
             if self._asr_executor is None:
                 self._asr_executor = ThreadPoolExecutor(
                     max_workers=1,
-                    thread_name_prefix="yakutan-local-asr",
+                    thread_name_prefix="yakutan-local-inference",
                 )
             self._worker = threading.Thread(target=self._worker_loop, daemon=True)
             self._worker.start()

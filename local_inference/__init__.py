@@ -8,19 +8,23 @@ from typing import Dict, List
 # Allow PyTorch and DirectML/ONNX stacks to coexist in one process.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
-LOCAL_ASR_UI_ENV = "YAKUTAN_LOCAL_ASR_UI"
+LOCAL_INFERENCE_UI_ENV = "YAKUTAN_LOCAL_INFERENCE_UI"
 
-LOCAL_ASR_ENGINES = ("sensevoice", "qwen3-asr")
+LOCAL_INFERENCE_ENGINES = ("sensevoice", "qwen3-asr")
+LOCAL_MT_ENGINES = ("hymt2",)
 
-LOCAL_ASR_DISPLAY_NAMES: Dict[str, str] = {
+LOCAL_INFERENCE_DISPLAY_NAMES: Dict[str, str] = {
     "sensevoice": "SenseVoice Small",
     "qwen3-asr": "Qwen3-ASR 1.7B",
+    "hymt2": "Hy-MT2 1.8B",
 }
 
+# 缺任何一个都算引擎未就绪。只列真正 import 的库：模型下载已改为直接走 HTTP，
+# 不再依赖 huggingface_hub——留着它会让打包版（没人 import 就不会被 PyInstaller 收进去）
+# 误报缺依赖，从而所有本地引擎都显示未就绪。
 COMMON_RUNTIME_MODULES = (
     "numpy",
     "onnxruntime",
-    "huggingface_hub",
     "soundfile",
     "sentencepiece",
 )
@@ -35,30 +39,30 @@ def _env_to_bool(value: str) -> bool:
     return value.strip().lower() not in {"", "0", "false", "no", "off"}
 
 
-def _frozen_local_asr_marker_present() -> bool:
+def _frozen_local_inference_marker_present() -> bool:
     if not getattr(sys, "frozen", False) or not hasattr(sys, "_MEIPASS"):
         return False
-    marker = os.path.join(sys._MEIPASS, "YAKUTAN_LOCAL_ASR_BUILD")
+    marker = os.path.join(sys._MEIPASS, "YAKUTAN_LOCAL_INFERENCE_BUILD")
     return os.path.isfile(marker)
 
 
-def is_local_asr_build_enabled() -> bool:
-    raw = os.getenv(LOCAL_ASR_UI_ENV)
+def is_local_inference_build_enabled() -> bool:
+    raw = os.getenv(LOCAL_INFERENCE_UI_ENV)
     if raw is not None:
         return _env_to_bool(raw)
     if getattr(sys, "frozen", False):
-        if _frozen_local_asr_marker_present():
+        if _frozen_local_inference_marker_present():
             return True
         try:
-            return importlib.util.find_spec("local_asr") is not None
+            return importlib.util.find_spec("local_inference") is not None
         except Exception:
             return False
     return True
 
 
-def is_local_asr_ui_enabled() -> bool:
-    """与构建开关一致：Local ASR 构建始终展示面板；引擎级问题见 engines[].runtime_issues。"""
-    return is_local_asr_build_enabled()
+def is_local_inference_ui_enabled() -> bool:
+    """与构建开关一致：Local Inference 构建始终展示面板；引擎级问题见 engines[].runtime_issues。"""
+    return is_local_inference_build_enabled()
 
 
 def _missing_modules(modules: tuple[str, ...]) -> List[str]:
@@ -83,17 +87,26 @@ def is_engine_runtime_available(engine: str) -> bool:
     return not get_engine_runtime_issues(engine)
 
 
-def get_local_asr_features() -> dict:
+def get_local_inference_features() -> dict:
+    # 显存占用是模型的固有属性，不是用户设置，所以走 features 而不是 config：
+    # 面板的设置会存进 localStorage 再回灌，未知字段在那一趟里会丢掉。
+    import config as _config
+
+    vram = getattr(_config, "QWEN3_ASR_VRAM_MB", {}) or {}
     return {
-        "local_asr_build_enabled": is_local_asr_build_enabled(),
-        "local_asr_ui_enabled": is_local_asr_ui_enabled(),
+        "local_inference_build_enabled": is_local_inference_build_enabled(),
+        "local_inference_ui_enabled": is_local_inference_ui_enabled(),
+        "qwen3_vram_mb": {
+            "decoder": int(vram.get("decoder", 0)),
+            "encoder": int(vram.get("encoder", 0)),
+        },
         "engines": {
             engine: {
-                "display_name": LOCAL_ASR_DISPLAY_NAMES.get(engine, engine),
+                "display_name": LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine),
                 "runtime_available": is_engine_runtime_available(engine),
                 "runtime_issues": get_engine_runtime_issues(engine),
             }
-            for engine in LOCAL_ASR_ENGINES
+            for engine in LOCAL_INFERENCE_ENGINES
         },
     }
 

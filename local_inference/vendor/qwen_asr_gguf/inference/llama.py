@@ -16,8 +16,13 @@ from . import logger
 # =========================================================================
 # Configuration
 # =========================================================================
-# QUIET_LOGS = True 时，不打印任何日志。但现在我们路由到 logger。
-QUIET_LOGS = True
+# llama.cpp 日志路由到 logger（见 python_log_callback）。
+# QUIET_LOGS = True 时会安装一个空回调，吞掉**所有** llama.cpp 输出——包括
+# "Vulkan 不可用，回退 CPU"这类关键警告，导致 GPU 静默失效时完全无从排查。
+# 因此默认 False；python_log_callback 按真实级别（2=INFO、3=WARN、4=ERROR）
+# 路由日志，并跳过 kv 元数据 dump 与进度点，避免刷屏；回退类 INFO 行升为 WARN，
+# 保证默认 LOG_LEVEL=ERROR 时"静默掉回 CPU"仍可见。
+QUIET_LOGS = False
 _log_callback_ref = None
 
 # =========================================================================
@@ -28,17 +33,45 @@ llama_token = ctypes.c_int32
 llama_pos = ctypes.c_int32
 llama_seq_id = ctypes.c_int32
 
-class llama_model_params(ctypes.Structure):
-    _fields_ = [
-        ("devices", ctypes.POINTER(ctypes.c_void_p)),
-        ("tensor_buft_overrides", ctypes.POINTER(ctypes.c_void_p)),
-        ("n_gpu_layers", ctypes.c_int32),
-        ("split_mode", ctypes.c_int32),
-        ("main_gpu", ctypes.c_int32),
-        ("tensor_split", ctypes.POINTER(ctypes.c_float)),
-        ("progress_callback", ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_float, ctypes.c_void_p)),
-        ("progress_callback_user_data", ctypes.c_void_p),
-        ("kv_overrides", ctypes.POINTER(ctypes.c_void_p)),
+# llama_split_mode
+LLAMA_SPLIT_MODE_NONE = 0   # 只用 main_gpu
+LLAMA_SPLIT_MODE_LAYER = 1  # 按层切分到多张 GPU（llama.cpp 默认）
+LLAMA_SPLIT_MODE_ROW = 2
+
+
+# The desktop Vulkan bundle and the Linux CUDA build deployed on gpu4038 come
+# from different llama.cpp ABI revisions. Keep the bundled desktop ABI as the
+# default and opt in to the server build's current structs from the service.
+_ABI_PROFILE = os.getenv("YAKUTAN_LLAMA_ABI_PROFILE", "").strip().lower()
+_CUDA_2026_ABI = _ABI_PROFILE == "cuda-2026-08"
+
+
+_model_params_fields = [
+    ("devices", ctypes.POINTER(ctypes.c_void_p)),
+    ("tensor_buft_overrides", ctypes.POINTER(ctypes.c_void_p)),
+    ("n_gpu_layers", ctypes.c_int32),
+    ("split_mode", ctypes.c_int32),
+]
+if _CUDA_2026_ABI:
+    _model_params_fields.append(("load_mode", ctypes.c_int32))
+_model_params_fields.extend([
+    ("main_gpu", ctypes.c_int32),
+    ("tensor_split", ctypes.POINTER(ctypes.c_float)),
+    ("progress_callback", ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_float, ctypes.c_void_p)),
+    ("progress_callback_user_data", ctypes.c_void_p),
+    ("kv_overrides", ctypes.POINTER(ctypes.c_void_p)),
+])
+if _CUDA_2026_ABI:
+    _model_params_fields.extend([
+        ("vocab_only", ctypes.c_bool),
+        ("check_tensors", ctypes.c_bool),
+        ("use_extra_bufts", ctypes.c_bool),
+        ("no_host", ctypes.c_bool),
+        ("no_alloc", ctypes.c_bool),
+        ("load_mtp", ctypes.c_bool),
+    ])
+else:
+    _model_params_fields.extend([
         ("vocab_only", ctypes.c_bool),
         ("use_mmap", ctypes.c_bool),
         ("use_direct_io", ctypes.c_bool),
@@ -47,43 +80,64 @@ class llama_model_params(ctypes.Structure):
         ("use_extra_bufts", ctypes.c_bool),
         ("no_host", ctypes.c_bool),
         ("no_alloc", ctypes.c_bool),
-    ]
+    ])
+
+
+class llama_model_params(ctypes.Structure):
+    _fields_ = _model_params_fields
+
+
+_context_params_fields = [
+    ("n_ctx", ctypes.c_uint32),
+    ("n_batch", ctypes.c_uint32),
+    ("n_ubatch", ctypes.c_uint32),
+    ("n_seq_max", ctypes.c_uint32),
+]
+if _CUDA_2026_ABI:
+    _context_params_fields.extend([
+        ("n_rs_seq", ctypes.c_uint32),
+        ("n_outputs_max", ctypes.c_uint32),
+        ("n_outputs_max_per_seq", ctypes.c_uint32),
+    ])
+_context_params_fields.extend([
+    ("n_threads", ctypes.c_int32),
+    ("n_threads_batch", ctypes.c_int32),
+])
+if _CUDA_2026_ABI:
+    _context_params_fields.append(("ctx_type", ctypes.c_int32))
+_context_params_fields.extend([
+    ("rope_scaling_type", ctypes.c_int32),
+    ("pooling_type", ctypes.c_int32),
+    ("attention_type", ctypes.c_int32),
+    ("flash_attn_type", ctypes.c_int32),
+    ("rope_freq_base", ctypes.c_float),
+    ("rope_freq_scale", ctypes.c_float),
+    ("yarn_ext_factor", ctypes.c_float),
+    ("yarn_attn_factor", ctypes.c_float),
+    ("yarn_beta_fast", ctypes.c_float),
+    ("yarn_beta_slow", ctypes.c_float),
+    ("yarn_orig_ctx", ctypes.c_uint32),
+    ("defrag_thold", ctypes.c_float),
+    ("cb_eval", ctypes.c_void_p),
+    ("cb_eval_user_data", ctypes.c_void_p),
+    ("type_k", ctypes.c_int32),
+    ("type_v", ctypes.c_int32),
+    ("abort_callback", ctypes.c_void_p),
+    ("abort_callback_data", ctypes.c_void_p),
+    ("embeddings", ctypes.c_bool),
+    ("offload_kqv", ctypes.c_bool),
+    ("no_perf", ctypes.c_bool),
+    ("op_offload", ctypes.c_bool),
+    ("swa_full", ctypes.c_bool),
+    ("kv_unified", ctypes.c_bool),
+    ("samplers", ctypes.POINTER(ctypes.c_void_p)),
+    ("n_samplers", ctypes.c_size_t),
+])
+if _CUDA_2026_ABI:
+    _context_params_fields.append(("ctx_other", ctypes.c_void_p))
 
 class llama_context_params(ctypes.Structure):
-    _fields_ = [
-        ("n_ctx", ctypes.c_uint32),
-        ("n_batch", ctypes.c_uint32),
-        ("n_ubatch", ctypes.c_uint32),
-        ("n_seq_max", ctypes.c_uint32),
-        ("n_threads", ctypes.c_int32),
-        ("n_threads_batch", ctypes.c_int32),
-        ("rope_scaling_type", ctypes.c_int32),
-        ("pooling_type", ctypes.c_int32),
-        ("attention_type", ctypes.c_int32),
-        ("flash_attn_type", ctypes.c_int32),
-        ("rope_freq_base", ctypes.c_float),
-        ("rope_freq_scale", ctypes.c_float),
-        ("yarn_ext_factor", ctypes.c_float),
-        ("yarn_attn_factor", ctypes.c_float),
-        ("yarn_beta_fast", ctypes.c_float),
-        ("yarn_beta_slow", ctypes.c_float),
-        ("yarn_orig_ctx", ctypes.c_uint32),
-        ("defrag_thold", ctypes.c_float),
-        ("cb_eval", ctypes.c_void_p),
-        ("cb_eval_user_data", ctypes.c_void_p),
-        ("type_k", ctypes.c_int32),
-        ("type_v", ctypes.c_int32),
-        ("abort_callback", ctypes.c_void_p),
-        ("abort_callback_data", ctypes.c_void_p),
-        ("embeddings", ctypes.c_bool),
-        ("offload_kqv", ctypes.c_bool),
-        ("no_perf", ctypes.c_bool),
-        ("op_offload", ctypes.c_bool),
-        ("swa_full", ctypes.c_bool),
-        ("kv_unified", ctypes.c_bool),
-        ("samplers", ctypes.POINTER(ctypes.c_void_p)),
-        ("n_samplers", ctypes.c_size_t),
-    ]
+    _fields_ = _context_params_fields
 
 class llama_sampler_chain_params(ctypes.Structure):
     _fields_ = [
@@ -405,13 +459,15 @@ def init_llama_lib():
     llama_sampler_accept.restype = None
 
 
-def load_model(model_path: str):
+def load_model(model_path: str, n_gpu_layers: int = 99, main_gpu: int = 0):
     """
     加载 GGUF 模型（自动处理初始化和路径编码）
-    
+
     Args:
         model_path: GGUF 模型文件路径
-        
+        n_gpu_layers: 卸载到 GPU 的层数，默认为 99（全部卸载），0 为纯 CPU
+        main_gpu: 使用第几张 GPU（与 ggml 的 GPU 设备枚举同序）
+
     Returns:
         model: llama_model 指针
     """
@@ -430,6 +486,15 @@ def load_model(model_path: str):
     # 初始化 backend，载入模型
     init_llama_lib()
     model_params = llama_model_default_params()
+    model_params.n_gpu_layers = 99 if n_gpu_layers == -1 else n_gpu_layers
+    # 默认 split_mode 是 LAYER（devices=NULL 时把层切分到所有可见 GPU）。核显+独显
+    # 的机器上这会把一部分层放到核显，比只用独显更慢，因此这里固定只用一张卡。
+    model_params.split_mode = LLAMA_SPLIT_MODE_NONE
+    model_params.main_gpu = max(0, int(main_gpu))
+    logger.info(
+        f"Loading model with n_gpu_layers={model_params.n_gpu_layers}, "
+        f"split_mode=NONE, main_gpu={model_params.main_gpu}"
+    )
     model = llama_model_load_from_file(
         model_rel.as_posix().encode('utf-8'),
         model_params
@@ -468,8 +533,8 @@ def create_context(model, n_ctx=2048, n_batch=2048, n_ubatch=512, n_seq_max=1,
 
 class LlamaModel:
     """模型的面向对象封装"""
-    def __init__(self, path, n_gpu_layers=-1):
-        self.ptr = load_model(path)
+    def __init__(self, path, n_gpu_layers=99, main_gpu=0):
+        self.ptr = load_model(path, n_gpu_layers=n_gpu_layers, main_gpu=main_gpu)
         if not self.ptr:
             raise RuntimeError(f"Failed to load llama model: {path}")
             
@@ -813,28 +878,64 @@ class ASRStreamDecoder:
         return remaining
 
 
+# 设备/后端落点相关的关键行（用于确认权重到底加载到了哪张卡；
+# 如 "using device Vulkan0 (...)"、"offloaded 29/29 layers to GPU"、
+# "cannot be used with preferred buffer type ... using CPU instead"、
+# "Vulkan ... not available" 等回退警告）。
+_BACKEND_HINTS = (
+    "using device",
+    "offloaded",
+    "offloading ",
+    "preferred buffer",
+    "vulkan",
+    "cuda",
+    "no gpu",
+    "no vulkan",
+)
+
+
+# level 2（INFO）行中，以下措辞意味着"回退/失败"——升级为 WARN，
+# 保证即使默认 LOG_LEVEL=ERROR 时，"静默掉回 CPU"这类情况也能在终端看到。
+_FALLBACK_HINTS = (
+    "unable to",
+    "cannot",
+    "failed",
+    "error",
+    "no gpu",
+    "no vulkan",
+    "using cpu instead",
+    "fallback",
+)
+
+
 def python_log_callback(level, message, user_data):
     """
-    llama.cpp 日志回调函数
-    level: 
-        2 = ERROR
-        3 = WARN
-        4 = INFO
-        5 = DEBUG
+    llama.cpp 日志回调函数。
+
+    本 build 实测的级别映射：0=VERBOSE、1=DEBUG（逐层分配）、
+    2=INFO（后端加载 / 设备选择 / offload / 缓冲区大小，kv dump 也在此级）、
+    3=WARN、4=ERROR、5≈FATAL（进度点等杂讯）。
+    注意：level 2 的行是**正常提示信息**（加载到哪张卡、占多少显存），不是错误。
     """
     if not message: return
     try:
         msg_str = message.decode('utf-8', errors='replace').strip()
         if not msg_str or msg_str in ['.', '\n']: return
-        
-        if level == 2:
+        low = msg_str.lower()
+
+        # 跳过 DEBUG/VERBOSE；INFO 级只保留设备/后端落点与回退相关行
+        # （跳过 kv 元数据 dump 等，避免刷屏）。
+        if level < 2:
+            return
+        if level == 2 and not any(hint in low for hint in _BACKEND_HINTS):
+            return
+
+        if level >= 4:
             logger.error(f"[llama.cpp] {msg_str}")
         elif level == 3:
             logger.warning(f"[llama.cpp] {msg_str}")
-        elif level == 4:
-            logger.info(f"[llama.cpp] {msg_str}")
-        elif level >= 5:
-            logger.debug(f"[llama.cpp] {msg_str}")
+        elif any(w in low for w in _FALLBACK_HINTS):
+            logger.warning(f"[llama.cpp] {msg_str}")
         else:
             logger.info(f"[llama.cpp] {msg_str}")
     except Exception as e:

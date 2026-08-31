@@ -29,9 +29,9 @@ if _pykakasi_spec is not None and getattr(_pykakasi_spec, 'submodule_search_loca
     datas += collect_data_files('pykakasi')
 
 # CI prefetch before PyInstaller: include Silero VAD ONNX in the standard single-file build.
-_silero_vad = Path('local_asr/models/silero_vad')
+_silero_vad = Path('local_inference/models/silero_vad')
 if _silero_vad.is_dir():
-    datas += [(str(_silero_vad), 'local_asr/models/silero_vad')]
+    datas += [(str(_silero_vad), 'local_inference/models/silero_vad')]
 
 # 需要包含的隐藏导入
 hiddenimports = [
@@ -71,7 +71,7 @@ hiddenimports += collect_submodules('webview.platforms')
 # streaming_translation 翻译库
 hiddenimports += collect_submodules('streaming_translation')
 # 本地 VAD 发送门控（Silero ONNX）& model_manager
-hiddenimports += collect_submodules('local_asr')
+hiddenimports += collect_submodules('local_inference')
 
 a = Analysis(
     ['run_ui.py'],  # Web UI入口文件

@@ -91,6 +91,9 @@ class ASREngineConfig:
     pad_to: Optional[int] = None # Encoder 填充时长
     vulkan_enable: bool = True
     vulkan_force_fp32: bool = False
+    # GGUF 解码器的运行位置：0 层 = 纯 CPU；main_gpu 与 ggml 的 GPU 枚举同序
+    n_gpu_layers: int = 99
+    main_gpu: int = 0
 
     def __post_init__(self):
         # 如果没有显式设置 Encoder 填充时长，则默认与 LLM 分段识别时长对齐

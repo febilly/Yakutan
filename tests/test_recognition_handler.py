@@ -135,6 +135,48 @@ class TestShouldTriggerPartialTranslation:
         assert result is False
 
 
+class TestForcedPartialTranslation:
+    @patch("recognition_handler.config")
+    def test_default_event_without_punctuation_does_not_trigger(self, mock_config):
+        mock_config.ENABLE_TRANSLATION = True
+        mock_config.TRANSLATE_PARTIAL_RESULTS = True
+        mock_config.SHOW_PARTIAL_RESULTS = False
+        mock_config.MIN_PARTIAL_TRANSLATION_CHARS = 2
+
+        callback = VRChatRecognitionCallback(_make_mock_state())
+        callback.loop = MagicMock()
+        callback._schedule_partial_output_with_debounce = MagicMock()
+        callback._schedule_partial_translation_with_debounce = MagicMock()
+
+        callback.on_result(RecognitionEvent(text="hello", is_final=False, raw={}))
+
+        callback._schedule_partial_translation_with_debounce.assert_not_called()
+
+    @patch("recognition_handler.config")
+    def test_forced_event_triggers_full_text_without_punctuation(self, mock_config):
+        mock_config.ENABLE_TRANSLATION = True
+        mock_config.TRANSLATE_PARTIAL_RESULTS = True
+        mock_config.SHOW_PARTIAL_RESULTS = False
+        mock_config.MIN_PARTIAL_TRANSLATION_CHARS = 2
+
+        callback = VRChatRecognitionCallback(_make_mock_state())
+        callback.loop = MagicMock()
+        callback._schedule_partial_output_with_debounce = MagicMock()
+        callback._schedule_partial_translation_with_debounce = MagicMock()
+
+        callback.on_result(
+            RecognitionEvent(
+                text="a",
+                is_final=False,
+                raw={},
+                force_partial_translation=True,
+            )
+        )
+
+        assert callback.pending_partial_segment == "a"
+        assert callback._schedule_partial_translation_with_debounce.call_args.args[0] == "a"
+
+
 class TestHasErrorText:
     def test_has_error(self):
         assert VRChatRecognitionCallback._has_error_text("[ERROR] something") is True
@@ -592,6 +634,97 @@ class TestASRNotBlockedByTranslation:
             typing_coro,
             callback.loop,
         )
+
+
+class TestPartialOutputDebounce:
+    """中间结果（终端打印 + OSC 发送）消抖：新更新重置计时，窗口内静默才输出。"""
+
+    def _make_callback(self, mock_config):
+        mock_config.ENABLE_TRANSLATION = False
+        mock_config.SHOW_PARTIAL_RESULTS = True
+        mock_config.ENABLE_REVERSE_TRANSLATION = False
+        mock_config.PARTIAL_DEBOUNCE_MS = 30
+        state = _make_mock_state()
+        state.update_subtitles = MagicMock()
+        callback = VRChatRecognitionCallback(state)
+        loop = asyncio.new_event_loop()
+        callback.loop = loop
+        return callback, loop
+
+    def _run_loop(self, loop):
+        thread = threading.Thread(target=loop.run_forever, daemon=True)
+        thread.start()
+        return thread
+
+    def _stop_loop(self, loop, thread):
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=2)
+
+    def test_rapid_partials_coalesce_to_latest(self):
+        """连续快速中间结果只输出最后一次（打印 + OSC 各一次）。"""
+        with patch("recognition_handler.config") as mock_config, \
+             patch("recognition_handler.osc_manager") as mock_osc:
+            mock_osc.send_text = AsyncMock()
+            callback, loop = self._make_callback(mock_config)
+            thread = self._run_loop(loop)
+            try:
+                for chunk in ["你", "你好", "你好世", "你好世界"]:
+                    callback.on_result(
+                        RecognitionEvent(text=chunk, is_final=False, raw={})
+                    )
+                time.sleep(0.2)
+                # 消抖窗口过后，只应发送一次，且为最新的文本
+                mock_osc.send_text.assert_awaited_once()
+                args, kwargs = mock_osc.send_text.await_args
+                assert args[0] == "你好世界"
+                assert kwargs.get("ongoing", args[1] if len(args) > 1 else None) is True
+            finally:
+                self._stop_loop(loop, thread)
+                loop.close()
+
+    def test_single_partial_emitted_after_window(self):
+        """单个中间结果在消抖窗口后正常输出。"""
+        with patch("recognition_handler.config") as mock_config, \
+             patch("recognition_handler.osc_manager") as mock_osc:
+            mock_osc.send_text = AsyncMock()
+            callback, loop = self._make_callback(mock_config)
+            thread = self._run_loop(loop)
+            try:
+                # 窗口内不应发送
+                callback.on_result(
+                    RecognitionEvent(text="你好世界", is_final=False, raw={})
+                )
+                assert mock_osc.send_text.await_count == 0
+                time.sleep(0.2)
+                mock_osc.send_text.assert_awaited_once()
+            finally:
+                self._stop_loop(loop, thread)
+                loop.close()
+
+    def test_final_cancels_pending_partial_output(self):
+        """终句到达后，未触发的中间结果消抖被取消，不再输出。"""
+        with patch("recognition_handler.config") as mock_config, \
+             patch("recognition_handler.osc_manager") as mock_osc:
+            mock_osc.send_text = AsyncMock()
+            callback, loop = self._make_callback(mock_config)
+            thread = self._run_loop(loop)
+            try:
+                callback.on_result(
+                    RecognitionEvent(text="中间句", is_final=False, raw={})
+                )
+                callback.on_result(
+                    RecognitionEvent(text="最终句。", is_final=True, raw={})
+                )
+                time.sleep(0.2)
+                # 中间结果不应被发送；只有终句被发送
+                sent_texts = [
+                    c.args[0] for c in mock_osc.send_text.await_args_list
+                ]
+                assert "中间句" not in sent_texts
+                assert "最终句。" in sent_texts
+            finally:
+                self._stop_loop(loop, thread)
+                loop.close()
 
 
 class TestExecutorDispatchPath:

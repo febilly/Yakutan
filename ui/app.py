@@ -30,43 +30,61 @@ from vrcx_context_bridge import (
     store_payload as store_vrcx_context_payload,
 )
 try:
-    from local_asr import (
-        LOCAL_ASR_DISPLAY_NAMES,
-        LOCAL_ASR_ENGINES,
-        get_local_asr_features,
-        is_local_asr_build_enabled,
-        is_local_asr_ui_enabled,
+    from local_inference import (
+        LOCAL_INFERENCE_DISPLAY_NAMES,
+        LOCAL_INFERENCE_ENGINES,
+        LOCAL_MT_ENGINES,
+        get_local_inference_features,
+        is_local_inference_build_enabled,
+        is_local_inference_ui_enabled,
     )
-    from local_asr.model_manager import download_asr as download_local_asr_model
-    from local_asr.model_manager import download_silero, get_engine_status, is_silero_cached
+    from local_inference.model_manager import download_asr as download_local_inference_model
+    from local_inference.model_manager import (
+        download_hymt2,
+        download_silero,
+        get_all_local_models_status,
+        get_engine_status,
+        get_hymt2_status,
+        is_silero_cached,
+    )
 except ImportError:  # pragma: no cover
-    LOCAL_ASR_ENGINES = ()
-    LOCAL_ASR_DISPLAY_NAMES = {}
+    LOCAL_INFERENCE_ENGINES = ()
+    LOCAL_MT_ENGINES = ()
+    LOCAL_INFERENCE_DISPLAY_NAMES = {}
 
-    def get_local_asr_features():
+    def get_local_inference_features():
         return {
-            'local_asr_build_enabled': False,
-            'local_asr_ui_enabled': False,
+            'local_inference_build_enabled': False,
+            'local_inference_ui_enabled': False,
             'engines': {},
         }
 
-    def is_local_asr_build_enabled():
+    def is_local_inference_build_enabled():
         return False
 
-    def is_local_asr_ui_enabled():
+    def is_local_inference_ui_enabled():
         return False
 
-    def download_silero():
-        raise RuntimeError('Local ASR unavailable')
+    def download_silero(*args, **kwargs):
+        raise RuntimeError('Local inference runtime unavailable')
 
     def is_silero_cached():
         return False
 
-    def download_local_asr_model(*args, **kwargs):
-        raise RuntimeError('Local ASR unavailable')
+    def download_local_inference_model(*args, **kwargs):
+        raise RuntimeError('Local inference runtime unavailable')
+
+    def download_hymt2(*args, **kwargs):
+        raise RuntimeError('Local inference runtime unavailable')
 
     def get_engine_status(*args, **kwargs):
-        raise RuntimeError('Local ASR unavailable')
+        raise RuntimeError('Local inference runtime unavailable')
+
+    def get_hymt2_status(*args, **kwargs):
+        raise RuntimeError('Local inference runtime unavailable')
+
+    def get_all_local_models_status(*args, **kwargs):
+        raise RuntimeError('Local inference runtime unavailable')
 from resource_path import get_resource_path
 
 # 配置Flask使用正确的模板和静态文件路径
@@ -113,13 +131,18 @@ service_status_lock = threading.Lock()
 service_thread: Optional[threading.Thread] = None
 service_loop: Optional[asyncio.AbstractEventLoop] = None
 stop_event: Optional[asyncio.Event] = None
-local_asr_download_state = {
+local_inference_download_state = {
     'running': False,
     'engine': None,
     'status': '',
     'error': None,
+    # 进度：stage 是当前正在下载/解压的文件，percent 在拿不到总长度时为 None（前端画不确定态）
+    'stage': None,
+    'downloaded_bytes': 0,
+    'total_bytes': None,
+    'percent': None,
 }
-local_asr_download_lock = threading.Lock()
+local_inference_download_lock = threading.Lock()
 
 
 def _snapshot_service_status() -> dict:
@@ -196,14 +219,32 @@ def _restore_runtime_config(snapshot: dict) -> None:
 
 
 def _get_feature_flags() -> dict:
-    return get_local_asr_features()
+    return get_local_inference_features()
 
 
-def _local_asr_config_dict() -> dict:
+def _local_inference_config_dict() -> dict:
     return {
-        'engine': getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice'),
+        'engine': getattr(config, 'LOCAL_INFERENCE_ENGINE', 'sensevoice'),
+        'backend': config.sanitize_local_inference_backend(
+            getattr(config, 'LOCAL_INFERENCE_BACKEND', 'local')
+        ),
+        'server_url': getattr(config, 'LOCAL_INFERENCE_SERVER_URL', ''),
+        'device': config.sanitize_local_device(getattr(config, 'LOCAL_INFERENCE_DEVICE', 'auto')),
+        'encoder_device': config.sanitize_qwen_encoder_device(
+            getattr(config, 'LOCAL_QWEN_ENCODER_DEVICE', 'auto')
+        ),
+        # 注：两个模型各自的显存占用走 /api/features（那是模型固有属性，不是设置，
+        # 而设置会经 localStorage 回灌、丢掉未知字段）
         'incremental_asr': getattr(config, 'LOCAL_INCREMENTAL_ASR', True),
-        'interim_interval': getattr(config, 'LOCAL_INTERIM_INTERVAL', 2.0),
+        # 对外接口用秒（内部配置 LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS 为毫秒）
+        'incremental_trigger_silence': int(getattr(
+            config, 'LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS', 10)) / 1000,
+        'incremental_min_interval': getattr(
+            config, 'LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL', 3.0,
+        ),
+        'incremental_fallback_interval': getattr(
+            config, 'LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL', 4.0,
+        ),
     }
 
 
@@ -215,7 +256,7 @@ def _vad_config_dict() -> dict:
         'min_speech_duration': getattr(config, 'LOCAL_VAD_MIN_SPEECH_DURATION', 1.0),
         'max_speech_duration': getattr(config, 'LOCAL_VAD_MAX_SPEECH_DURATION', 30.0),
         'silence_duration': getattr(config, 'LOCAL_VAD_SILENCE_DURATION', 0.8),
-        'pre_speech_duration': getattr(config, 'LOCAL_VAD_PRE_SPEECH_DURATION', 0.2),
+        'pre_speech_duration': getattr(config, 'VAD_PRE_SPEECH_DURATION', 0.5),
     }
 
 
@@ -338,46 +379,89 @@ def _accelerator_window_warning_payload() -> dict:
 
 def _sanitize_preferred_backend(value: Optional[str]) -> str:
     backend = (value or config.PREFERRED_ASR_BACKEND or 'qwen').strip() or 'qwen'
-    if backend == 'local' and not is_local_asr_ui_enabled():
+    if backend == 'local' and not is_local_inference_ui_enabled():
         return 'qwen'
     return backend
 
 
-def _update_local_asr_download_state(**changes) -> None:
-    with local_asr_download_lock:
-        local_asr_download_state.update(changes)
+def _update_local_inference_download_state(**changes) -> None:
+    with local_inference_download_lock:
+        local_inference_download_state.update(changes)
 
 
-def _snapshot_local_asr_download_state() -> dict:
-    with local_asr_download_lock:
-        return dict(local_asr_download_state)
+def _snapshot_local_inference_download_state() -> dict:
+    with local_inference_download_lock:
+        return dict(local_inference_download_state)
 
 
-def _download_local_asr_worker(engine: str) -> None:
-    _update_local_asr_download_state(
-        running=True,
-        engine=engine,
-        status=f'准备下载 {LOCAL_ASR_DISPLAY_NAMES.get(engine, engine)}',
-        error=None,
-    )
-    try:
-        if not is_silero_cached():
-            _update_local_asr_download_state(status='下载 Silero VAD...')
-            download_silero()
-        _update_local_asr_download_state(
-            status=f'下载 {LOCAL_ASR_DISPLAY_NAMES.get(engine, engine)} 模型与运行时...',
+def _begin_local_inference_download(engine: str) -> bool:
+    """占下下载位并把状态置为「进行中」，同一时刻只允许一个下载。
+
+    检查与置位必须在同一把锁里：既避免两个请求同时起下载，也让接口返回时状态已经是
+    running，前端不用等下一次轮询才知道自己点的下载开始了。
+    """
+    with local_inference_download_lock:
+        if local_inference_download_state.get('running'):
+            return False
+        local_inference_download_state.update(
+            running=True,
+            engine=engine,
+            status=f'准备下载 {LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine)}',
+            error=None,
+            stage=None,
+            downloaded_bytes=0,
+            total_bytes=None,
+            percent=None,
         )
-        download_local_asr_model(engine)
-        _update_local_asr_download_state(
+    return True
+
+
+def _report_local_inference_progress(stage: str, done_bytes: int,
+                                     total_bytes: Optional[int]) -> None:
+    """把 model_manager 的下载进度写进面板状态（前端轮询取用）。"""
+    done_mb = done_bytes / (1024 * 1024)
+    if total_bytes:
+        percent = min(100, int(done_bytes * 100 / total_bytes))
+        detail = f'{percent}% ({done_mb:.0f}/{total_bytes / (1024 * 1024):.0f} MB)'
+    else:
+        # 总长度未知（服务端没给 Content-Length）：只报已下载量，前端画不确定进度条
+        percent = None
+        detail = f'{done_mb:.0f} MB' if done_bytes else ''
+    _update_local_inference_download_state(
+        stage=stage,
+        downloaded_bytes=done_bytes,
+        total_bytes=total_bytes,
+        percent=percent,
+        status=f'{stage} {detail}'.strip(),
+    )
+
+
+def _download_local_inference_worker(engine: str) -> None:
+    # HTTP 接口已在 _begin_local_inference_download() 里占位并写好初始状态；
+    # 脚本或测试直接调用本函数时在这里补一次，避免两处各写一份字段清单
+    if not _snapshot_local_inference_download_state().get('running'):
+        _begin_local_inference_download(engine)
+    try:
+        if engine == 'hymt2':
+            download_hymt2(progress_callback=_report_local_inference_progress)
+        else:
+            if not is_silero_cached():
+                download_silero(_report_local_inference_progress)
+            download_local_inference_model(engine, _report_local_inference_progress)
+        _update_local_inference_download_state(
             running=False,
             status='下载完成',
             error=None,
+            stage=None,
+            percent=100,
         )
     except Exception as e:
-        _update_local_asr_download_state(
+        _update_local_inference_download_state(
             running=False,
             status='下载失败',
             error=str(e),
+            stage=None,
+            percent=None,
         )
 
 
@@ -401,6 +485,9 @@ def get_config_dict():
             'secondary_target_language': getattr(config, 'SECONDARY_TARGET_LANGUAGE', None),
             'fallback_language': config.FALLBACK_LANGUAGE,
             'api_type': config.TRANSLATION_API_TYPE,
+            'translate_partial_results': getattr(config, 'TRANSLATE_PARTIAL_RESULTS', True),
+            'llm_streaming': bool(getattr(config, 'LLM_STREAMING_PREF', True)),
+            'hymt2_streaming': bool(getattr(config, 'HYMT2_STREAMING_PREF', True)),
             'llm_template': getattr(
                 config, 'LLM_TEMPLATE', config.DEFAULT_LLM_TEMPLATE
             ),
@@ -424,6 +511,14 @@ def get_config_dict():
             'llm_parallel_fastest_mode': getattr(
                 config, 'LLM_PARALLEL_FASTEST_MODE', 'off'
             ),
+            'hymt2_backend': (
+                'api' if getattr(config, 'LOCAL_INFERENCE_BACKEND', 'local') == 'remote'
+                else 'local'
+            ),
+            'hymt2_local_device': config.sanitize_local_device(
+                getattr(config, 'HYMT2_LOCAL_DEVICE', 'auto')
+            ),
+            'hymt2_websocket_url': getattr(config, 'LOCAL_INFERENCE_SERVER_URL', ''),
             'enable_llm_parallel_fastest': (
                 getattr(config, 'LLM_PARALLEL_FASTEST_MODE', 'off')
                 not in ('off', None, '')
@@ -473,7 +568,7 @@ def get_config_dict():
             'bypass_udp_port_check': bool(getattr(config, 'BYPASS_OSC_UDP_PORT_CHECK', False)),
             'send_error_messages': bool(getattr(config, 'OSC_SEND_ERROR_MESSAGES', False)),
         },
-        'local_asr': _local_asr_config_dict() if is_local_asr_ui_enabled() else None,
+        'local_inference': _local_inference_config_dict() if is_local_inference_ui_enabled() else None,
         'config_applied_at_ms': int(getattr(config, 'CONFIG_APPLIED_AT_MS', 0) or 0),
         'backend_boot_ms': int(getattr(config, 'BACKEND_BOOT_MS', 0) or 0),
     }
@@ -495,8 +590,6 @@ def update_config(config_data):
                 config.ENABLE_VAD = asr['enable_vad']
             if 'vad_threshold' in asr:
                 config.VAD_THRESHOLD = float(asr['vad_threshold'])
-            if 'vad_silence_duration_ms' in asr:
-                config.VAD_SILENCE_DURATION_MS = int(asr['vad_silence_duration_ms'])
             if 'keepalive_interval' in asr:
                 config.KEEPALIVE_INTERVAL = int(asr['keepalive_interval'])
             if 'enable_hot_words' in asr:
@@ -518,9 +611,11 @@ def update_config(config_data):
             if 'max_speech_duration' in vad:
                 config.LOCAL_VAD_MAX_SPEECH_DURATION = float(vad['max_speech_duration'])
             if 'silence_duration' in vad:
-                config.LOCAL_VAD_SILENCE_DURATION = float(vad['silence_duration'])
+                config.LOCAL_VAD_SILENCE_DURATION = config.clamp_vad_silence_duration(
+                    float(vad['silence_duration'])
+                )
             if 'pre_speech_duration' in vad:
-                config.LOCAL_VAD_PRE_SPEECH_DURATION = max(0.0, float(vad['pre_speech_duration']))
+                config.VAD_PRE_SPEECH_DURATION = max(0.0, float(vad['pre_speech_duration']))
 
         # 更新翻译配置
         if 'translation' in config_data:
@@ -537,12 +632,28 @@ def update_config(config_data):
                 config.FALLBACK_LANGUAGE = trans['fallback_language'] if trans['fallback_language'] else None
             if 'api_type' in trans:
                 config.TRANSLATION_API_TYPE = trans['api_type']
-                # 前端的"流式翻译模式"开关会将 api_type 设为 'openrouter_streaming'
-                # 此时启用部分结果翻译（实时翻译未完成的句子）
-                config.TRANSLATE_PARTIAL_RESULTS = trans['api_type'] in (
-                    'openrouter_streaming',
-                    'openrouter_streaming_deepl_hybrid',
+                if 'translate_partial_results' in trans:
+                    config.TRANSLATE_PARTIAL_RESULTS = bool(trans['translate_partial_results'])
+                else:
+                    config.TRANSLATE_PARTIAL_RESULTS = trans['api_type'] in (
+                        'openrouter_streaming',
+                        'openrouter_streaming_deepl_hybrid',
+                        'hymt2',
+                    )
+            elif 'translate_partial_results' in trans:
+                config.TRANSLATE_PARTIAL_RESULTS = bool(trans['translate_partial_results'])
+            if 'llm_streaming' in trans:
+                config.LLM_STREAMING_PREF = bool(trans['llm_streaming'])
+            if 'hymt2_streaming' in trans:
+                config.HYMT2_STREAMING_PREF = bool(trans['hymt2_streaming'])
+            if 'hymt2_backend' in trans:
+                config.HYMT2_BACKEND = (trans['hymt2_backend'] or 'api').strip()
+            if 'hymt2_local_device' in trans:
+                config.HYMT2_LOCAL_DEVICE = config.sanitize_local_device(
+                    trans['hymt2_local_device']
                 )
+            if 'hymt2_websocket_url' in trans:
+                config.HYMT2_WEBSOCKET_URL = (trans['hymt2_websocket_url'] or '').strip()
             if 'llm_template' in trans:
                 config.LLM_TEMPLATE = (
                     trans['llm_template'] or config.DEFAULT_LLM_TEMPLATE
@@ -670,30 +781,63 @@ def update_config(config_data):
                     p = 9000
                 config.OSC_SEND_TARGET_PORT = max(1, min(65535, p))
 
-        if is_local_asr_ui_enabled() and 'local_asr' in config_data and config_data['local_asr']:
-            local_asr = config_data['local_asr']
-            if 'engine' in local_asr:
-                _eng = str(local_asr['engine'] or 'sensevoice')
-                if _eng not in LOCAL_ASR_ENGINES:
+        if is_local_inference_ui_enabled() and (config_data.get('local_inference') or config_data.get('local_asr')):
+            local_inference = config_data.get('local_inference') or config_data.get('local_asr')
+            if 'engine' in local_inference:
+                _eng = str(local_inference['engine'] or 'sensevoice')
+                if _eng not in LOCAL_INFERENCE_ENGINES:
                     _eng = 'sensevoice'
-                config.LOCAL_ASR_ENGINE = _eng
-            if 'vad_mode' in local_asr and 'vad' not in config_data:
-                mode = str(local_asr['vad_mode'] or 'silero')
+                config.LOCAL_INFERENCE_ENGINE = _eng
+            if 'backend' in local_inference:
+                config.LOCAL_INFERENCE_BACKEND = config.sanitize_local_inference_backend(
+                    local_inference['backend']
+                )
+            if 'server_url' in local_inference:
+                config.LOCAL_INFERENCE_SERVER_URL = (
+                    str(local_inference['server_url'] or '').strip()
+                )
+            # Hy-MT2 follows the same execution switch and endpoint. Keep the old
+            # fields synchronized for TranslationConfig and older callers.
+            if config.LOCAL_INFERENCE_BACKEND == 'remote':
+                config.HYMT2_BACKEND = 'api'
+                config.HYMT2_WEBSOCKET_URL = config.LOCAL_INFERENCE_SERVER_URL
+            else:
+                config.HYMT2_BACKEND = 'local'
+            if 'vad_mode' in local_inference and 'vad' not in config_data:
+                mode = str(local_inference['vad_mode'] or 'silero')
                 config.LOCAL_VAD_MODE = mode if mode in ('silero', 'energy') else 'silero'
-            if 'vad_threshold' in local_asr and 'vad' not in config_data:
-                config.LOCAL_VAD_THRESHOLD = float(local_asr['vad_threshold'])
-            if 'min_speech_duration' in local_asr and 'vad' not in config_data:
-                config.LOCAL_VAD_MIN_SPEECH_DURATION = float(local_asr['min_speech_duration'])
-            if 'max_speech_duration' in local_asr and 'vad' not in config_data:
-                config.LOCAL_VAD_MAX_SPEECH_DURATION = float(local_asr['max_speech_duration'])
-            if 'silence_duration' in local_asr and 'vad' not in config_data:
-                config.LOCAL_VAD_SILENCE_DURATION = float(local_asr['silence_duration'])
-            if 'pre_speech_duration' in local_asr and 'vad' not in config_data:
-                config.LOCAL_VAD_PRE_SPEECH_DURATION = max(0.0, float(local_asr['pre_speech_duration']))
-            if 'incremental_asr' in local_asr:
-                config.LOCAL_INCREMENTAL_ASR = bool(local_asr['incremental_asr'])
-            if 'interim_interval' in local_asr:
-                config.LOCAL_INTERIM_INTERVAL = float(local_asr['interim_interval'])
+            if 'vad_threshold' in local_inference and 'vad' not in config_data:
+                config.LOCAL_VAD_THRESHOLD = float(local_inference['vad_threshold'])
+            if 'min_speech_duration' in local_inference and 'vad' not in config_data:
+                config.LOCAL_VAD_MIN_SPEECH_DURATION = float(local_inference['min_speech_duration'])
+            if 'max_speech_duration' in local_inference and 'vad' not in config_data:
+                config.LOCAL_VAD_MAX_SPEECH_DURATION = float(local_inference['max_speech_duration'])
+            if 'silence_duration' in local_inference and 'vad' not in config_data:
+                config.LOCAL_VAD_SILENCE_DURATION = config.clamp_vad_silence_duration(
+                    float(local_inference['silence_duration'])
+                )
+            if 'pre_speech_duration' in local_inference and 'vad' not in config_data:
+                config.VAD_PRE_SPEECH_DURATION = max(0.0, float(local_inference['pre_speech_duration']))
+            if 'device' in local_inference:
+                config.LOCAL_INFERENCE_DEVICE = config.sanitize_local_device(local_inference['device'])
+            if 'encoder_device' in local_inference:
+                config.LOCAL_QWEN_ENCODER_DEVICE = config.sanitize_qwen_encoder_device(
+                    local_inference['encoder_device']
+                )
+            if 'incremental_asr' in local_inference:
+                config.LOCAL_INCREMENTAL_ASR = bool(local_inference['incremental_asr'])
+            if 'incremental_trigger_silence' in local_inference:
+                config.LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = int(round(max(
+                    0.0, float(local_inference['incremental_trigger_silence']),
+                ) * 1000))
+            if 'incremental_min_interval' in local_inference:
+                config.LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = max(
+                    0.0, float(local_inference['incremental_min_interval']),
+                )
+            if 'incremental_fallback_interval' in local_inference:
+                config.LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = max(
+                    0.0, float(local_inference['incremental_fallback_interval']),
+                )
         
         config.bump_config_applied_at_ms()
         return True, 'msg.configUpdated', '配置已更新'
@@ -821,61 +965,131 @@ def receive_vrcx_context():
     return ('', 204)
 
 
-@app.route('/api/local-asr/status', methods=['GET'])
-def get_local_asr_status():
-    """获取本地 ASR 下载/可用状态。"""
-    if not is_local_asr_build_enabled():
-        return jsonify({'success': False, 'message': 'Local ASR is disabled in this build'}), 404
+@app.route('/api/local-models/status', methods=['GET'])
+@app.route('/api/local-inference/status', methods=['GET'])
+def get_local_inference_status():
+    """获取本地 ASR 及翻译模型下载/可用状态。"""
+    if not is_local_inference_build_enabled():
+        return jsonify({'success': False, 'message': 'Local inference is disabled in this build'}), 404
 
-    engines = {}
-    for engine in LOCAL_ASR_ENGINES:
-        try:
-            engines[engine] = get_engine_status(engine)
-        except Exception as e:
-            engines[engine] = {
+    # 先取下载状态再扫模型：反过来的话，如果下载正好在这两步之间完成，这次响应就会把
+    # 「已经不在下载」和扫描时还没落盘的「未就绪」拼在一起，界面要等下一轮才变成已就绪。
+    download_state = _snapshot_local_inference_download_state()
+    models_status = get_all_local_models_status()
+    backend = config.sanitize_local_inference_backend(
+        getattr(config, 'LOCAL_INFERENCE_BACKEND', 'local')
+    )
+    remote_status = None
+    if backend == 'remote':
+        from local_inference.remote_client import probe_remote_server
+
+        remote_status = probe_remote_server(
+            getattr(config, 'LOCAL_INFERENCE_SERVER_URL', ''), timeout=5.0
+        )
+        remote_models = remote_status.get('models') if isinstance(remote_status, dict) else {}
+        vad_ready = is_silero_cached()
+        remote_engines = {}
+        for engine in LOCAL_INFERENCE_ENGINES:
+            row = dict((remote_models or {}).get(engine) or {})
+            row.update({
                 'engine': engine,
-                'display_name': LOCAL_ASR_DISPLAY_NAMES.get(engine, engine),
-                'ready': False,
-                'error': str(e),
-            }
+                'display_name': LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine),
+                'model_cached': bool(row.get('ready')),
+                'runtime_issues': [] if remote_status.get('ready') else [
+                    remote_status.get('error') or 'remote service unavailable'
+                ],
+                'ready': bool(remote_status.get('ready') and row.get('ready') and vad_ready),
+                'remote': True,
+                'vad_ready': vad_ready,
+            })
+            remote_engines[engine] = row
+        models_status['asr'] = remote_engines
+        remote_hymt2 = dict((remote_models or {}).get('hymt2') or {})
+        models_status['translation']['hymt2'] = {
+            **remote_hymt2,
+            'engine': 'hymt2',
+            'display_name': LOCAL_INFERENCE_DISPLAY_NAMES.get('hymt2', 'hymt2'),
+            'ready': bool(remote_status.get('ready') and remote_hymt2.get('ready')),
+            'remote': True,
+        }
+    hymt2_status = dict(models_status['translation'].get('hymt2') or {})
+    # 进程内本地模型运行时状态（服务启动/切换本地后端时加载，停止时卸载）
+    try:
+        from streaming_translation import get_local_engine_runtime_status
+        hymt2_status['engine'] = get_local_engine_runtime_status()
+    except Exception:
+        hymt2_status['engine'] = {'loaded': False, 'loading': False, 'engines': []}
     return jsonify({
         'success': True,
-        'ui_enabled': is_local_asr_ui_enabled(),
-        'engines': engines,
-        'download': _snapshot_local_asr_download_state(),
+        'ui_enabled': is_local_inference_ui_enabled(),
+        'backend': backend,
+        'remote': remote_status,
+        'engines': models_status['asr'],
+        'models': models_status,
+        'hymt2': hymt2_status,
+        'download': download_state,
     })
 
 
-@app.route('/api/local-asr/download', methods=['POST'])
-def download_local_asr():
-    """后台下载本地 ASR 模型与运行时。"""
-    if not is_local_asr_build_enabled():
-        return jsonify({'success': False, 'message': 'Local ASR is disabled in this build'}), 404
+@app.route('/api/local-models/download', methods=['POST'])
+@app.route('/api/local-inference/download', methods=['POST'])
+def download_local_inference():
+    """后台下载本地 ASR / 翻译模型与运行时。"""
+    if not is_local_inference_build_enabled():
+        return jsonify({'success': False, 'message': 'Local inference is disabled in this build'}), 404
 
     data = request.json or {}
-    engine = str(data.get('engine') or getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice'))
-    if engine not in LOCAL_ASR_ENGINES:
+    engine = str(data.get('engine') or getattr(config, 'LOCAL_INFERENCE_ENGINE', 'sensevoice'))
+    valid_engines = set(LOCAL_INFERENCE_ENGINES) | set(LOCAL_MT_ENGINES)
+    if engine not in valid_engines:
         return jsonify({'success': False, 'message': f'Unsupported engine: {engine}'}), 400
 
-    snapshot = _snapshot_local_asr_download_state()
-    if snapshot.get('running'):
-        return jsonify({'success': False, 'message': 'Another local ASR download is already running'}), 409
+    if not _begin_local_inference_download(engine):
+        return jsonify({'success': False, 'message': 'Another download is already running'}), 409
 
     worker = threading.Thread(
-        target=_download_local_asr_worker,
+        target=_download_local_inference_worker,
         args=(engine,),
         daemon=True,
     )
-    worker.start()
+    try:
+        worker.start()
+    except Exception as e:
+        # 线程没起来就得把占位放掉，否则下载入口会一直卡在「进行中」
+        _update_local_inference_download_state(running=False, status='下载失败', error=str(e))
+        return jsonify({'success': False, 'message': str(e)}), 500
     return jsonify({'success': True, 'message': 'download started', 'engine': engine})
 
 
-@app.route('/api/local-asr/download-progress', methods=['GET'])
-def get_local_asr_download_progress():
+@app.route('/api/local-models/devices', methods=['GET'])
+def get_local_model_devices():
+    """列出本地 GGUF 推理可用的 GPU 设备（子进程枚举，结果带缓存）。"""
+    if not is_local_inference_build_enabled():
+        return jsonify({'success': False, 'message': 'Local inference is disabled in this build'}), 404
+
+    refresh = str(request.args.get('refresh') or '').strip().lower() in ('1', 'true', 'yes')
+    try:
+        from local_inference.gpu_devices import pick_auto_index, probe_gpu_devices
+
+        devices = probe_gpu_devices(refresh=refresh)
+        auto_index = pick_auto_index(devices)
+    except Exception as e:
+        print(f'枚举本地推理设备失败: {e}')
+        devices, auto_index = [], None
+
+    return jsonify({
+        'success': True,
+        'devices': devices,
+        'auto_index': auto_index,
+    })
+
+
+@app.route('/api/local-inference/download-progress', methods=['GET'])
+def get_local_inference_download_progress():
     """查询本地 ASR 下载状态。"""
-    if not is_local_asr_build_enabled():
-        return jsonify({'success': False, 'message': 'Local ASR is disabled in this build'}), 404
-    return jsonify({'success': True, **_snapshot_local_asr_download_state()})
+    if not is_local_inference_build_enabled():
+        return jsonify({'success': False, 'message': 'Local inference is disabled in this build'}), 404
+    return jsonify({'success': True, **_snapshot_local_inference_download_state()})
 
 
 @app.route('/api/credentials/status', methods=['GET'])
@@ -944,7 +1158,7 @@ def get_status():
     status['target_language'] = config.TARGET_LANGUAGE
     status['config_applied_at_ms'] = int(getattr(config, 'CONFIG_APPLIED_AT_MS', 0) or 0)
     status['backend_boot_ms'] = int(getattr(config, 'BACKEND_BOOT_MS', 0) or 0)
-    status['local_asr_ui_enabled'] = is_local_asr_ui_enabled()
+    status['local_inference_ui_enabled'] = is_local_inference_ui_enabled()
     return jsonify(status)
 
 @app.route('/api/subtitles', methods=['GET'])
@@ -1394,13 +1608,15 @@ def get_defaults():
     """获取默认配置"""
     defaults = config.get_default_ui_config()
     defaults['features'] = _get_feature_flags()
-    defaults['local_asr'] = (
+    defaults['local_inference'] = (
         {
             'engine': 'sensevoice',
             'incremental_asr': True,
-            'interim_interval': 2.0,
+            'incremental_trigger_silence': 0.01,
+            'incremental_min_interval': 3.0,
+            'incremental_fallback_interval': 4.0,
         }
-        if is_local_asr_ui_enabled()
+        if is_local_inference_ui_enabled()
         else None
     )
     return jsonify(defaults)

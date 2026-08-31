@@ -46,6 +46,8 @@ from app_state import AppState, get_state, set_state
 from streaming_translation import (
     clear_translation_contexts,
     config_from_module,
+    prewarm_local_engines,
+    release_local_engines,
     reinitialize_translator,
     update_secondary_translator,
 )
@@ -115,12 +117,42 @@ def update_subtitles(original: str, translated: str, ongoing: bool, reverse_tran
         subtitles_state["ongoing"] = ongoing
 
 
+# 进行中的本地模型预加载 future（服务停止时先等其结束再释放模型，避免泄漏）
+_local_engine_prewarm_futures: set = set()
+
+
+def _schedule_local_engine_prewarm(state):
+    """后台线程预载本地 Hy-MT2 模型（不阻塞主事件循环，音频采集不受影响）。"""
+
+    def _worker():
+        try:
+            loaded = prewarm_local_engines(state)
+            if loaded:
+                print(f'[Translator] 本地 Hy-MT2 模型已就绪（供 {loaded} 个翻译器使用）')
+        except Exception as e:
+            print(f'[Translator] 本地 Hy-MT2 模型预加载失败: {e}')
+
+    loop = state.main_loop
+    if loop is None or not loop.is_running():
+        _worker()
+        return
+    try:
+        future = loop.run_in_executor(state.executor, _worker)
+    except RuntimeError:
+        _worker()
+        return
+    _local_engine_prewarm_futures.add(future)
+    future.add_done_callback(_local_engine_prewarm_futures.discard)
+
+
 def reinitialize_translator_compat():
     state = get_state()
     if state:
         # 翻译关闭时跳过（重）构建翻译器，避免未配置对应 API Key 时报错。
-        # 运行时重新开启翻译会再次调用本函数并正常构建。
+        # 运行时重新开启翻译会再次调用本函数并正常构建；
+        # 关闭时同时释放本地模型，不再占用内存/显存。
         if not getattr(config, 'ENABLE_TRANSLATION', True):
+            release_local_engines(state)
             return
         cfg = config_from_module(config)
         if _is_primary_translator_config_changed(state, cfg):
@@ -131,6 +163,8 @@ def reinitialize_translator_compat():
         loop = state.main_loop
         if loop is not None and loop.is_running():
             loop.create_task(osc_manager.apply_runtime_config(app_name="Yakutan"))
+        # 切换翻译模式/Hy-MT2 本地开关后，当场（后台）加载新的本地模型
+        _schedule_local_engine_prewarm(state)
 
 
 def clear_translator_contexts_compat():
@@ -360,8 +394,8 @@ async def main(
 
     if _vad_gating_enabled:
         try:
-            from local_asr.model_manager import is_silero_cached, download_silero
-            from local_asr.vad_processor import VADProcessor
+            from local_inference.model_manager import is_silero_cached, download_silero
+            from local_inference.vad_processor import VADProcessor
 
             if not is_silero_cached():
                 print('[VAD] Silero ONNX 模型未下载，正在自动下载...')
@@ -373,23 +407,28 @@ async def main(
                 threshold=config.LOCAL_VAD_THRESHOLD,
                 min_speech_duration=config.LOCAL_VAD_MIN_SPEECH_DURATION,
                 chunk_duration=512.0 / config.SAMPLE_RATE,
-                pre_speech_duration=config.LOCAL_VAD_PRE_SPEECH_DURATION,
+                pre_speech_duration=config.VAD_PRE_SPEECH_DURATION,
+            )
+            vad_silence_duration = config.clamp_vad_silence_duration(
+                config.LOCAL_VAD_SILENCE_DURATION
             )
             state.vad_processor.update_settings({
                 'vad_mode': 'silero',
                 'vad_threshold': config.LOCAL_VAD_THRESHOLD,
                 'min_speech_duration': config.LOCAL_VAD_MIN_SPEECH_DURATION,
-                'silence_duration': config.LOCAL_VAD_SILENCE_DURATION,
-                'pre_speech_duration': config.LOCAL_VAD_PRE_SPEECH_DURATION,
+                'silence_duration': vad_silence_duration,
+                'pre_speech_duration': config.VAD_PRE_SPEECH_DURATION,
             })
             state.vad_enabled = True
             import numpy as np
             state._vad_pending_samples = np.array([], dtype=np.float32)
             state._vad_was_speaking = False
-            print('[VAD] ✓ 在线 API VAD 发送门控已启用')
+            print(f'[VAD] ✓ 在线 API VAD 发送门控已启用')
             print(f'[VAD]   threshold={state.vad_processor.threshold:.2f} '
                   f'min_speech={config.LOCAL_VAD_MIN_SPEECH_DURATION:.1f}s '
-                  f'silence={config.LOCAL_VAD_SILENCE_DURATION:.1f}s '
+                  f'silence={vad_silence_duration:.1f}s '
+                  f'(在线服务端断句阈值同步为 {int(round(vad_silence_duration * 1000))}ms) '
+                  f'pre={config.VAD_PRE_SPEECH_DURATION:.1f}s '
                   f'mode={state.vad_processor.mode}')
         except Exception as e:
             import traceback
@@ -406,6 +445,9 @@ async def main(
     cfg = config_from_module(config)
     if config.ENABLE_TRANSLATION:
         reinitialize_translator(state, cfg)
+        # 本地 Hy-MT2：服务启动时立即加载模型（此时尚无流量，同步加载不阻塞用户）
+        if prewarm_local_engines(state):
+            print('[Translator] 本地 Hy-MT2 模型已在服务启动时加载')
 
     # 初始化热词（在线：qwen 语料 / qwen_audio3 即时热词 / dashscope 热词表；
     # 本地：Qwen3-ASR 走与在线 Qwen 相同的语料注入）
@@ -444,7 +486,7 @@ async def main(
                     for entry in hot_words_manager.get_hot_words()
                     if entry.get('text')
                 ]
-                local_engine = getattr(config, 'LOCAL_ASR_ENGINE', 'sensevoice')
+                local_engine = getattr(config, 'LOCAL_INFERENCE_ENGINE', 'sensevoice')
                 if words and local_engine == 'qwen3-asr':
                     corpus_text = "\n".join(words)
                     print(f'[热词] 已生成本地 Qwen3-ASR 语料文本，共 {len(words)} 条\n')
@@ -500,7 +542,6 @@ async def main(
         hot_words=hot_word_entries,
         enable_vad=config.ENABLE_VAD,
         vad_threshold=config.VAD_THRESHOLD,
-        vad_silence_duration_ms=config.VAD_SILENCE_DURATION_MS,
         keepalive_interval=config.KEEPALIVE_INTERVAL,
     )
 
@@ -511,7 +552,9 @@ async def main(
         vad_status = '启用' if config.ENABLE_VAD else '禁用'
         print(f'[ASR] VAD状态: {vad_status}')
         if config.ENABLE_VAD:
-            print(f'[ASR] VAD配置: 阈值={config.VAD_THRESHOLD}, 静音时长={config.VAD_SILENCE_DURATION_MS}ms')
+            print(f'[ASR] VAD配置: 阈值={config.VAD_THRESHOLD}, '
+                  f'静音时长={int(round(config.clamp_vad_silence_duration(config.LOCAL_VAD_SILENCE_DURATION) * 1000))}ms '
+                  f'(与本地 VAD 对齐)')
 
         if config.KEEPALIVE_INTERVAL > 0:
             print(f'[ASR] WebSocket心跳已启用: 间隔={config.KEEPALIVE_INTERVAL}秒')
@@ -610,6 +653,25 @@ async def main(
 
     finally:
         emit_lifecycle('stopping', state.recognition_active)
+        # 等待进行中的本地模型预加载结束后再统一释放，避免“加载完才释放”的泄漏
+        if _local_engine_prewarm_futures:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        *(
+                            asyncio.wrap_future(fut)
+                            for fut in list(_local_engine_prewarm_futures)
+                        ),
+                        return_exceptions=True,
+                    ),
+                    timeout=300,
+                )
+            except Exception as e:
+                print(f'[Translator] 等待本地模型预加载结束失败: {e}')
+        # 服务关闭：卸载本地翻译模型（释放内存/显存）
+        released = release_local_engines(state)
+        if released:
+            print(f'[Translator] 本地 Hy-MT2 模型已卸载（释放 {released} 个引用）')
         clear_translator_contexts_compat()
         osc_manager.clear_mute_callback()
         osc_manager.reset_runtime_state()

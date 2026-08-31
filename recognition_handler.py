@@ -83,6 +83,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self.partial_translation_update_count = 0
         self._prefer_deepl_on_next_final = False
         self._partial_debounce_handle: Optional[asyncio.TimerHandle] = None
+        self._partial_output_debounce_handle: Optional[asyncio.TimerHandle] = None
         self._discard_results = False
         self._discard_deadline = 0.0
 
@@ -96,6 +97,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         识别重新开始/恢复（resume_outputs / on_session_started）会立即解除丢弃。
         """
         self._cancel_partial_debounce()
+        self._cancel_partial_output_debounce()
         with self._translate_ordering_lock:
             self._session_generation += 1
         self._reset_partial_translation_state()
@@ -249,6 +251,19 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         else:
             _cancel()
 
+    def _cancel_partial_output_debounce(self) -> None:
+        """取消尚未触发的中间结果（终端打印 + OSC 发送）消抖定时器。"""
+
+        def _cancel() -> None:
+            if self._partial_output_debounce_handle is not None:
+                self._partial_output_debounce_handle.cancel()
+                self._partial_output_debounce_handle = None
+
+        if self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(_cancel)
+        else:
+            _cancel()
+
     def _next_async_result_seq(self) -> int:
         """为异步翻译结果分配一个全局递增序号。"""
         with self._translate_ordering_lock:
@@ -320,7 +335,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         if not self.loop:
             return
 
-        debounce_ms = max(0, int(getattr(config, 'PARTIAL_TRANSLATION_DEBOUNCE_MS', 50)))
+        debounce_ms = max(0, int(getattr(config, 'PARTIAL_DEBOUNCE_MS', 50)))
         debounce_seconds = debounce_ms / 1000.0
 
         def _dispatch() -> None:
@@ -344,6 +359,54 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             if self._partial_debounce_handle is not None:
                 self._partial_debounce_handle.cancel()
             self._partial_debounce_handle = self.loop.call_later(
+                debounce_seconds, _dispatch,
+            )
+
+        self.loop.call_soon_threadsafe(_schedule)
+
+    def _schedule_partial_output_with_debounce(
+        self,
+        text,
+        osc_text,
+        should_send_osc,
+        session_generation,
+    ) -> None:
+        """对中间结果的终端打印与 OSC 发送做消抖。
+
+        每收到一个新中间结果就重置计时；只有消抖窗口内没有新更新时，
+        才真正打印到终端并按需发送 OSC（与流式翻译消抖逻辑一致）。
+        """
+        if not self.loop:
+            return
+
+        debounce_ms = max(0, int(getattr(config, 'PARTIAL_DEBOUNCE_MS', 50)))
+        debounce_seconds = debounce_ms / 1000.0
+        finalized_seq = self._finalized_seq
+        final_output_version = self._final_output_version
+
+        def _dispatch() -> None:
+            self._partial_output_debounce_handle = None
+            if not self._is_session_generation_current(session_generation):
+                return
+            if (
+                self._finalized_seq != finalized_seq
+                or self._final_output_version != final_output_version
+            ):
+                return
+            _now = time.time()
+            print(
+                f"[{time.strftime('%H:%M:%S', time.localtime(_now))}"
+                f".{int(_now * 1000) % 1000:03d}] 部分：{text}"
+            )
+            if should_send_osc and osc_text:
+                asyncio.create_task(
+                    osc_manager.send_text(osc_text, ongoing=True),
+                )
+
+        def _schedule() -> None:
+            if self._partial_output_debounce_handle is not None:
+                self._partial_output_debounce_handle.cancel()
+            self._partial_output_debounce_handle = self.loop.call_later(
                 debounce_seconds, _dispatch,
             )
 
@@ -666,6 +729,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
     def on_session_started(self) -> None:
         logger.info('Speech recognizer session opened.')
         self._cancel_partial_debounce()
+        self._cancel_partial_output_debounce()
         self._reset_partial_translation_state()
         self._discard_results = False
         self._final_output_version = 0
@@ -673,9 +737,26 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self._last_osc_typing_ongoing = False
         with self._translate_ordering_lock:
             self._session_generation += 1
+        # 重置翻译 API 的进行中句子修订链（如 Hy-MT2 的 WebSocket 会话），
+        # 避免上一句未完成的链被当作下一句的 previous_* 携带发送
+        s = self.state
+        if s is not None:
+            for api in (
+                getattr(s, 'translation_api', None),
+                getattr(s, 'secondary_translation_api', None),
+                getattr(s, 'deepl_fallback_translation_api', None),
+                getattr(s, 'secondary_deepl_fallback_translation_api', None),
+            ):
+                reset = getattr(api, 'reset_session', None)
+                if callable(reset):
+                    try:
+                        reset()
+                    except Exception:
+                        pass
 
     def on_session_stopped(self) -> None:
         self._cancel_partial_debounce()
+        self._cancel_partial_output_debounce()
         self._last_osc_typing_ongoing = False
         with self._translate_ordering_lock:
             self._final_output_version += 1
@@ -749,6 +830,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         is_partial=True,
                         record_history=False,
                         previous_translation=self.last_partial_translation,
+                        detected_source_language=detected_lang,
                     ),
                 )
 
@@ -764,6 +846,7 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                         is_partial=True,
                         record_history=False,
                         previous_translation=self.last_partial_translation_secondary,
+                        detected_source_language=detected_lang,
                     ),
                 )
 
@@ -1170,16 +1253,24 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         primary_translated = False
 
         if is_ongoing:
-            print(f'部分：{text}', end='\r')
             display_text = get_display_text(text)
             current_trans = s.subtitles_state.get("translated", "")
             current_reverse_trans = s.subtitles_state.get("reverse_translated", "")
             s.update_subtitles(display_text, current_trans, True, current_reverse_trans)
 
+            # 终端打印 + OSC 发送：对中间结果做消抖，新更新到达后需静默窗口才真正输出
+            self._schedule_partial_output_with_debounce(
+                text,
+                display_text,
+                should_output_partial_results(s.current_asr_backend),
+                session_generation,
+            )
+
             if config.ENABLE_TRANSLATION and getattr(config, 'TRANSLATE_PARTIAL_RESULTS', False):
-                segment = self._extract_streaming_segment(text)
+                force_partial_translation = bool(event.force_partial_translation)
+                segment = text if force_partial_translation else self._extract_streaming_segment(text)
                 if (
-                    self._should_trigger_partial_translation(segment)
+                    (force_partial_translation or self._should_trigger_partial_translation(segment))
                     and segment != self.last_partial_source_segment
                     and segment != self.pending_partial_segment
                     and self.loop
@@ -1201,6 +1292,15 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     )
 
         else:
+            # 终句到达：先让上一句未触发的 debounce（流式翻译 / 中间结果输出）
+            # 因 finalized_seq / final_output_version 失效并取消，
+            # 避免迟到的中间结果在终句之后仍被打印 / 发送到 OSC。
+            # （与是否启用翻译无关，中间结果输出消抖始终会被调度）
+            self._finalized_seq += 1
+            self._final_output_version += 1
+            self._cancel_partial_debounce()
+            self._cancel_partial_output_debounce()
+
             if not config.ENABLE_TRANSLATION:
                 source_lang_info = s.language_detector.detect(text)
                 source_lang = source_lang_info['language']
@@ -1261,13 +1361,6 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     use_secondary_output
                     and self._should_translate(source_lang, actual_secondary_target)
                 )
-
-                # 在可能阻塞的终句翻译之前就递增，让上一句未返回的句内流式任务
-                # 与未触发的 debounce 立即因 finalized_seq / final_output_version 失效，
-                # 避免句间迟到 partial 在终句翻译期间仍刷新 OSC/字幕。
-                self._finalized_seq += 1
-                self._final_output_version += 1
-                self._cancel_partial_debounce()
 
                 if not primary_should_translate:
                     print('主输出语言与源语言相同，跳过翻译，直接输出原文')
@@ -1487,7 +1580,14 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         )
 
         if self.loop:
-            if _should_send:
+            if is_ongoing:
+                # 中间结果的终端打印 + OSC 发送由消抖处理；这里只负责按需设置 typing 状态
+                if not _should_send and should_set_typing_started:
+                    asyncio.run_coroutine_threadsafe(
+                        osc_manager.set_typing(True),
+                        self.loop,
+                    )
+            elif _should_send:
                 if osc_text:
                     asyncio.run_coroutine_threadsafe(
                         osc_manager.send_text(osc_text, ongoing=is_ongoing),

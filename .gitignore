@@ -16,6 +16,7 @@ models/lid.176.bin
 *.zip
 hot_words_private/*.txt
 temp/
+start_hymt2_tunnel.bat
 
 # PyInstaller build files
 build/
@@ -29,10 +30,18 @@ debug_audio/
 
 # 本地ASR：模型缓存不入库；vendor 下 Python 源码纳入版本控制，原生 DLL/SO 不入库
 .lt_sparse/
-local_asr/vendor/**/__pycache__/
-local_asr/vendor/**/*.dll
-local_asr/vendor/**/*.so
-local_asr/vendor/qwen_asr_gguf/inference_old/
+local_inference/vendor/**/__pycache__/
+local_inference/vendor/**/*.dll
+local_inference/vendor/**/*.so
+local_inference/vendor/qwen_asr_gguf/inference_old/
 
 local_asr_models/
 /.sisyphus
+
+# 本机工具配置与远程推理部署文件（可能含服务器路径或连接信息）
+.claude/settings.local.json
+remote_inference_service/README.md
+remote_inference_service/run_*.sh
+remote_inference_service/tunnel_to_*.bat
+remote_inference_service/*.sbatch
+remote_inference_service/*.service
