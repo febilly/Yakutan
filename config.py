@@ -143,9 +143,9 @@ VAD_PRE_SPEECH_DURATION = 0.5
 # 本地设置统一夹到同一范围，见 clamp_vad_silence_duration()。
 VAD_SILENCE_DURATION_MIN = 0.2
 VAD_SILENCE_DURATION_MAX = 6.0
-# 在线门控：本地 VAD 判定说话结束的瞬间，向 API 一次性补发一帧合成静音（毫秒），
-# 用于吸收本地与服务端 VAD"话音结束"判定的时差，保证服务端能凑满其断句静音
-# 阈值。200ms @16kHz PCM16 单声道约 6.4KB，在在线 API 建议的单帧大小（1KB~16KB）内。
+# 在线门控：本地 VAD 判定说话结束后补发合成静音的安全余量（毫秒）。
+# Qwen-Audio-3.0 / Fun-ASR 的本地 VAD 断句会直接结束当前 Recognition task；
+# 此值仅作为结束失败时的合成静音降级余量。其他在线后端直接发送此余量。
 ONLINE_VAD_END_BURST_MS = 200
 
 

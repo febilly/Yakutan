@@ -20,6 +20,83 @@ logger = logging.getLogger(__name__)
 RECOGNIZER_CHANNELS = 1
 ASR_SEND_QUEUE_SECONDS = 3.0
 ASR_SEND_QUEUE_MIN_FRAMES = 10
+ASR_MAX_AUDIO_FRAME_BYTES = 16 * 1024
+PCM16_SAMPLE_BYTES = 2
+DASHSCOPE_SERVER_VAD_BACKENDS = frozenset({'qwen_audio3', 'dashscope'})
+
+
+class _SilenceBurst:
+    """A synthetic PCM16 silence task expanded by the sender worker."""
+
+    def __init__(self, total_bytes: int) -> None:
+        self.total_bytes = max(0, int(total_bytes))
+
+
+def _vad_gate_tail_seconds(backend: str) -> float:
+    """Return the unpaced silence needed after the local VAD falling edge.
+
+    DashScope Recognition stops receiving real microphone silence as soon as
+    the local gate closes. Qwen-Audio-3.0 and Fun-ASR therefore need a complete
+    copy of their server-side VAD window, plus the configured safety margin.
+    Other online backends retain the legacy margin-only behavior.
+    """
+    margin_seconds = max(
+        0.0,
+        float(getattr(config, 'ONLINE_VAD_END_BURST_MS', 200) or 0) / 1000.0,
+    )
+    if backend not in DASHSCOPE_SERVER_VAD_BACKENDS:
+        return margin_seconds
+
+    remote_silence_seconds = config.clamp_vad_silence_duration(
+        getattr(config, 'LOCAL_VAD_SILENCE_DURATION', 0.8)
+    )
+    return remote_silence_seconds + margin_seconds
+
+
+def _make_silence_burst(seconds: float, sample_rate: int) -> _SilenceBurst:
+    sample_count = max(0, int(round(float(seconds) * max(1, int(sample_rate)))))
+    return _SilenceBurst(sample_count * PCM16_SAMPLE_BYTES * RECOGNIZER_CHANNELS)
+
+
+def _iter_silence_burst_frames(burst: _SilenceBurst):
+    """Split a silence task into API-safe, sample-aligned frames."""
+    frame_alignment = PCM16_SAMPLE_BYTES * RECOGNIZER_CHANNELS
+    frame_bytes = ASR_MAX_AUDIO_FRAME_BYTES - (ASR_MAX_AUDIO_FRAME_BYTES % frame_alignment)
+    remaining = burst.total_bytes - (burst.total_bytes % frame_alignment)
+    while remaining > 0:
+        chunk_bytes = min(frame_bytes, remaining)
+        yield b'\x00' * chunk_bytes
+        remaining -= chunk_bytes
+
+
+async def _send_queue_payload(state, recognizer, generation: int, payload) -> None:
+    frames = (
+        _iter_silence_burst_frames(payload)
+        if isinstance(payload, _SilenceBurst)
+        else (payload,)
+    )
+    for frame in frames:
+        if not (
+            state.recognition_active
+            and generation == getattr(state, 'audio_send_generation', 0)
+        ):
+            break
+        # Synthetic tail frames are intentionally sent back-to-back: server
+        # VAD needs audio duration, not wall-clock pacing.
+        await send_audio_frame_async(state, recognizer, frame)
+
+
+async def _run_recognizer_control_async(state, recognizer, method_name: str) -> bool:
+    """Run pause/resume in the serialized ASR executor and surface failures."""
+    state.ensure_asr_send_executor()
+    method = getattr(recognizer, method_name)
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(state.asr_send_executor, method)
+        return True
+    except Exception as exc:
+        print(f'[VAD] ASR {method_name} 失败: {exc}')
+        return False
 
 
 async def init_audio_stream(state):
@@ -351,13 +428,9 @@ async def audio_capture_task(state, recognizer):
 
     async def _sender_worker():
         while True:
-            generation, frame = await send_queue.get()
+            generation, payload = await send_queue.get()
             try:
-                if (
-                    state.recognition_active
-                    and generation == getattr(state, 'audio_send_generation', 0)
-                ):
-                    await send_audio_frame_async(state, recognizer, frame)
+                await _send_queue_payload(state, recognizer, generation, payload)
             finally:
                 send_queue.task_done()
 
@@ -368,14 +441,22 @@ async def audio_capture_task(state, recognizer):
     _vad_chunk_count = 0
     _vad_last_diag_at = 0.0
     _vad_verbose = bool(getattr(config, 'ENABLE_VAD_GATING_VERBOSE', False))
-    # 说话结束瞬间一次性补发的合成静音帧：吸收本地/服务端 VAD 话音判定时差，
-    # 保证服务端凑满其断句静音阈值（见 config.ONLINE_VAD_END_BURST_MS 注释）
-    _vad_end_burst_ms = int(getattr(config, 'ONLINE_VAD_END_BURST_MS', 200) or 0)
-    _vad_end_burst_bytes = (
-        b'\x00' * (int(config.SAMPLE_RATE * _vad_end_burst_ms / 1000) * 2)
-        if _vad_end_burst_ms > 0
-        else b''
+    # 本地门控停止转发真实静音后，补发服务端判停所需的合成静音。
+    # DashScope Recognition 后端需要完整判停窗口；其他后端仅保留安全余量。
+    _vad_tail_seconds = _vad_gate_tail_seconds(state.current_asr_backend)
+    _vad_end_burst = _make_silence_burst(
+        _vad_tail_seconds,
+        int(getattr(config, 'SAMPLE_RATE', 16000) or 16000),
     )
+    # DashScope Recognition 的本地 VAD 断句直接复用游戏内闭麦已验证的
+    # pause/stop -> resume/start 生命周期，不再依赖服务端接受突发合成静音。
+    _vad_rolls_recognition_session = (
+        state.current_asr_backend in DASHSCOPE_SERVER_VAD_BACKENDS
+    )
+    _vad_recognition_paused = False
+    # 防止切换后端或一次短促误触发时，结束一个尚未送入真实音频的
+    # Recognition task；DashScope 会对此返回 EmptyAudio。
+    _vad_recognition_has_audio = False
     # 门控预缓冲：静音期门控丢弃的音频先滚动保留，开口瞬间整体补发给 ASR，
     # 避免漏掉句首（时长由 config.VAD_PRE_SPEECH_DURATION 统一控制）
     _vad_pre_buffer_seconds = max(
@@ -415,6 +496,8 @@ async def audio_capture_task(state, recognizer):
             if _generation != _vad_pre_generation:
                 _vad_pre_generation = _generation
                 _vad_pre_buffer.clear()
+                _vad_recognition_paused = False
+                _vad_recognition_has_audio = False
 
             # ── VAD 侧路分析（不阻塞主通道，且仅在识别激活时进行） ──
             if state.recognition_active and state.vad_enabled and state.vad_processor is not None:
@@ -435,10 +518,23 @@ async def audio_capture_task(state, recognizer):
                             state._vad_was_speaking = is_speaking
                             conf = state.vad_processor.last_confidence
                             if is_speaking:
+                                if _vad_rolls_recognition_session and _vad_recognition_paused:
+                                    resumed = await _run_recognizer_control_async(
+                                        state, recognizer, 'resume'
+                                    )
+                                    if not resumed:
+                                        # 保留起声预缓冲，并让下一帧重新触发起声，以便重试。
+                                        state.vad_processor.reset()
+                                        state._vad_was_speaking = False
+                                        break
+                                    _vad_recognition_paused = False
+                                    _vad_recognition_has_audio = False
+                                    print('[VAD] ▶ DashScope Recognition 新会话已开始')
                                 # 开口瞬间：把门控期间扣留的预缓冲音频整体补发，
                                 # 保证服务端收到句首（当前帧随后由发送块正常入队，不重复）
                                 pre_frames = _vad_pre_buffer.flush()
                                 if pre_frames:
+                                    _vad_recognition_has_audio = True
                                     for pre_frame in pre_frames:
                                         try:
                                             send_queue.put_nowait((_generation, pre_frame))
@@ -449,20 +545,25 @@ async def audio_capture_task(state, recognizer):
                                         print(f'[VAD] 预缓冲补发 {len(pre_frames)} 帧（约 {_vad_pre_buffer_seconds:.1f}s）')
                                 print(f'[VAD] ▶ SPEECH 开始 (chunk=#{_vad_chunk_count}, 置信度={conf:.3f})')
                             else:
-                                # 说完瞬间补发一帧合成静音（此时门控即将停发真实帧），
-                                # 让服务端在"断流"前已凑满断句静音阈值
-                                if _vad_end_burst_bytes:
-                                    try:
-                                        send_queue.put_nowait(
-                                            (getattr(state, 'audio_send_generation', 0),
-                                             _vad_end_burst_bytes)
+                                if _vad_rolls_recognition_session:
+                                    # pause/stop 会等待 SDK 内部音频队列排空并完成当前 task，
+                                    # 行为与游戏内闭麦一致，可确定触发最终识别结果。
+                                    if _vad_recognition_has_audio:
+                                        await send_queue.join()
+                                        _vad_recognition_paused = await _run_recognizer_control_async(
+                                            state, recognizer, 'pause'
                                         )
-                                    except asyncio.QueueFull:
-                                        _drop_oldest_queue_item(send_queue)
-                                        send_queue.put_nowait(
-                                            (getattr(state, 'audio_send_generation', 0),
-                                             _vad_end_burst_bytes)
-                                        )
+                                        if _vad_recognition_paused:
+                                            _vad_recognition_has_audio = False
+                                            print('[VAD] ■ DashScope Recognition 当前会话已结束')
+                                        elif _vad_end_burst.total_bytes:
+                                            # 生命周期切换失败时保留合成静音作为降级路径。
+                                            await send_queue.put((_generation, _vad_end_burst))
+                                    else:
+                                        print('[VAD] 跳过未送入音频的 DashScope task 结束，避免 EmptyAudio')
+                                elif _vad_end_burst.total_bytes:
+                                    # 其他在线后端维持原有的合成静音余量。
+                                    await send_queue.put((_generation, _vad_end_burst))
                                 print(f'[VAD] ■ SILENCE (chunk=#{_vad_chunk_count}, 置信度={conf:.3f})')
                         # 定期诊断（仅在 verbose 模式下显示）
                         if _vad_verbose:
@@ -497,7 +598,10 @@ async def audio_capture_task(state, recognizer):
                     _vad_pre_buffer.push(data)
                 _should_send = True
                 if _gating_active:
-                    _should_send = state.vad_processor.is_speaking
+                    _should_send = (
+                        state.vad_processor.is_speaking
+                        and not _vad_recognition_paused
+                    )
                 if _should_send:
                     item = (getattr(state, 'audio_send_generation', 0), data)
                     try:
@@ -509,6 +613,8 @@ async def audio_capture_task(state, recognizer):
                         if now - last_queue_warning_at > 5.0:
                             print('[Audio] ASR发送队列已满，丢弃最旧音频帧以保持实时采集')
                             last_queue_warning_at = now
+                    if _vad_rolls_recognition_session:
+                        _vad_recognition_has_audio = True
                 elif _vad_verbose:
                     state._vad_drop_count += 1
                     if state._vad_drop_count == 1 or state._vad_drop_count % 100 == 0:
