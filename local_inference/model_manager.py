@@ -287,7 +287,7 @@ def sensevoice_onnx_model_dir() -> Path | None:
     return None
 
 
-def _ensure_llama_cpp_vulkan_to(bin_dir: Path) -> None:
+def _ensure_llama_cpp_vulkan_to(bin_dir: Path, progress_callback=None) -> None:
     """若 bin_dir 中缺少 llama/ggml 主库，则从 ggml-org llama.cpp win-vulkan x64 release 解压写入。"""
     import json
     import zipfile
@@ -309,7 +309,11 @@ def _ensure_llama_cpp_vulkan_to(bin_dir: Path) -> None:
     except Exception:
         tag = "b8391"
     dll_zip = MODELS_DIR / "llama-cpp-vulkan.zip"
-    _download_file(LLAMA_CPP_DLL_URL_TEMPLATE.format(tag=tag), dll_zip, f"llama.cpp Vulkan {tag}")
+    _download_file(
+        LLAMA_CPP_DLL_URL_TEMPLATE.format(tag=tag), dll_zip,
+        f"llama.cpp Vulkan 运行时 {tag}", progress_callback,
+    )
+    _report(progress_callback, "解压 llama.cpp Vulkan 运行时", 0, None)
     with zipfile.ZipFile(str(dll_zip), "r") as archive:
         for member in archive.namelist():
             basename = os.path.basename(member)
@@ -338,15 +342,8 @@ def prefetch_sensevoice_for_pyinstaller_bundle() -> None:
     if _sensevoice_onnx_ready(dest):
         logger.info("SenseVoice ONNX already present under %s", dest)
         return
-    from huggingface_hub import snapshot_download
-
-    dest.mkdir(parents=True, exist_ok=True)
     logger.info("Downloading SenseVoice ONNX (INT8) to %s", dest)
-    snapshot_download(
-        repo_id=SENSEVOICE_ONNX_REPO,
-        local_dir=str(dest),
-        allow_patterns=list(SENSEVOICE_ONNX_FILES),
-    )
+    _download_sensevoice_onnx(dest)
 
 
 def _write_text_if_missing(path: Path, content: str) -> None:
@@ -525,14 +522,14 @@ def get_missing_models(engine: str) -> list[dict]:
     return missing
 
 
-def download_silero() -> None:
+def download_silero(progress_callback=None) -> None:
     apply_cache_env()
     if is_silero_cached():
         logger.info("Silero VAD ONNX already present")
         return
     dest = _silero_onnx_user_path()
     logger.info("Downloading Silero VAD (ONNX)...")
-    _download_file(SILERO_VAD_ONNX_URL, dest, "Silero VAD (ONNX)")
+    _download_file(SILERO_VAD_ONNX_URL, dest, "Silero VAD", progress_callback)
     logger.info("Silero VAD downloaded to %s", dest)
 
 
@@ -693,7 +690,27 @@ def _verify_or_discard(part: Path, expected_bytes: int | None, magic: bytes | No
         raise
 
 
-def download_qwen3_asr() -> None:
+def _extract_members(archive, members, dest_dir: Path, total: int | None,
+                     progress_callback=None, stage: str = "解压 Qwen3-ASR 模型") -> None:
+    """把 zip 里的成员平铺写入 dest_dir，并按写出的字节数报进度。"""
+    done = 0
+    last_report = 0.0
+    for member in members:
+        with archive.open(member) as src, open(dest_dir / os.path.basename(member), "wb") as dst:
+            while True:
+                chunk = src.read(_DOWNLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                dst.write(chunk)
+                done += len(chunk)
+                now = time.monotonic()
+                if now - last_report >= _PROGRESS_INTERVAL_SEC:
+                    last_report = now
+                    _report(progress_callback, stage, done, total)
+    _report(progress_callback, stage, done, total)
+
+
+def download_qwen3_asr(progress_callback=None) -> None:
     apply_cache_env()
     ensure_vendor_sources("qwen3-asr")
 
@@ -706,17 +723,16 @@ def download_qwen3_asr() -> None:
 
     if any(not (model_dir / filename).exists() for filename in QWEN3_ASR_FILES):
         zip_path = MODELS_DIR / "qwen3-asr-1.7b-gguf.zip"
-        _download_file(QWEN3_ASR_MODEL_URL, zip_path, "Qwen3-ASR model")
+        _download_file(QWEN3_ASR_MODEL_URL, zip_path, "Qwen3-ASR 模型", progress_callback)
         with zipfile.ZipFile(str(zip_path), "r") as archive:
-            for member in archive.namelist():
-                basename = os.path.basename(member)
-                if basename and basename in QWEN3_ASR_FILES:
-                    with archive.open(member) as src, open(model_dir / basename, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
+            members = [m for m in archive.namelist() if os.path.basename(m) in QWEN3_ASR_FILES]
+            # 解压 770MB 要几十秒；按已写出的字节报进度，免得界面卡在 100% 上不动
+            total = sum(archive.getinfo(member).file_size for member in members)
+            _extract_members(archive, members, model_dir, total, progress_callback)
         zip_path.unlink(missing_ok=True)
 
     if sys.platform == "win32":
-        _ensure_llama_cpp_vulkan_to(bin_dir)
+        _ensure_llama_cpp_vulkan_to(bin_dir, progress_callback)
     else:
         # Linux runtime still expects system OpenMP libraries (e.g. libgomp/libomp).
         required_so = ["libllama.so", "libggml.so", "libggml-base.so"]
@@ -727,38 +743,54 @@ def download_qwen3_asr() -> None:
             )
 
 
-def download_asr(engine: str) -> None:
+def _download_sensevoice_onnx(dest: Path, progress_callback=None) -> None:
+    """逐个文件下载 SenseVoice ONNX：和其他模型走同一套端点回退 / 续传 / 进度。"""
+    dest.mkdir(parents=True, exist_ok=True)
+    pending = [name for name in SENSEVOICE_ONNX_FILES if not (dest / name).is_file()]
+    endpoints = _ordered_hf_endpoints(SENSEVOICE_ONNX_REPO, SENSEVOICE_ENCODER_ONNX)
+
+    for index, name in enumerate(pending, start=1):
+        stage = f"SenseVoice {name}（{index}/{len(pending)}）"
+        failures: list[str] = []
+        for endpoint in endpoints:
+            host = urlparse(endpoint).netloc or endpoint
+            try:
+                _stream_download(
+                    _hf_file_url(endpoint, SENSEVOICE_ONNX_REPO, name),
+                    dest / name, stage, progress_callback,
+                )
+                break
+            except Exception as exc:
+                logger.warning("从 %s 下载 %s 失败: %s", host, name, exc)
+                failures.append(f"{host}: {exc}")
+        else:
+            raise RuntimeError(f"SenseVoice {name} 下载失败（" + "；".join(failures) + "）")
+
+
+def download_asr(engine: str, progress_callback=None) -> None:
     apply_cache_env()
     ensure_vendor_sources(engine)
 
     if engine == "qwen3-asr":
-        download_qwen3_asr()
+        download_qwen3_asr(progress_callback)
         return
     if engine == "sensevoice":
         if sensevoice_onnx_model_dir() is not None:
             logger.info("SenseVoice ONNX already available (bundled or cached)")
             return
-        from huggingface_hub import snapshot_download
-
-        dest = _sensevoice_onnx_user_dir()
-        dest.mkdir(parents=True, exist_ok=True)
         logger.info("Downloading SenseVoice ONNX (INT8) from %s", SENSEVOICE_ONNX_REPO)
-        snapshot_download(
-            repo_id=SENSEVOICE_ONNX_REPO,
-            local_dir=str(dest),
-            allow_patterns=list(SENSEVOICE_ONNX_FILES),
-        )
+        _download_sensevoice_onnx(_sensevoice_onnx_user_dir(), progress_callback)
         return
 
     raise ValueError(f"Unknown local ASR engine: {engine}")
 
 
-def prepare_engine(engine: str) -> None:
+def prepare_engine(engine: str, progress_callback=None) -> None:
     ensure_vendor_sources(engine)
     if not is_silero_cached():
-        download_silero()
+        download_silero(progress_callback)
     if not is_asr_cached(engine):
-        download_asr(engine)
+        download_asr(engine, progress_callback)
 
 
 def get_hymt2_model_path() -> Path | None:
@@ -788,7 +820,7 @@ def download_hymt2(progress_callback=None) -> None:
 
     # 本地 Hy-MT2 和 Qwen3-ASR 共用同一套 llama.cpp 运行时。只装翻译模型的用户机器上
     # 这些库还不存在，缺了就只能在加载模型时报 ctypes 错误，所以随权重一起备好。
-    _ensure_llama_cpp_vulkan_to(_qwen_llama_vulkan_user_bin())
+    _ensure_llama_cpp_vulkan_to(_qwen_llama_vulkan_user_bin(), progress_callback)
 
 
 def _download_hymt2_weights(dest: Path, progress_callback=None) -> None:

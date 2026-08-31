@@ -6,8 +6,10 @@
 """
 
 import http.server
+import json
 import os
 import socketserver
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -281,3 +283,194 @@ class TestDownloadHymt2:
         mm.download_hymt2()
 
         assert _stub_runtime == [mm._qwen_llama_vulkan_user_bin()]
+
+
+class TestOtherEnginesReportProgress:
+    """面板的进度条对每个模型都要能动，不能只有 Hy-MT2 有。"""
+
+    def test_silero_reports_progress(self, server, tmp_path, monkeypatch):
+        dest = tmp_path / "silero_vad.onnx"
+        monkeypatch.setattr(mm, "apply_cache_env", lambda: None)
+        monkeypatch.setattr(mm, "is_silero_cached", lambda: False)
+        monkeypatch.setattr(mm, "_silero_onnx_user_path", lambda: dest)
+        monkeypatch.setattr(mm, "SILERO_VAD_ONNX_URL", f"{server.base_url}/silero.onnx")
+        seen = []
+
+        mm.download_silero(lambda stage, done, total: seen.append((stage, done, total)))
+
+        assert dest.read_bytes() == PAYLOAD
+        assert seen[-1] == ("Silero VAD", len(PAYLOAD), len(PAYLOAD))
+
+    def test_sensevoice_downloads_every_file_with_a_counter(self, server, tmp_path, monkeypatch):
+        monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda repo, name: [server.base_url])
+        monkeypatch.setattr(
+            mm, "_hf_file_url",
+            lambda endpoint, repo, name, revision="main": f"{endpoint}/{name}",
+        )
+        seen = []
+
+        mm._download_sensevoice_onnx(tmp_path, lambda stage, done, total: seen.append(stage))
+
+        assert mm._sensevoice_onnx_ready(tmp_path)
+        # 每个文件一个阶段名，并带上「第几个/共几个」，否则四连下载看起来像卡住了
+        stages = {stage for stage in seen}
+        assert len(stages) == len(mm.SENSEVOICE_ONNX_FILES)
+        assert all(f"/{len(mm.SENSEVOICE_ONNX_FILES)}" in stage for stage in stages)
+
+    def test_sensevoice_skips_files_already_on_disk(self, server, tmp_path, monkeypatch):
+        monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda repo, name: [server.base_url])
+        monkeypatch.setattr(
+            mm, "_hf_file_url",
+            lambda endpoint, repo, name, revision="main": f"{endpoint}/{name}",
+        )
+        keep = b"already here"
+        (tmp_path / mm.SENSEVOICE_ENCODER_ONNX).write_bytes(keep)
+
+        mm._download_sensevoice_onnx(tmp_path)
+
+        assert (tmp_path / mm.SENSEVOICE_ENCODER_ONNX).read_bytes() == keep
+        assert len(server.requested_paths) == len(mm.SENSEVOICE_ONNX_FILES) - 1
+
+    def test_qwen3_extraction_reports_bytes(self, tmp_path, monkeypatch):
+        """解压 770MB 要几十秒；这一段没有进度的话面板会长时间停在 100%。"""
+        import zipfile
+
+        monkeypatch.setattr(mm, "MODELS_DIR", tmp_path)
+        monkeypatch.setattr(mm, "apply_cache_env", lambda: None)
+        monkeypatch.setattr(mm, "ensure_vendor_sources", lambda engine: None)
+        monkeypatch.setattr(mm, "_ensure_llama_cpp_vulkan_to", lambda *a, **kw: None)
+
+        contents = {name: bytes([index]) * 1000 for index, name in enumerate(mm.QWEN3_ASR_FILES)}
+
+        def _fake_download(url, dest, desc="", progress_callback=None):
+            with zipfile.ZipFile(str(dest), "w") as archive:
+                for name, blob in contents.items():
+                    archive.writestr(f"Qwen3-ASR-1.7B/{name}", blob)
+            mm._report(progress_callback, desc, 1, 1)
+
+        monkeypatch.setattr(mm, "_download_file", _fake_download)
+        seen = []
+
+        mm.download_qwen3_asr(lambda stage, done, total: seen.append((stage, done, total)))
+
+        model_dir = tmp_path / mm.QWEN3_ASR_DIR_NAME
+        for name, blob in contents.items():
+            assert (model_dir / name).read_bytes() == blob
+        extract = [entry for entry in seen if entry[0].startswith("解压")]
+        assert extract[-1] == ("解压 Qwen3-ASR 模型", 3000, 3000)
+        assert not (tmp_path / "qwen3-asr-1.7b-gguf.zip").exists()
+
+
+# ── 面板进度：worker -> 状态快照 -> HTTP 接口 ────────────────────────────────
+
+# ui.app 会读配置、起后台线程，放进 pytest 进程里会污染其他用例，所以在子进程里跑。
+_PANEL_PROGRESS_SCRIPT = """
+import json, sys
+sys.path.insert(0, %(root)r)
+from ui import app as ui_app
+
+steps = [
+    ("Silero VAD", 0, 1300000),
+    ("Qwen3-ASR 模型", 100000000, 770000000),
+    ("解压 Qwen3-ASR 模型", 0, None),
+]
+seen = []
+
+def fake_download(engine, progress_callback=None):
+    for stage, done, total in steps:
+        progress_callback(stage, done, total)
+        seen.append(ui_app._snapshot_local_inference_download_state())
+
+ui_app.download_local_inference_model = fake_download
+ui_app.is_silero_cached = lambda: True
+ui_app._download_local_inference_worker("qwen3-asr")
+
+client = ui_app.app.test_client()
+done_state = client.get("/api/local-inference/download-progress").get_json()
+
+def boom(engine, progress_callback=None):
+    raise RuntimeError("镜像也连不上")
+
+ui_app.download_local_inference_model = boom
+ui_app._download_local_inference_worker("qwen3-asr")
+failed_state = client.get("/api/local-inference/download-progress").get_json()
+
+print(json.dumps({"seen": seen, "done": done_state, "failed": failed_state}, ensure_ascii=False))
+"""
+
+
+def test_panel_progress_reaches_the_http_endpoint():
+    root = str(Path(__file__).resolve().parent.parent)
+    result = subprocess.run(
+        [sys.executable, "-c", _PANEL_PROGRESS_SCRIPT % {"root": root}],
+        cwd=root, check=True, capture_output=True, text=True, encoding="utf-8",
+    )
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+
+    percents = [snap["percent"] for snap in payload["seen"]]
+    assert percents == [0, 12, None]  # 拿不到总长度的阶段报 None，前端据此画不确定态
+    assert payload["seen"][1]["stage"] == "Qwen3-ASR 模型"
+    assert "95/734 MB" in payload["seen"][1]["status"]
+
+    assert payload["done"]["running"] is False
+    assert payload["done"]["percent"] == 100
+    assert payload["done"]["error"] is None
+
+    # 失败时进度条要收起来，而不是停在最后一次的百分比上
+    assert payload["failed"]["running"] is False
+    assert payload["failed"]["percent"] is None
+    assert "镜像也连不上" in payload["failed"]["error"]
+
+
+# ui.app 同上：放子进程里跑，避免 Flask/配置污染 pytest 进程。
+_DOWNLOAD_ENDPOINT_SCRIPT = """
+import json, sys, threading, time
+sys.path.insert(0, %(root)r)
+from ui import app as ui_app
+
+release, started = threading.Event(), threading.Event()
+
+def slow_download(engine, progress_callback=None):
+    started.set()
+    release.wait(10)
+
+ui_app.download_local_inference_model = slow_download
+ui_app.is_silero_cached = lambda: True
+client = ui_app.app.test_client()
+
+first = client.post("/api/local-inference/download", json={"engine": "qwen3-asr"})
+# 接口返回的那一刻状态就得是 running，不能等 worker 线程被调度到
+right_after = client.get("/api/local-inference/download-progress").get_json()
+second = client.post("/api/local-inference/download", json={"engine": "qwen3-asr"})
+
+started.wait(10)
+release.set()
+for _ in range(200):
+    final = client.get("/api/local-inference/download-progress").get_json()
+    if not final["running"]:
+        break
+    time.sleep(0.05)
+
+print(json.dumps({
+    "first_code": first.status_code,
+    "right_after": right_after,
+    "second_code": second.status_code,
+    "final": final,
+}, ensure_ascii=False))
+"""
+
+
+def test_download_endpoint_marks_running_before_it_returns():
+    root = str(Path(__file__).resolve().parent.parent)
+    result = subprocess.run(
+        [sys.executable, "-c", _DOWNLOAD_ENDPOINT_SCRIPT % {"root": root}],
+        cwd=root, check=True, capture_output=True, text=True, encoding="utf-8",
+    )
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert payload["first_code"] == 200
+    # 否则面板要等下一次轮询才显示「下载中」，按钮也还是可点的
+    assert payload["right_after"]["running"] is True
+    assert payload["right_after"]["engine"] == "qwen3-asr"
+    assert payload["second_code"] == 409  # 占位是原子的，第二个请求必须被挡掉
+    assert payload["final"]["running"] is False

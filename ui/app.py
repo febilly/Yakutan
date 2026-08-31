@@ -65,7 +65,7 @@ except ImportError:  # pragma: no cover
     def is_local_inference_ui_enabled():
         return False
 
-    def download_silero():
+    def download_silero(*args, **kwargs):
         raise RuntimeError('Local inference runtime unavailable')
 
     def is_silero_cached():
@@ -127,6 +127,11 @@ local_inference_download_state = {
     'engine': None,
     'status': '',
     'error': None,
+    # 进度：stage 是当前正在下载/解压的文件，percent 在拿不到总长度时为 None（前端画不确定态）
+    'stage': None,
+    'downloaded_bytes': 0,
+    'total_bytes': None,
+    'percent': None,
 }
 local_inference_download_lock = threading.Lock()
 
@@ -380,37 +385,74 @@ def _snapshot_local_inference_download_state() -> dict:
         return dict(local_inference_download_state)
 
 
-def _download_local_inference_worker(engine: str) -> None:
+def _begin_local_inference_download(engine: str) -> bool:
+    """占下下载位并把状态置为「进行中」，同一时刻只允许一个下载。
+
+    检查与置位必须在同一把锁里：既避免两个请求同时起下载，也让接口返回时状态已经是
+    running，前端不用等下一次轮询才知道自己点的下载开始了。
+    """
+    with local_inference_download_lock:
+        if local_inference_download_state.get('running'):
+            return False
+        local_inference_download_state.update(
+            running=True,
+            engine=engine,
+            status=f'准备下载 {LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine)}',
+            error=None,
+            stage=None,
+            downloaded_bytes=0,
+            total_bytes=None,
+            percent=None,
+        )
+    return True
+
+
+def _report_local_inference_progress(stage: str, done_bytes: int,
+                                     total_bytes: Optional[int]) -> None:
+    """把 model_manager 的下载进度写进面板状态（前端轮询取用）。"""
+    done_mb = done_bytes / (1024 * 1024)
+    if total_bytes:
+        percent = min(100, int(done_bytes * 100 / total_bytes))
+        detail = f'{percent}% ({done_mb:.0f}/{total_bytes / (1024 * 1024):.0f} MB)'
+    else:
+        # 总长度未知（服务端没给 Content-Length）：只报已下载量，前端画不确定进度条
+        percent = None
+        detail = f'{done_mb:.0f} MB' if done_bytes else ''
     _update_local_inference_download_state(
-        running=True,
-        engine=engine,
-        status=f'准备下载 {LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine)}',
-        error=None,
+        stage=stage,
+        downloaded_bytes=done_bytes,
+        total_bytes=total_bytes,
+        percent=percent,
+        status=f'{stage} {detail}'.strip(),
     )
+
+
+def _download_local_inference_worker(engine: str) -> None:
+    # HTTP 接口已在 _begin_local_inference_download() 里占位并写好初始状态；
+    # 脚本或测试直接调用本函数时在这里补一次，避免两处各写一份字段清单
+    if not _snapshot_local_inference_download_state().get('running'):
+        _begin_local_inference_download(engine)
     try:
         if engine == 'hymt2':
-            _update_local_inference_download_state(
-                status=f'下载 {LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine)} 模型...',
-            )
-            download_hymt2()
+            download_hymt2(progress_callback=_report_local_inference_progress)
         else:
             if not is_silero_cached():
-                _update_local_inference_download_state(status='下载 Silero VAD...')
-                download_silero()
-            _update_local_inference_download_state(
-                status=f'下载 {LOCAL_INFERENCE_DISPLAY_NAMES.get(engine, engine)} 模型与运行时...',
-            )
-            download_local_inference_model(engine)
+                download_silero(_report_local_inference_progress)
+            download_local_inference_model(engine, _report_local_inference_progress)
         _update_local_inference_download_state(
             running=False,
             status='下载完成',
             error=None,
+            stage=None,
+            percent=100,
         )
     except Exception as e:
         _update_local_inference_download_state(
             running=False,
             status='下载失败',
             error=str(e),
+            stage=None,
+            percent=None,
         )
 
 
@@ -921,6 +963,9 @@ def get_local_inference_status():
     if not is_local_inference_build_enabled():
         return jsonify({'success': False, 'message': 'Local inference is disabled in this build'}), 404
 
+    # 先取下载状态再扫模型：反过来的话，如果下载正好在这两步之间完成，这次响应就会把
+    # 「已经不在下载」和扫描时还没落盘的「未就绪」拼在一起，界面要等下一轮才变成已就绪。
+    download_state = _snapshot_local_inference_download_state()
     models_status = get_all_local_models_status()
     backend = config.sanitize_local_inference_backend(
         getattr(config, 'LOCAL_INFERENCE_BACKEND', 'local')
@@ -973,7 +1018,7 @@ def get_local_inference_status():
         'engines': models_status['asr'],
         'models': models_status,
         'hymt2': hymt2_status,
-        'download': _snapshot_local_inference_download_state(),
+        'download': download_state,
     })
 
 
@@ -990,8 +1035,7 @@ def download_local_inference():
     if engine not in valid_engines:
         return jsonify({'success': False, 'message': f'Unsupported engine: {engine}'}), 400
 
-    snapshot = _snapshot_local_inference_download_state()
-    if snapshot.get('running'):
+    if not _begin_local_inference_download(engine):
         return jsonify({'success': False, 'message': 'Another download is already running'}), 409
 
     worker = threading.Thread(
@@ -999,7 +1043,12 @@ def download_local_inference():
         args=(engine,),
         daemon=True,
     )
-    worker.start()
+    try:
+        worker.start()
+    except Exception as e:
+        # 线程没起来就得把占位放掉，否则下载入口会一直卡在「进行中」
+        _update_local_inference_download_state(running=False, status='下载失败', error=str(e))
+        return jsonify({'success': False, 'message': str(e)}), 500
     return jsonify({'success': True, 'message': 'download started', 'engine': engine})
 
 

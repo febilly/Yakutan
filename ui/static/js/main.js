@@ -92,6 +92,10 @@ let localInferenceStatus = {
     engine: null,
     status: '',
     error: null,
+    stage: null,
+    downloaded_bytes: 0,
+    total_bytes: null,
+    percent: null,
 };
 
 function updateLocalInferenceEngineHint() {
@@ -525,6 +529,69 @@ function setLocalModelBadge(badge, state) {
     badge.classList.toggle('is-missing', state === 'missing');
 }
 
+/**
+ * 下载期间把 3 秒的常规轮询提到 1 秒，下载一结束立刻再查一次。
+ *
+ * 常规轮询用来看「模型在不在」，3 秒足够；但下载时它同时也是进度来源，而且下载完成那一刻
+ * 若不马上复查，界面会在「已经下完了」和「显示未就绪」之间干等好几秒。
+ */
+const LOCAL_DOWNLOAD_POLL_MS = 1000;
+let localDownloadPollTimer = null;
+
+function syncDownloadPolling(wasRunning, isRunning) {
+    if (isRunning && !localDownloadPollTimer) {
+        localDownloadPollTimer = setInterval(() => {
+            void refreshLocalInferenceStatus();
+        }, LOCAL_DOWNLOAD_POLL_MS);
+    } else if (!isRunning && localDownloadPollTimer) {
+        clearInterval(localDownloadPollTimer);
+        localDownloadPollTimer = null;
+    }
+    if (wasRunning && !isRunning) {
+        // 刚下完：本次响应里的模型状态是下载结束前扫的，立刻重扫一次拿到「已就绪」
+        void refreshLocalInferenceStatus();
+    }
+}
+
+/**
+ * 把下载进度画进某个状态框：一行文字 + 一条进度条。
+ *
+ * 后端拿不到 Content-Length 时 percent 为 null，此时画不确定态（来回滑动），
+ * 而不是让进度条停在 0% 上，看起来像卡住了。
+ */
+function renderDownloadProgress(box, state) {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    box.textContent = '';
+    // 内容是动态拼的，留着 data-i18n 会在切换语言时被静态译文覆盖掉
+    box.removeAttribute('data-i18n');
+
+    const line = document.createElement('div');
+    line.className = 'local-download-line';
+    line.textContent = state.stage
+        ? `${state.stage}${state.percent === null || state.percent === undefined ? '' : ` · ${state.percent}%`}`
+        : (state.status || t('status.downloading'));
+    box.appendChild(line);
+
+    if (state.total_bytes) {
+        const size = document.createElement('div');
+        size.className = 'local-download-size';
+        const mb = (value) => `${Math.round((value || 0) / (1024 * 1024))} MB`;
+        size.textContent = `${mb(state.downloaded_bytes)} / ${mb(state.total_bytes)}`;
+        box.appendChild(size);
+    }
+
+    const track = document.createElement('div');
+    track.className = 'local-download-bar';
+    const fill = document.createElement('span');
+    if (typeof state.percent === 'number') {
+        fill.style.width = `${Math.max(0, Math.min(100, state.percent))}%`;
+    } else {
+        track.classList.add('is-indeterminate');
+    }
+    track.appendChild(fill);
+    box.appendChild(track);
+}
+
 function renderLocalInferenceStatus(payload) {
     const box = document.getElementById('local-inference-status');
     const button = document.getElementById('local-inference-download-btn');
@@ -532,15 +599,21 @@ function renderLocalInferenceStatus(payload) {
     const t = window.i18n ? window.i18n.t : (key) => key;
     const engine = document.getElementById('local-inference-engine')?.value || 'sensevoice';
     const engineStatus = payload?.engines?.[engine] || payload?.models?.asr?.[engine];
+    const wasRunning = localInferenceStatus.running;
     localInferenceStatus = payload?.download || localInferenceStatus;
+    syncDownloadPolling(wasRunning, localInferenceStatus.running);
+
+    // 下载状态只画在正在下载的那张卡片上：ASR 卡片认当前选中的引擎，Hy-MT2 卡片认 'hymt2'
+    const downloadingThisEngine = localInferenceStatus.running
+        && localInferenceStatus.engine === engine;
 
     if (box && button) {
         if (!payload || !engineStatus) {
             box.textContent = t('hint.localInferenceNotChecked');
             setLocalModelBadge(badge, 'unknown');
             button.disabled = false;
-        } else if (localInferenceStatus.running) {
-            box.textContent = `${t('status.downloading')}: ${localInferenceStatus.status || ''}`;
+        } else if (downloadingThisEngine) {
+            renderDownloadProgress(box, localInferenceStatus);
             setLocalModelBadge(badge, 'downloading');
             button.disabled = true;
         } else if (engineStatus.ready) {
@@ -564,6 +637,10 @@ function renderLocalInferenceStatus(payload) {
             setLocalModelBadge(badge, 'missing');
             button.disabled = false;
         }
+        // 后端一次只跑一个下载任务，别的模型在下时这个按钮点了也只会拿到 409
+        if (localInferenceStatus.running) {
+            button.disabled = true;
+        }
     }
 
     // 渲染 Hy-MT2 本地模型状态：完整管理在「本地模型」卡片，翻译API设置里只显示一行简要状态
@@ -582,11 +659,22 @@ function renderLocalInferenceStatus(payload) {
             : null;
         const engineText = engineKey ? t(engineKey) : '';
 
-        setLocalModelBadge(hymt2Badge, isReady ? 'ready' : 'missing');
+        const hymt2Downloading = localInferenceStatus.running
+            && localInferenceStatus.engine === 'hymt2';
+
+        setLocalModelBadge(hymt2Badge, hymt2Downloading ? 'downloading' : (isReady ? 'ready' : 'missing'));
         if (hymt2CardStatusBox) {
-            hymt2CardStatusBox.textContent = isReady
-                ? (engineText || t('status.localModelReady')) + (modelName ? ` (${modelName})` : '')
-                : t('status.hymt2Missing');
+            if (hymt2Downloading) {
+                renderDownloadProgress(hymt2CardStatusBox, localInferenceStatus);
+            } else {
+                hymt2CardStatusBox.textContent = isReady
+                    ? (engineText || t('status.localModelReady')) + (modelName ? ` (${modelName})` : '')
+                    : t('status.hymt2Missing');
+            }
+        }
+        const hymt2Button = document.getElementById('local-hymt2-download-btn');
+        if (hymt2Button) {
+            hymt2Button.disabled = localInferenceStatus.running;
         }
         if (hymt2SettingsStatusBox) {
             const key = isReady
