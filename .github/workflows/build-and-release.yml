@@ -113,7 +113,7 @@ jobs:
           
           **构建产物**（与本 tag 并行 job 合计）:
           - `Yakutan-*.exe`: 标准版单文件；内置 Silero VAD ONNX 权重
-          - `Yakutan-LocalInference-*.exe`: 本地推理版单文件；内置本地推理运行胶水代码与 Silero VAD ONNX 权重。**SenseVoice / Qwen3 权重与 Qwen Vulkan 运行时**：运行 **Pack Local Inference model bundles** 工作流，将生成的 zip 内 **`local_asr_models`** 解压到与 **`Yakutan-LocalInference-*.exe` 同级**
+          - `Yakutan-LocalInference-*.exe`: 本地推理版单文件；内置本地推理运行胶水代码与 Silero VAD ONNX 权重。**SenseVoice / Qwen3-ASR / Hy-MT2 权重与 llama.cpp Vulkan 运行时**：可在 **WebUI** 内一键下载，或运行 **Pack Local Inference model bundles** 工作流，将生成的 zip 内 **`local_asr_models`** 解压到与 **`Yakutan-LocalInference-*.exe` 同级**
           
           **离线语音识别资源**：可从 [https://github.com/febilly/Yakutan/releases/tag/untagged-1a0522a8c7f4c560a615](https://github.com/febilly/Yakutan/releases/tag/untagged-1a0522a8c7f4c560a615) 下载，也可以在 **WebUI** 中下载。
         files: ./dist/${{ steps.commit_info.outputs.exe_name }}

@@ -44,6 +44,7 @@ jobs:
           $commitDate = git log -1 --date=format:%Y%m%d-%H%M%S --pretty=%cd
           $senseZip = "Yakutan-SenseVoice-bundle-$commitDate.zip"
           $qwenZip = "Yakutan-Qwen3-ASR-bundle-$commitDate.zip"
+          $hymt2Zip = "Yakutan-HyMT2-bundle-$commitDate.zip"
           $in = "${{ inputs.release_tag }}".Trim()
           if ($in -eq "") {
             $relTag = "yakutan-local-inference-models-$commitDate-$commitSha"
@@ -52,13 +53,14 @@ jobs:
           }
           echo "sense_zip=$senseZip" >> $env:GITHUB_OUTPUT
           echo "qwen_zip=$qwenZip" >> $env:GITHUB_OUTPUT
+          echo "hymt2_zip=$hymt2Zip" >> $env:GITHUB_OUTPUT
           echo "release_tag=$relTag" >> $env:GITHUB_OUTPUT
           echo "commit_date=$commitDate" >> $env:GITHUB_OUTPUT
           echo "sha=$commitSha" >> $env:GITHUB_OUTPUT
 
-      - name: Download SenseVoice ONNX, Qwen weights, llama.cpp Vulkan, Qwen vendor
+      - name: Download SenseVoice ONNX, Qwen weights, Hy-MT2 weights, llama.cpp Vulkan, Qwen vendor
         run: |
-          python -c "from local_inference.model_manager import apply_cache_env, download_qwen3_asr, ensure_vendor_sources, prefetch_llama_cpp_vulkan_for_pyinstaller_bundle, prefetch_sensevoice_for_pyinstaller_bundle; apply_cache_env(); ensure_vendor_sources('qwen3-asr'); prefetch_sensevoice_for_pyinstaller_bundle(); prefetch_llama_cpp_vulkan_for_pyinstaller_bundle(); download_qwen3_asr()"
+          python -c "from local_inference.model_manager import apply_cache_env, download_hymt2, download_qwen3_asr, ensure_vendor_sources, prefetch_llama_cpp_vulkan_for_pyinstaller_bundle, prefetch_sensevoice_for_pyinstaller_bundle; apply_cache_env(); ensure_vendor_sources('qwen3-asr'); prefetch_sensevoice_for_pyinstaller_bundle(); prefetch_llama_cpp_vulkan_for_pyinstaller_bundle(); download_qwen3_asr(); download_hymt2()"
 
       - name: Build SenseVoice bundle zip
         shell: pwsh
@@ -147,6 +149,40 @@ jobs:
           Compress-Archive -Path (Join-Path $bundleRoot '*') -DestinationPath $out -Force
           Remove-Item -Recurse -Force $stageRoot
 
+      - name: Build Hy-MT2 bundle zip
+        shell: pwsh
+        run: |
+          # 权重文件名跟着量化版本走，从代码里取，避免 workflow 和 model_manager 各写一份
+          $modelFile = python -c "from local_inference.model_manager import HYMT2_MODEL_FILE; print(HYMT2_MODEL_FILE)"
+          $hymt2Src = "./local_asr_models/hymt2"
+          if (-not (Test-Path (Join-Path $hymt2Src $modelFile))) {
+            throw "缺少 Hy-MT2 权重: $modelFile"
+          }
+          $hymt2BinSrc = "./local_asr_models/qwen_llama_vulkan_bin"
+          foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll", "libomp140.x86_64.dll")) {
+            if (-not (Test-Path (Join-Path $hymt2BinSrc $f))) { throw "缺少 llama Vulkan DLL: $f" }
+          }
+          $stageRoot = Join-Path "./dist" "_hymt2_pack_layout"
+          $bundleRoot = Join-Path $stageRoot "zip_root"
+          $dest = Join-Path $bundleRoot "local_asr_models/hymt2"
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+          # 排除 .part：下载中断留下的半截文件不能进包
+          Copy-Item -Path (Join-Path $hymt2Src "*") -Destination $dest -Force -Exclude "*.part"
+          # Hy-MT2 与 Qwen3-ASR 共用同一套 llama.cpp 运行时。两个包各带一份（约 75MB，占
+          # 本包 7%），换来「解压即用」；只装翻译模型的用户不必再去下 Qwen 包。两个包由同一次
+          # 运行产出，文件一致，先后解压互相覆盖没有影响。
+          $binDest = Join-Path $bundleRoot "local_asr_models/qwen_llama_vulkan_bin"
+          New-Item -ItemType Directory -Path $binDest -Force | Out-Null
+          Copy-Item -Path (Join-Path $hymt2BinSrc "*") -Destination $binDest -Force
+          $readmeCn = "请把local_asr_models文件夹放在与主程序exe同级目录下"
+          $readmeEn = "Please place the local_asr_models folder in the same directory as the main executable"
+          New-Item -ItemType File -Path (Join-Path $bundleRoot $readmeCn) -Force | Out-Null
+          New-Item -ItemType File -Path (Join-Path $bundleRoot $readmeEn) -Force | Out-Null
+          $out = Join-Path "./dist" "${{ steps.meta.outputs.hymt2_zip }}"
+          # 1GB 的 GGUF 已经是量化数据，再压也就省个位数百分比，用 Fastest 省几分钟
+          Compress-Archive -Path (Join-Path $bundleRoot '*') -DestinationPath $out -Force -CompressionLevel Fastest
+          Remove-Item -Recurse -Force $stageRoot
+
       - name: Create or update Release with bundle zips
         uses: softprops/action-gh-release@v1
         with:
@@ -162,10 +198,15 @@ jobs:
 
             将任一 zip 内的 **`local_asr_models`** 文件夹解压到 **`Yakutan-LocalInference.exe` 所在目录**（与 exe 同级）。
 
-            - `${{ steps.meta.outputs.sense_zip }}`：**SenseVoice** INT8 ONNX
-            - `${{ steps.meta.outputs.qwen_zip }}`：**Qwen3-ASR** ONNX×2 + GGUF + llama.cpp Vulkan DLL
+            - `${{ steps.meta.outputs.sense_zip }}`：**SenseVoice** INT8 ONNX（识别，CPU）
+            - `${{ steps.meta.outputs.qwen_zip }}`：**Qwen3-ASR** ONNX×2 + GGUF + llama.cpp Vulkan DLL（识别）
+            - `${{ steps.meta.outputs.hymt2_zip }}`：**Hy-MT2** GGUF + llama.cpp Vulkan DLL（本地翻译）
+
+            按需下载，可只下其中一个。Qwen3-ASR 与 Hy-MT2 共用同一套 llama.cpp 运行时，两个包
+            各自带了一份，同时解压会互相覆盖同样的文件，不影响使用。
           files: |
             ./dist/${{ steps.meta.outputs.sense_zip }}
             ./dist/${{ steps.meta.outputs.qwen_zip }}
+            ./dist/${{ steps.meta.outputs.hymt2_zip }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
