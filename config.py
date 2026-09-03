@@ -581,6 +581,11 @@ OSC_SEND_ERROR_MESSAGES = False
 OSC_QUERY_ENABLED = True
 OSCQUERY_APP_NAME = 'DeafaultAppName'
 
+# 启动时主动读取一次游戏内的静音状态（查询 VRChat 自己的 OSCQuery 服务），
+# 这样不必等到玩家切换一次麦克风才知道状态。读不到时静默退回事件驱动。
+OSC_MUTE_PROBE_ENABLED = True
+OSC_MUTE_PROBE_TIMEOUT_SECONDS = 3.0
+
 # ============================================================================
 # 线程池配置
 # ============================================================================
@@ -659,6 +664,7 @@ def apply_cli_env() -> None:
     global OSC_SEND_TARGET_PORT, OSC_COMPAT_MODE, OSC_COMPAT_LISTEN_PORT
     global BYPASS_OSC_UDP_PORT_CHECK, OSC_SEND_ERROR_MESSAGES
     global OSC_QUERY_ENABLED, OSCQUERY_APP_NAME
+    global OSC_MUTE_PROBE_ENABLED
     global IPC_ENABLED, IPC_HOST, IPC_DISCOVERY_FILE
 
     VAD_ENABLED = _read_env_bool('VAD_ENABLED', VAD_ENABLED)
@@ -777,6 +783,9 @@ def apply_cli_env() -> None:
     OSC_QUERY_ENABLED = _read_env_bool('OSC_QUERY_ENABLED', OSC_QUERY_ENABLED)
     OSCQUERY_APP_NAME = _read_first_env(
         'OSCQUERY_APP_NAME', default=OSCQUERY_APP_NAME
+    )
+    OSC_MUTE_PROBE_ENABLED = _read_env_bool(
+        'OSC_MUTE_PROBE_ENABLED', OSC_MUTE_PROBE_ENABLED
     )
 
     IPC_ENABLED = _read_env_bool('IPC_ENABLED', IPC_ENABLED)

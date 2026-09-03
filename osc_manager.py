@@ -3,10 +3,12 @@ OSC (Open Sound Control) 管理模块
 负责处理VRChat的OSC通信，包括接收静音消息和发送聊天框消息
 """
 import asyncio
+import json
 import logging
 import time
 import threading
-from typing import Optional, Tuple
+import urllib.request
+from typing import List, Optional, Tuple
 from dataclasses import dataclass
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
@@ -40,6 +42,11 @@ PRIORITY_HIGH = 1  # 最终确认的消息
 PRIORITY_LOW = 2   # ongoing 消息
 
 VRCHAT_MUTE_PATH = "/avatar/parameters/MuteSelf"
+
+# VRChat 自己也会发布一个 OSCQuery 服务，节点树里带参数当前值，
+# 可以用来在启动时主动读取静音状态（HTTP 端口每次启动都是随机的，只能靠 mDNS 发现）
+VRCHAT_OSCQUERY_SERVICE_TYPE = "_oscjson._tcp.local."
+VRCHAT_OSCQUERY_NAME_PREFIX = "VRChat-Client-"
 
 @dataclass
 class QueuedMessage:
@@ -239,8 +246,9 @@ class OSCManager:
             )
             return
 
-        previous = self._last_mute_value
-        self._last_mute_value = mute_value
+        with self._oscquery_lock:
+            previous = self._last_mute_value
+            self._last_mute_value = mute_value
         if previous == mute_value:
             self._emit(
                 f"[OSC] Received duplicated MuteSelf={mute_value} (raw={raw_value!r}), ignored",
@@ -259,7 +267,186 @@ class OSCManager:
             else:
                 self._emit("[OSCQuery] Linked with VRChat (received first MuteSelf event)")
         self._notify_mute_callback(mute_value)
-    
+
+    @staticmethod
+    def _http_get_json(url: str, timeout: float):
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            body = response.read()
+        return json.loads(body.decode("utf-8", "replace"))
+
+    @staticmethod
+    def _find_oscquery_node(root, path: str):
+        """Walk an OSCQuery tree (CONTENTS nesting) down to the node at `path`."""
+        node = root
+        for segment in path.strip("/").split("/"):
+            if not isinstance(node, dict):
+                return None
+            contents = node.get("CONTENTS")
+            if not isinstance(contents, dict):
+                return None
+            node = contents.get(segment)
+        return node
+
+    @classmethod
+    def _extract_mute_from_node(cls, node) -> Optional[bool]:
+        """Read a bool out of an OSCQuery node: VALUE first, TYPE tag as fallback."""
+        if not isinstance(node, dict):
+            return None
+
+        values = node.get("VALUE")
+        if isinstance(values, list) and values:
+            parsed = cls._parse_mute_value(values[0])
+            if parsed is not None:
+                return parsed
+
+        type_tag = node.get("TYPE")
+        if type_tag == "T":
+            return True
+        if type_tag == "F":
+            return False
+        return None
+
+    def _discover_vrchat_oscquery_endpoints(self, timeout: float) -> List[Tuple[str, int]]:
+        """Browse mDNS for VRChat's own OSCQuery HTTP service (blocking)."""
+        from zeroconf import ServiceBrowser, Zeroconf
+
+        endpoints: List[Tuple[str, int]] = []
+        discovered = threading.Event()
+        info_timeout_ms = max(500, int(timeout * 1000))
+
+        class _VRChatServiceListener:
+            def add_service(self, zeroconf_instance, service_type, name):
+                if not name.startswith(VRCHAT_OSCQUERY_NAME_PREFIX):
+                    return
+                try:
+                    info = zeroconf_instance.get_service_info(
+                        service_type, name, timeout=info_timeout_ms
+                    )
+                except Exception as error:
+                    logger.debug("[OSCQuery] Failed to resolve %s: %r", name, error)
+                    return
+                if info is None or not info.port:
+                    return
+                for address in info.parsed_addresses():
+                    endpoint = (address, int(info.port))
+                    if endpoint not in endpoints:
+                        endpoints.append(endpoint)
+                if endpoints:
+                    discovered.set()
+
+            def update_service(self, zeroconf_instance, service_type, name):
+                self.add_service(zeroconf_instance, service_type, name)
+
+            def remove_service(self, zeroconf_instance, service_type, name):
+                pass
+
+        zeroconf_instance = Zeroconf()
+        try:
+            ServiceBrowser(
+                zeroconf_instance,
+                VRCHAT_OSCQUERY_SERVICE_TYPE,
+                _VRChatServiceListener(),
+            )
+            discovered.wait(timeout)
+        finally:
+            zeroconf_instance.close()
+        return endpoints
+
+    def _fetch_mute_state_from_endpoint(
+        self, host: str, port: int, timeout: float
+    ) -> Optional[bool]:
+        host_part = f"[{host}]" if ":" in host else host
+        base_url = f"http://{host_part}:{port}"
+
+        try:
+            node = self._http_get_json(base_url + VRCHAT_MUTE_PATH, timeout)
+        except Exception as error:
+            logger.debug("[OSCQuery] Leaf query failed on %s: %r", base_url, error)
+            node = None
+
+        mute_value = self._extract_mute_from_node(node)
+        if mute_value is not None:
+            return mute_value
+
+        # 叶子节点查不到就退回整棵树再找一次
+        try:
+            root = self._http_get_json(base_url + "/", timeout)
+        except Exception as error:
+            logger.debug("[OSCQuery] Root query failed on %s: %r", base_url, error)
+            return None
+        return self._extract_mute_from_node(
+            self._find_oscquery_node(root, VRCHAT_MUTE_PATH)
+        )
+
+    def _probe_mute_state_blocking(self, timeout: float) -> Optional[bool]:
+        endpoints = self._discover_vrchat_oscquery_endpoints(timeout)
+        if not endpoints:
+            self._emit(
+                "[OSCQuery] VRChat OSCQuery service not found; falling back to event-driven mute state",
+                level="debug",
+            )
+            return None
+
+        for host, port in endpoints:
+            mute_value = self._fetch_mute_state_from_endpoint(host, port, timeout)
+            if mute_value is not None:
+                self._emit(f"[OSCQuery] Probed MuteSelf={mute_value} from {host}:{port}")
+                return mute_value
+
+        self._emit(
+            "[OSCQuery] VRChat OSCQuery service found but MuteSelf value is unavailable",
+            level="debug",
+        )
+        return None
+
+    async def probe_initial_mute_state(self, timeout: Optional[float] = None) -> Optional[bool]:
+        """启动时主动读取一次游戏内的静音状态，避免必须等玩家切换一次麦克风。
+
+        走的是 VRChat 自己发布的 OSCQuery HTTP 服务（节点树带当前值）。
+        只在还没收到过任何真实 MuteSelf 事件时生效；读不到就静默放弃。
+        """
+        if not bool(getattr(app_config, "OSC_MUTE_PROBE_ENABLED", True)):
+            return None
+
+        try:
+            probe_timeout = float(
+                timeout
+                if timeout is not None
+                else getattr(app_config, "OSC_MUTE_PROBE_TIMEOUT_SECONDS", 3.0)
+            )
+        except (TypeError, ValueError):
+            probe_timeout = 3.0
+        probe_timeout = max(0.5, min(10.0, probe_timeout))
+
+        with self._oscquery_lock:
+            if self._last_mute_value is not None:
+                return None
+
+        try:
+            mute_value = await asyncio.to_thread(
+                self._probe_mute_state_blocking, probe_timeout
+            )
+        except Exception as error:
+            self._emit(f"[OSCQuery] Failed to probe initial mute state: {error!r}", level="warning")
+            return None
+
+        if mute_value is None:
+            return None
+
+        with self._oscquery_lock:
+            # 探测期间收到了真实事件，以事件为准
+            if self._last_mute_value is not None:
+                self._emit(
+                    "[OSCQuery] Discarded probed mute state; a live MuteSelf event arrived first",
+                    level="debug",
+                )
+                return None
+            self._last_mute_value = mute_value
+
+        self._emit(f"[OSCQuery] Applying probed initial MuteSelf={mute_value}")
+        self._notify_mute_callback(mute_value)
+        return mute_value
+
     async def start_server(self, app_name: Optional[str] = None):
         """Start the configured OSC receive service and wait for callbacks."""
         if app_name is not None:

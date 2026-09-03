@@ -603,6 +603,12 @@ async def main(
         audio_capture_task(state, state.recognition_instance)
     )
 
+    # 主动读取一次游戏当前的静音状态，这样开着游戏中途启动也能立刻对齐，
+    # 不必等玩家切换一次麦克风。放在识别实例与音频流就绪之后再探测。
+    mute_probe_task = None
+    if effective_mic_control:
+        mute_probe_task = asyncio.create_task(osc_manager.probe_initial_mute_state())
+
     # ---- 字幕状态同步任务 ----
     async def _subtitles_sync_loop():
         """定期将 AppState.subtitles_state 同步到模块级变量。"""
@@ -621,6 +627,8 @@ async def main(
 
         capture_task.cancel()
         sync_task.cancel()
+        if mute_probe_task is not None and not mute_probe_task.done():
+            mute_probe_task.cancel()
 
         try:
             await asyncio.wait_for(capture_task, timeout=2.0)
