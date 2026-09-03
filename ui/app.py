@@ -1022,6 +1022,17 @@ def receive_vrcx_context():
     if not ok:
         status_code = 403 if reason == 'invalid token' else 400
         return jsonify({'success': False, 'message': reason}), status_code
+
+    try:
+        from app_state import get_state
+        live_state = get_state()
+        if live_state and live_state.recognition_instance:
+            instance = live_state.recognition_instance
+            if hasattr(instance, "notify_context_changed"):
+                instance.notify_context_changed()
+    except Exception as e:
+        logger.debug("Failed to notify ASR context changed: %s", e)
+
     return ('', 204)
 
 

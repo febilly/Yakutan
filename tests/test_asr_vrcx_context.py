@@ -348,3 +348,112 @@ def test_local_qwen3_asr_receives_fresh_vrcx_context(monkeypatch):
     assert "VRChat ASR hints" in engine.corpus_text
     assert "Test World" in engine.corpus_text
     assert engine.update_context is False
+
+
+def test_qwen_realtime_handles_mismatched_server_event_item_ids(monkeypatch):
+    import speech_recognizers.qwen_speech_recognizer as qwen_mod
+
+    class DummyTranscriptionParams:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class DummyConversation:
+        def __init__(self):
+            self.updates = []
+
+        def update_session(self, **kwargs):
+            self.updates.append(kwargs)
+
+    _store_vrcx_context()
+    monkeypatch.setattr(qwen_mod, "TranscriptionParams", DummyTranscriptionParams)
+
+    recognizer = qwen_mod.QwenSpeechRecognizer(callback=DummyCallback(), corpus_text="InitialTerm")
+    adapter = recognizer._create_adapter()
+    conversation = DummyConversation()
+    recognizer._conversation = conversation
+    recognizer._applied_transcription_corpus_text = "InitialTerm"
+
+    # Simulate DashScope real-world event flow with different item IDs
+    adapter.on_event({"type": "input_audio_buffer.speech_started", "item_id": "buffer_item_start_1"})
+    adapter.on_event({"type": "input_audio_buffer.committed", "item_id": "commit_msg_1"})
+    adapter.on_event({"type": "conversation.item.input_audio_transcription.text", "item_id": "trans_1", "text": "hello"})
+
+    # During speech, context update should be deferred
+    assert recognizer._is_transcription_context_idle_locked() is False
+
+    adapter.on_event({"type": "input_audio_buffer.speech_stopped", "item_id": "buffer_item_stop_1"})
+    adapter.on_event({"type": "conversation.item.input_audio_transcription.completed", "item_id": "trans_1", "transcript": "hello"})
+
+    # After utterance completes, active item IDs must be empty and session must be idle
+    assert len(recognizer._active_transcription_item_ids) == 0
+    assert recognizer._input_speech_active is False
+    assert recognizer._is_transcription_context_idle_locked() is True
+
+    # Now notify context changed; it must immediately update session without deadlock
+    recognizer.notify_context_changed()
+    assert len(conversation.updates) == 1
+    applied = conversation.updates[0]["transcription_params"].kwargs["corpus_text"]
+    assert "Test World" in applied
+
+
+def test_mono_audio_wrapper_forwards_notify_context_changed():
+    from speech_recognizers.base_speech_recognizer import MonoAudioSpeechRecognizer
+
+    class SpyRecognizer(DummyCallback):
+        def __init__(self):
+            self.notified = 0
+
+        def notify_context_changed(self):
+            self.notified += 1
+
+    spy = SpyRecognizer()
+    wrapper = MonoAudioSpeechRecognizer(spy)
+    wrapper.notify_context_changed()
+    assert spy.notified == 1
+
+
+def test_qwen_realtime_reconnects_on_context_change_when_idle(monkeypatch):
+    import speech_recognizers.qwen_speech_recognizer as qwen_mod
+
+    _store_vrcx_context()
+    recognizer = qwen_mod.QwenSpeechRecognizer(callback=DummyCallback(), corpus_text="OldTerm")
+    recognizer._conversation = object()
+    recognizer._should_run = True
+    recognizer._applied_transcription_corpus_text = "OldTerm"
+
+    reconnected = []
+    monkeypatch.setattr(recognizer, "_trigger_reconnect_async", lambda: reconnected.append(True))
+
+    recognizer.notify_context_changed()
+    assert len(reconnected) == 1
+
+
+def test_qwen_realtime_defers_reconnect_until_speech_finishes(monkeypatch):
+    import speech_recognizers.qwen_speech_recognizer as qwen_mod
+
+    _store_vrcx_context()
+    recognizer = qwen_mod.QwenSpeechRecognizer(callback=DummyCallback(), corpus_text="OldTerm")
+    recognizer._conversation = object()
+    recognizer._should_run = True
+    recognizer._applied_transcription_corpus_text = "OldTerm"
+
+    reconnected = []
+    monkeypatch.setattr(recognizer, "_trigger_reconnect_async", lambda: reconnected.append(True))
+
+    # Speech in progress
+    recognizer._mark_input_speech_started("item-1")
+    recognizer._track_transcription_item("trans-1")
+
+    recognizer.notify_context_changed()
+    # Should NOT reconnect while speaking
+    assert len(reconnected) == 0
+    assert recognizer._pending_transcription_corpus_text is not None
+
+    # Speech finishes
+    recognizer._mark_input_speech_stopped("item-1")
+    recognizer._mark_transcription_item_done("trans-1")
+
+    # Should trigger reconnect immediately upon completion
+    assert len(reconnected) == 1
+
+

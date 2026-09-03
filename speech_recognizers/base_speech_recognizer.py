@@ -79,6 +79,10 @@ class SpeechRecognizer(ABC):
     def get_last_package_delay(self) -> Optional[int]:
         """Latency in milliseconds for the last package, if available."""
 
+    def notify_context_changed(self) -> None:
+        """Notify the recognizer that external context (such as VRCX) has changed."""
+        pass
+
 
 def mix_pcm16le_to_mono(data: bytes, channels: int) -> bytes:
     """Downmix little-endian 16-bit PCM audio to mono."""
@@ -148,3 +152,8 @@ class MonoAudioSpeechRecognizer(SpeechRecognizer):
 
     def get_last_package_delay(self) -> Optional[int]:
         return self._recognizer.get_last_package_delay()
+
+    def notify_context_changed(self) -> None:
+        if hasattr(self._recognizer, "notify_context_changed"):
+            self._recognizer.notify_context_changed()
+

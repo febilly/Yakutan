@@ -102,6 +102,7 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
         session_id = session.get("id")
         if session_id:
             self._recognizer._update_session_id(str(session_id))
+            print(f"[Qwen] ✓ DashScope 服务端已确认会话更新 (session_id={session_id})")
 
     def _handle_speech_started(self, message: Dict[str, Any]) -> None:
         self._recognizer._mark_input_speech_started(message.get("item_id"))
@@ -110,7 +111,7 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
         self._recognizer._mark_input_speech_stopped(message.get("item_id"))
 
     def _handle_audio_committed(self, message: Dict[str, Any]) -> None:
-        self._recognizer._track_transcription_item(message.get("item_id"))
+        pass
 
     def _handle_transcription_text(self, message: Dict[str, Any]) -> None:
         item_id = message.get("item_id")
@@ -204,6 +205,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         self._keepalive_stop_event = threading.Event()
         self._connection_closed: bool = False  # 标记连接是否已关闭
         self._should_run: bool = False  # 标记服务是否应该运行（用于自动重连）
+        self._reconnecting: bool = False  # 标记是否正在重建连接
 
         options = dict(recognition_kwargs)
         self._model = options.pop("model", "qwen3-asr-flash-realtime")
@@ -412,6 +414,50 @@ class QwenSpeechRecognizer(SpeechRecognizer):
                 print(f"[WebSocket] Reconnection on resume failed: {e}")
                 with self._lock:
                     self._connection_closed = True
+        else:
+            self._refresh_dynamic_transcription_context()
+
+    def notify_context_changed(self) -> None:
+        """外部上下文（如 VRCX）发生变更时通知刷新。若空闲则平滑重建连接，保证服务端100%生效新热词。"""
+        corpus_text = self._resolve_corpus_text()
+        with self._lock:
+            conversation = self._conversation
+            if conversation is None:
+                return
+            if corpus_text == self._applied_transcription_corpus_text:
+                return
+            if not self._is_transcription_context_idle_locked():
+                self._pending_transcription_corpus_text = corpus_text
+                print("[Qwen] 检测到上下文变更，当前正在语音识别中，将在本句结束后平滑重建连接...")
+                return
+
+        with self._lock:
+            can_reconnect = self._should_run and not getattr(self, "_reconnecting", False)
+
+        if can_reconnect:
+            print("[Qwen] 检测到上下文变更且处于空闲状态，正在平滑重建连接以生效新世界/玩家热词...")
+            self._trigger_reconnect_async()
+        else:
+            self._refresh_dynamic_transcription_context()
+
+    def _trigger_reconnect_async(self) -> None:
+        """异步触发重建连接，避免阻塞调用方线程。"""
+        with self._lock:
+            if getattr(self, "_reconnecting", False):
+                return
+            self._reconnecting = True
+
+        def _do_reconnect():
+            try:
+                self._reconnect()
+            except Exception as e:
+                print(f"[Qwen] 平滑重建连接失败: {e}")
+            finally:
+                with self._lock:
+                    self._reconnecting = False
+
+        thread = threading.Thread(target=_do_reconnect, daemon=True, name="QwenContextReconnect")
+        thread.start()
 
     def get_last_request_id(self) -> Optional[str]:
         with self._lock:
@@ -520,17 +566,13 @@ class QwenSpeechRecognizer(SpeechRecognizer):
     def _is_transcription_context_idle_locked(self) -> bool:
         return not self._input_speech_active and not self._active_transcription_item_ids
 
-    def _mark_input_speech_started(self, item_id: Optional[Any]) -> None:
+    def _mark_input_speech_started(self, item_id: Optional[Any] = None) -> None:
         with self._lock:
             self._input_speech_active = True
-            if item_id:
-                self._active_transcription_item_ids.add(str(item_id))
 
-    def _mark_input_speech_stopped(self, item_id: Optional[Any]) -> None:
+    def _mark_input_speech_stopped(self, item_id: Optional[Any] = None) -> None:
         with self._lock:
             self._input_speech_active = False
-            if item_id:
-                self._active_transcription_item_ids.add(str(item_id))
 
     def _track_transcription_item(self, item_id: Optional[Any]) -> None:
         if not item_id:
@@ -539,9 +581,21 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._active_transcription_item_ids.add(str(item_id))
 
     def _mark_transcription_item_done(self, item_id: Optional[Any]) -> None:
+        should_reconnect = False
         if item_id:
             with self._lock:
                 self._active_transcription_item_ids.discard(str(item_id))
+                if (
+                    self._pending_transcription_corpus_text is not None
+                    and self._is_transcription_context_idle_locked()
+                    and self._should_run
+                    and self._conversation is not None
+                    and not getattr(self, "_reconnecting", False)
+                ):
+                    should_reconnect = True
+        if should_reconnect:
+            print("[Qwen] 本句识别完成，正在平滑重建连接以生效新世界/玩家上下文...")
+            self._trigger_reconnect_async()
 
     def _apply_transcription_context_update(
         self,
@@ -550,6 +604,10 @@ class QwenSpeechRecognizer(SpeechRecognizer):
     ) -> None:
         try:
             conversation.update_session(**self._build_update_session_kwargs(corpus_text))
+            preview = corpus_text.replace("\n", " ").strip()
+            if len(preview) > 60:
+                preview = preview[:60] + "..."
+            print(f"[Qwen] ✓ 已向 DashScope 发送动态上下文更新: {preview}")
         except Exception as e:
             print(f"[Qwen] Failed to refresh ASR context: {e}")
             return
@@ -689,6 +747,10 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             corpus_text = self._resolve_corpus_text()
             update_kwargs = self._build_update_session_kwargs(corpus_text)
             conversation.update_session(**update_kwargs)
+            preview = corpus_text.replace("\n", " ").strip()
+            if len(preview) > 60:
+                preview = preview[:60] + "..."
+            print(f"[Qwen] ✓ 已平滑重建连接并成功加载新上下文: {preview}")
             with self._lock:
                 self._applied_transcription_corpus_text = corpus_text
             
