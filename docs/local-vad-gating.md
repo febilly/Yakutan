@@ -13,8 +13,8 @@ Web UI 中的入口为「高级设置 -> VAD」。本地音频识别卡片只保
 
 本地识别开启「启用增量识别」时，中间结果不再按固定间隔轮询，而是由 VAD 状态驱动：
 
-- **短停顿触发**：说话中连续静音达到 `LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS`（默认 100ms）时，视为一个分句位置（如逗号），立即对当前累积音频做一次完整本地识别；同一次停顿只触发一次，重新开口后再次武装。
-- **限流**：`LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL`（默认 1s）是两次增量更新的最小间隔。
+- **短停顿触发**：说话中连续静音达到 `LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS`（默认 10ms，即第一个被判为非语音的 VAD 分块）时，视为一个分句位置（如逗号），立即对当前累积音频做一次完整本地识别；同一次停顿只触发一次，重新开口后再次武装。
+- **限流**：`LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL`（默认 0.3s）是两次增量更新的最小间隔。这个值不能设大：一次增量识别之后要等满该间隔，期间出现的停顿一律不触发，设成秒级会让「一停顿就出结果」失效（说一句 2s 的话根本等不到）。真正的限流来自单线程识别执行器——上一次识别没跑完，下一次自然排队并合并快照。
 - **保底**：`LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL`（默认 4s）内没有任何增量更新时，强制刷新一次中间结果。
 - 静音时长继续由 `LOCAL_VAD_SILENCE_DURATION` 控制整句提交（断句），与增量触发互相独立。
 
@@ -58,10 +58,25 @@ VAD_SILENCE_DURATION_MAX = 6.0
 ONLINE_VAD_END_BURST_MS = 200           # 在线门控：合成静音降级路径的安全余量（毫秒）
 
 LOCAL_INCREMENTAL_ASR = True
-LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 100
-LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = 1.0
+LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 10
+LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = 0.3
 LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 4.0
+
+BLOCK_SIZE = 512   # 采集块 = 32ms = 恰好一个 Silero 分析窗
 ```
+
+## 触发延迟从哪来
+
+以「信号里语音真正结束」为零点，代码侧的延迟只有三项（实测，`temp/录音.wav` + 精确数字静音）：
+
+| 环节 | 延迟 | 说明 |
+|------|------|------|
+| Silero 判静音 | ~56ms | 模型固有，调 `LOCAL_VAD_THRESHOLD` 不改变 |
+| 采集块量化 | 0 ~ 一个 `BLOCK_SIZE` | 1600 帧时实测多出约 60ms；512 帧后降到 32ms 以内 |
+| 整句断句 | `LOCAL_VAD_SILENCE_DURATION` | 默认 800ms，只影响最终结果，不影响增量 |
+
+增量识别在 `BLOCK_SIZE=512` 下实测在语音结束后 **+40ms** 触发。剩下的感知延迟来自麦克风/PortAudio
+缓冲与识别本身的耗时（见 `[本地ASR] 识别完成` 日志里的毫秒数）。
 
 环境变量：
 

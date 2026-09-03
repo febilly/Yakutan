@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 from concurrent.futures import Future, ThreadPoolExecutor
 import logging
 import queue
@@ -23,6 +24,14 @@ LOCAL_VAD_SAMPLE_RATE = 16000
 LOCAL_VAD_CHUNK_SAMPLES = 512
 LOCAL_VAD_CHUNK_DURATION = LOCAL_VAD_CHUNK_SAMPLES / LOCAL_VAD_SAMPLE_RATE
 
+# "从未发生过"的时间戳哨兵。不能用 0.0 —— time.monotonic() 在 Windows 上是
+# 开机以来的秒数，刚开机时它本身就很小，0.0 会被当成"几秒前"而不是"从未"。
+_NEVER = float("-inf")
+
+# 整句识别积压上限。识别速度长期跟不上说话速度时才会触到，触到就说明
+# 已经没救了，与其无限吃内存不如丢最早的一段并告警。
+_MAX_WAITING_FINALS = 8
+
 
 class LocalSpeechRecognizer(SpeechRecognizer):
     """Local VAD + on-device ASR wrapped as the existing recognizer interface."""
@@ -43,7 +52,9 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         self._asr_executor: ThreadPoolExecutor | None = None
         self._active_transcribe_future: Future | None = None
         self._waiting_partial_audio: np.ndarray | None = None
-        self._waiting_final_audio: np.ndarray | None = None
+        # 待识别的整句队列。整句不能像中间结果那样只留一份、后来者覆盖前者——
+        # 那会让还没开跑的整句被下一段整句顶掉，那句话的结果就永远不出来了。
+        self._waiting_finals: collections.deque[np.ndarray] = collections.deque()
         self._running = False
         self._paused = False
         self._lock = threading.RLock()
@@ -51,14 +62,21 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         self._vad = self._create_vad()
         self._pending_samples = np.array([], dtype=np.float32)
         self._last_partial_text = ""
-        self._last_partial_time = 0.0
+        # 两个时间戳，服务两个互不相干的用途，别再合并回一个：
+        # - _last_partial_time：上一次「真的跑了」中间识别的时刻，只给限流用。
+        #   除了真正入队识别，任何地方都不该动它——否则本句还没识别过就被判
+        #   「离上次太近」，本句的第一次停顿触发永远出不来。
+        # - _segment_started_at：本段开口时刻，只给保底刷新用。开口前的长静音
+        #   不该被算成「很久没更新」，否则一开口就会立刻强制刷一次。
+        self._last_partial_time = _NEVER
+        self._segment_started_at = _NEVER
         self._silence_trigger_armed = True
         # 有声内容计数：每处理到一个有声 VAD 分块 +1。
         # 最近一次"已完成"中间结果入队时的快照值若与当前一致，
         # 说明该快照之后缓冲里只追加了静音——中间结果已覆盖整句。
         self._voiced_chunk_seq = 0
         self._last_partial_voiced_seq = -1
-        self._partial_pending_voiced_seq = -1
+        self._waiting_partial_voiced_seq = -1
         self._last_request_id = f"local-{self._engine_name}"
         self._stream_id = 0
         self._corpus_text = (corpus_text or "").strip()
@@ -179,7 +197,9 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             return None
         return text, result
 
-    def _on_transcription_done(self, future: Future, *, stream_id: int, is_final: bool) -> None:
+    def _on_transcription_done(
+        self, future: Future, *, stream_id: int, is_final: bool, voiced_seq: int,
+    ) -> None:
         try:
             payload = future.result()
         except Exception as exc:  # pragma: no cover - runtime safety
@@ -193,8 +213,12 @@ class LocalSpeechRecognizer(SpeechRecognizer):
                 if is_final:
                     self._emit_final_result(text, raw)
                 elif stream_id == self._stream_id:
-                    # 中间结果完成：记录其快照对应的有声计数，供整句复用时比对。
-                    self._last_partial_voiced_seq = self._partial_pending_voiced_seq
+                    # 中间结果完成：记录**这次识别所用快照**对应的有声计数。
+                    # voiced_seq 必须跟着任务走：本次识别在跑的时候还可以再入队
+                    # 一份更新的快照，读共享字段的话会把那份的计数当成本次的，
+                    # 于是整句收束时会误判"中间结果已覆盖整句"而复用旧文本，
+                    # 把两份快照之间说的话整段吞掉。
+                    self._last_partial_voiced_seq = voiced_seq
                     if text != self._last_partial_text:
                         self._last_partial_text = text
                         self._emit_result(text, is_final=False, raw=raw)
@@ -214,12 +238,13 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         if fut is not None and not fut.done():
             return
 
-        if self._waiting_final_audio is not None:
-            audio = self._waiting_final_audio
-            self._waiting_final_audio = None
+        if self._waiting_finals:
+            audio = self._waiting_finals.popleft()
             is_final = True
+            voiced_seq = -1
         elif self._waiting_partial_audio is not None:
             audio = self._waiting_partial_audio
+            voiced_seq = self._waiting_partial_voiced_seq
             self._waiting_partial_audio = None
             is_final = False
         else:
@@ -234,10 +259,13 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         )
         self._active_transcribe_future = self._asr_executor.submit(self._transcribe, audio, is_final=is_final)
         self._active_transcribe_future.add_done_callback(
-            lambda done_future, _sid=stream_id, _fin=is_final: self._on_transcription_done(
-                done_future,
-                stream_id=_sid,
-                is_final=_fin,
+            lambda done_future, _sid=stream_id, _fin=is_final, _seq=voiced_seq: (
+                self._on_transcription_done(
+                    done_future,
+                    stream_id=_sid,
+                    is_final=_fin,
+                    voiced_seq=_seq,
+                )
             )
         )
 
@@ -252,11 +280,21 @@ class LocalSpeechRecognizer(SpeechRecognizer):
                     thread_name_prefix="yakutan-local-inference",
                 )
             if is_final:
-                self._waiting_final_audio = copy
+                # 整句必须排队，不能像中间结果那样覆盖：两份整句是两段不同的话，
+                # 覆盖掉的那段就再也不会被识别了（闭麦→开麦→再闭麦时，第一句
+                # 的识别还排在队里没开跑，就会被第二段整句顶掉，结果永远不出来）。
+                if len(self._waiting_finals) >= _MAX_WAITING_FINALS:
+                    dropped = self._waiting_finals.popleft()
+                    logger.warning(
+                        "整句识别积压超过 %d 段，丢弃最早的 %.1fs——识别速度跟不上说话速度",
+                        _MAX_WAITING_FINALS,
+                        dropped.size / LOCAL_VAD_SAMPLE_RATE,
+                    )
+                self._waiting_finals.append(copy)
             else:
                 self._waiting_partial_audio = copy
-                # 记录这份快照入队时的有声计数（完成时回写到 _last_partial_voiced_seq）。
-                self._partial_pending_voiced_seq = self._voiced_chunk_seq
+                # 这份快照入队时的有声计数，跟着快照走；真正开跑时交给该次任务。
+                self._waiting_partial_voiced_seq = self._voiced_chunk_seq
             self._try_start_transcribe_locked()
 
     def _maybe_emit_partial(self) -> None:
@@ -269,16 +307,12 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         if silence_sec <= 0.0:
             # 正在说话（无停顿）：确保下一次停顿可以触发；继续走保底判定。
             self._silence_trigger_armed = True
-        peek = vad.peek_buffer()
-        if peek is None:
-            return
-        audio, duration = peek
-        if duration < 1.0:
-            return
         now = time.monotonic()
-        elapsed = now - self._last_partial_time
+        # 限流看「离上次真正识别多久」；保底看「离上次刷屏多久，但不早于本段开口」。
+        since_partial = now - self._last_partial_time
+        since_update = now - max(self._last_partial_time, self._segment_started_at)
         min_interval = max(0.0, float(
-            getattr(config, "LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL", 3.0),
+            getattr(config, "LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL", 0.3),
         ))
         fallback_interval = max(min_interval, float(
             getattr(config, "LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL", 4.0),
@@ -295,11 +329,21 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             and silence_sec >= trigger_silence
         )
         # 保底：连续很久没有任何增量更新时强制刷新一次（含完全无停顿的连续说话）。
-        fallback_triggered = elapsed >= fallback_interval
+        fallback_triggered = since_update >= fallback_interval
         if not silence_triggered and not fallback_triggered:
             return
-        # 限流：短停顿触发至少间隔 min_interval 一次。
-        if silence_triggered and elapsed < min_interval:
+        # 限流：短停顿触发至少间隔 min_interval 一次。本段还没识别过时
+        # since_partial 一定很大，所以本段的第一次停顿不会被上一句的限流挡住。
+        if silence_triggered and since_partial < min_interval:
+            return
+        # 判定通过后才去拼缓冲：peek_buffer() 会把整段语音 concatenate 一遍，
+        # 放在判定之前的话，每个 32ms 分块都要复制一次整段音频（还握着 self._lock），
+        # 越说越久开销越大，反过来又推高触发延迟。
+        peek = vad.peek_buffer()
+        if peek is None:
+            return
+        audio, duration = peek
+        if duration < 1.0:
             return
         if silence_triggered:
             self._silence_trigger_armed = False
@@ -346,8 +390,8 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             # 本分块是有声内容：此后缓冲与任何既有中间结果快照不再等价。
             self._voiced_chunk_seq += 1
         if speech_segment is not None:
-            # 整句提交（断句）：下一句的保底计时与短停顿触发从此处重新计。
-            self._last_partial_time = time.monotonic()
+            # 整句提交（断句）：下一句的保底计时从此处重新计。
+            self._segment_started_at = time.monotonic()
             self._silence_trigger_armed = True
             reused = self._try_reuse_partial_as_final(speech_segment)
             if reused is not None:
@@ -359,7 +403,9 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             if not was_speaking:
                 # 新段刚进入说话状态：保底计时从"开口时刻"重新锚定，
                 # 否则开口前的长静音（> 保底间隔）会让开口瞬间被误判为"连续说话很久未更新"而立即触发。
-                self._last_partial_time = time.monotonic()
+                # 注意只动保底那个时间戳——以前这里连限流的时间戳一起重置了，
+                # 结果本句的第一次停顿总被上一句的限流挡掉。
+                self._segment_started_at = time.monotonic()
             self._maybe_emit_partial()
 
     def _feed_samples(self, samples: np.ndarray) -> None:
@@ -403,7 +449,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
                 self._enqueue_transcribe(segment, is_final=True)
         self._last_partial_text = ""
         # 新句子从此刻重新计时：保底间隔从新句子开始计而不是从进程启动计。
-        self._last_partial_time = time.monotonic()
+        self._segment_started_at = time.monotonic()
         self._silence_trigger_armed = True
 
     @staticmethod
@@ -440,13 +486,16 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             self._stream_id = 0
             self._reset_engine_draft()
             self._last_partial_text = ""
-            self._last_partial_time = time.monotonic()
+            # 本次会话还没跑过任何中间识别，限流应视为「从未」，
+            # 否则开麦后的第一句又会被限流挡掉第一次停顿触发。
+            self._last_partial_time = _NEVER
+            self._segment_started_at = time.monotonic()
             self._silence_trigger_armed = True
             self._voiced_chunk_seq = 0
             self._last_partial_voiced_seq = -1
-            self._partial_pending_voiced_seq = -1
+            self._waiting_partial_voiced_seq = -1
             self._waiting_partial_audio = None
-            self._waiting_final_audio = None
+            self._waiting_finals.clear()
             self._active_transcribe_future = None
             if self._asr_executor is None:
                 self._asr_executor = ThreadPoolExecutor(
@@ -471,7 +520,7 @@ class LocalSpeechRecognizer(SpeechRecognizer):
             self._asr_executor = None
         self._active_transcribe_future = None
         self._waiting_partial_audio = None
-        self._waiting_final_audio = None
+        self._waiting_finals.clear()
         with self._lock:
             if self._engine is not None:
                 try:

@@ -319,7 +319,7 @@ function getLocalInferenceConfigFromForm() {
             parseInt(document.getElementById('local-incremental-trigger-silence')?.value || '10', 10) / 1000,
         // 表单以毫秒为单位；对外配置接口沿用秒，在此换算
         incremental_min_interval:
-            parseFloat(document.getElementById('local-incremental-min-interval')?.value || '3000') / 1000,
+            parseFloat(document.getElementById('local-incremental-min-interval')?.value || '300') / 1000,
         incremental_fallback_interval:
             parseFloat(document.getElementById('local-incremental-fallback-interval')?.value || '4000') / 1000,
     };
@@ -356,7 +356,7 @@ function applyLocalInferenceConfig(config) {
     // 表单以毫秒为单位展示；配置接口沿用秒
     if (document.getElementById('local-incremental-min-interval')) {
         document.getElementById('local-incremental-min-interval').value =
-            (config.incremental_min_interval ?? 3.0) * 1000;
+            (config.incremental_min_interval ?? 0.3) * 1000;
     }
     if (document.getElementById('local-incremental-fallback-interval')) {
         document.getElementById('local-incremental-fallback-interval').value =
@@ -3201,7 +3201,7 @@ function loadDefaultConfig() {
             device: getDefaultDeviceValue(),
             incremental_asr: true,
             incremental_trigger_silence: 0.01,
-            incremental_min_interval: 3.0,
+            incremental_min_interval: 0.3,
             incremental_fallback_interval: 4.0,
         });
     }

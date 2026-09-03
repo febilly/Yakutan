@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 import unittest
 import wave
@@ -106,6 +107,31 @@ class _StubEngine:
         if self.calls == 1:
             return {"text": "第一句，第二句", "language": "zh", "language_name": "zh"}
         return {"text": "最终一句", "language": "zh", "language_name": "zh"}
+
+
+class _GatedStubEngine:
+    """每次识别都卡在一个 Event 上，让测试能精确控制"谁在跑、谁在排队"。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.audio_seconds: list[float] = []
+        self.started = [threading.Event(), threading.Event()]
+        self.release = [threading.Event(), threading.Event()]
+
+    def set_language(self, language: str) -> None:
+        return None
+
+    def unload(self) -> None:
+        return None
+
+    def transcribe(self, audio: np.ndarray) -> dict | None:
+        self.calls += 1
+        self.audio_seconds.append(round(audio.size / 16000, 2))
+        index = self.calls - 1
+        if index < len(self.started):
+            self.started[index].set()
+            self.release[index].wait(10)
+        return {"text": f"文本{self.calls}", "language": "zh", "language_name": "zh"}
 
 
 class _CountingStubEngine:
@@ -286,7 +312,8 @@ class LocalInferenceTests(unittest.TestCase):
         try:
             audio = audio.astype(np.float32)
             # 阶段一：制造"启动已久、一直沉默"的陈旧计时（回拨 10 秒 > 5 秒保底间隔）
-            recognizer._last_partial_time = time.monotonic() - 10.0
+            # 保底路径的锚点是 _segment_started_at（限流用的 _last_partial_time 是另一个）
+            recognizer._segment_started_at = time.monotonic() - 10.0
 
             offset = 0
             end_limit = min(6 * sr, len(audio))
@@ -314,13 +341,182 @@ class LocalInferenceTests(unittest.TestCase):
             # 阶段三：保底机制本身仍要有效——把锚点回拨 6 秒（> 5 秒保底间隔）后继续说话 → 应触发增量更新
             while offset < end_limit and not any(not event.is_final for event in callback.events):
                 with recognizer._lock:
-                    recognizer._last_partial_time = time.monotonic() - 6.0
+                    recognizer._segment_started_at = time.monotonic() - 6.0
                     end = min(offset + sr // 10, end_limit)
                     recognizer._feed_samples(audio[offset:end])
                 offset = end
+            # 识别跑在线程池里、结果回调是异步的：音频喂完不代表事件已经落地。
+            # 少了这一段等待，喂完 6 秒音频就断言的话会随机失败。
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline and not any(
+                not event.is_final for event in callback.events
+            ):
+                time.sleep(0.02)
             self.assertTrue(
                 any(not event.is_final for event in callback.events),
                 "锚点超过保底间隔后应触发保底增量更新",
+            )
+        finally:
+            recognizer.stop()
+
+    def test_queued_final_is_not_dropped_by_a_later_final(self) -> None:
+        """回归：排队中的整句不能被后来的整句顶掉。
+
+        闭麦时整句识别入队，若此时中间识别还在跑，它只能排队；这期间重新开麦
+        并再攒出一段（再闭麦 / VAD 又收到声音）会入队第二个整句。以前整句和
+        中间结果一样只留一份、后来者覆盖前者，于是闭麦那句的识别永远不会跑，
+        结果也就永远不出来。"""
+        callback = CollectingCallback()
+        engine = _GatedStubEngine()
+        engine.release[1].set()  # 只卡住第一次识别
+        recognizer = LocalSpeechRecognizer(callback=callback, sample_rate=16000, source_language="auto")
+        recognizer._engine = engine
+        recognizer._ensure_engine = lambda: engine  # type: ignore[assignment]
+        recognizer.start()
+        try:
+            # 中间识别占住执行器
+            recognizer._enqueue_transcribe(np.zeros(2 * 16000, dtype=np.float32), is_final=False)
+            self.assertTrue(engine.started[0].wait(10), "中间识别没有开始")
+
+            # 闭麦的整句 + 开麦后又攒出的整句，两个都只能排队
+            recognizer._enqueue_transcribe(np.zeros(3 * 16000, dtype=np.float32), is_final=True)
+            recognizer._enqueue_transcribe(np.zeros(int(1.5 * 16000), dtype=np.float32), is_final=True)
+
+            engine.release[0].set()
+
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline and sum(
+                1 for event in callback.events if event.is_final
+            ) < 2:
+                time.sleep(0.02)
+
+            finals = [event for event in callback.events if event.is_final]
+            self.assertEqual(len(finals), 2, f"整句结果丢了：{engine.audio_seconds}")
+            self.assertIn(3.0, engine.audio_seconds, "闭麦那句的音频压根没送去识别")
+            self.assertIn(1.5, engine.audio_seconds, "开麦后那段的音频压根没送去识别")
+        finally:
+            for event in engine.release:
+                event.set()
+            recognizer.stop()
+
+    def test_partial_records_its_own_voiced_seq_not_a_newer_snapshot(self) -> None:
+        """回归：中间识别完成时记录的有声计数，必须是**它自己那份快照**的。
+
+        识别 A 在跑的时候还能再入队一份更新的快照 B。以前两者共用一个字段，
+        A 完成时会把 B 的计数当成自己的，于是整句收束时误判"中间结果已覆盖整句"
+        而复用 A 的旧文本，把 A→B 之间说的话整段吞掉。"""
+        callback = CollectingCallback()
+        engine = _GatedStubEngine()
+        recognizer = LocalSpeechRecognizer(callback=callback, sample_rate=16000, source_language="auto")
+        recognizer._engine = engine
+        recognizer._ensure_engine = lambda: engine  # type: ignore[assignment]
+        recognizer.start()
+        try:
+            audio = np.zeros(16000, dtype=np.float32)
+
+            # 快照 A：入队时已累计 10 个有声分块，随即开跑并卡住
+            recognizer._voiced_chunk_seq = 10
+            recognizer._enqueue_transcribe(audio, is_final=False)
+            self.assertTrue(engine.started[0].wait(10), "识别 A 没有开始")
+
+            # A 还在跑的时候又说了话（计数涨到 20），入队更新的快照 B
+            recognizer._voiced_chunk_seq = 20
+            recognizer._enqueue_transcribe(audio, is_final=False)
+
+            # 放行 A；等 B 开跑即说明 A 的完成回调已经写完
+            engine.release[0].set()
+            self.assertTrue(engine.started[1].wait(10), "识别 B 没有接上")
+
+            with recognizer._lock:
+                recorded = recognizer._last_partial_voiced_seq
+                reused = recognizer._try_reuse_partial_as_final(audio)
+            self.assertEqual(recorded, 10, "A 完成时记录的应是自己快照的有声计数")
+            self.assertIsNone(
+                reused,
+                "A 之后还说了话，终句不能复用 A 的文本（会吞掉这中间说的内容）",
+            )
+        finally:
+            for event in engine.release:
+                event.set()
+            recognizer.stop()
+
+    @staticmethod
+    def _longest_voiced_run(audio: np.ndarray, sr: int, need_chunks: int) -> int | None:
+        """返回第一段长度 >= need_chunks 的连续有声分块的起始下标（按 VAD 判定）。"""
+        threshold = float(getattr(config, "LOCAL_VAD_THRESHOLD", 0.50))
+        vad = VADProcessor(
+            sample_rate=sr, threshold=threshold,
+            chunk_duration=LOCAL_VAD_CHUNK_SAMPLES / sr,
+        )
+        vad.update_settings({"vad_mode": "silero", "vad_threshold": threshold})
+        run_start: int | None = None
+        for index in range(len(audio) // LOCAL_VAD_CHUNK_SAMPLES):
+            offset = index * LOCAL_VAD_CHUNK_SAMPLES
+            vad.process_chunk(audio[offset:offset + LOCAL_VAD_CHUNK_SAMPLES])
+            if vad.last_confidence < threshold:
+                run_start = None
+                continue
+            if run_start is None:
+                run_start = index
+            if index - run_start + 1 >= need_chunks:
+                return run_start
+        return None
+
+    def test_first_pause_of_segment_is_not_blocked_by_throttle(self) -> None:
+        """回归：限流计时器只能被"真的跑过一次中间识别"重置。
+
+        以前开口也会重置它，于是本句还没识别过就被判成"离上次太近"，
+        本句的第一次停顿触发永远出不来——短句因此完全等不到增量结果。"""
+        audio, sample_rate = load_audio_file(SAMPLE_WAV)
+        if sample_rate != 16000:
+            self.skipTest("测试音频采样率不是 16kHz")
+
+        sr = 16000
+        # 只留短停顿这一条触发路径：保底间隔调到很大，限流调到明显大于本段时长
+        config.LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 10
+        config.LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = 3.0
+        config.LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 600.0
+
+        # 取一段 Silero 判定为连续有声的语音，保证停顿阶段之前不会有间隙提前触发。
+        # 判据必须用 VAD 本身而不是能量阈值——能量阈值挑出来的片段 VAD 未必认账。
+        audio = audio.astype(np.float32)
+        need = int(1.5 * sr) // LOCAL_VAD_CHUNK_SAMPLES
+        start = self._longest_voiced_run(audio, sr, need)
+        if start is None:
+            self.skipTest("样本音频里找不到 1.5 秒连续有声片段")
+        speech = audio[start * LOCAL_VAD_CHUNK_SAMPLES:(start + need) * LOCAL_VAD_CHUNK_SAMPLES]
+
+        callback = CollectingCallback()
+        recognizer = LocalSpeechRecognizer(callback=callback, sample_rate=16000, source_language="auto")
+        recognizer._engine = _StubEngine()
+        recognizer._ensure_engine = lambda: recognizer._engine  # type: ignore[assignment]
+        enqueued: list[bool] = []
+        recognizer._enqueue_transcribe = (  # type: ignore[assignment]
+            lambda _audio, *, is_final: enqueued.append(is_final)
+        )
+        recognizer.start()
+        try:
+            # 上一句的中间识别发生在 10 秒前 —— 限流早就该过期了
+            throttle_anchor = time.monotonic() - 10.0
+            recognizer._last_partial_time = throttle_anchor
+
+            with recognizer._lock:
+                recognizer._feed_samples(np.zeros(int(1.0 * sr), dtype=np.float32))
+                recognizer._feed_samples(speech)
+            self.assertTrue(recognizer._vad._is_speaking, "连续有声片段未被判为说话")
+            self.assertEqual(
+                recognizer._last_partial_time,
+                throttle_anchor,
+                "开口不应重置限流计时器（它只属于'真的跑过一次中间识别'）",
+            )
+            self.assertFalse(any(not final for final in enqueued), "语音阶段不应触发中间识别")
+
+            # 200ms 短停顿（远小于 800ms 断句阈值）→ 本段的第一次停顿触发
+            with recognizer._lock:
+                recognizer._feed_samples(np.zeros(int(0.2 * sr), dtype=np.float32))
+            self.assertTrue(
+                any(not final for final in enqueued),
+                "本句还没跑过中间识别，第一次停顿不该被上一句的限流挡掉",
             )
         finally:
             recognizer.stop()

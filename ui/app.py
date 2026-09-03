@@ -240,7 +240,7 @@ def _local_inference_config_dict() -> dict:
         'incremental_trigger_silence': int(getattr(
             config, 'LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS', 10)) / 1000,
         'incremental_min_interval': getattr(
-            config, 'LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL', 3.0,
+            config, 'LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL', 0.3,
         ),
         'incremental_fallback_interval': getattr(
             config, 'LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL', 4.0,
@@ -1613,7 +1613,7 @@ def get_defaults():
             'engine': 'sensevoice',
             'incremental_asr': True,
             'incremental_trigger_silence': 0.01,
-            'incremental_min_interval': 3.0,
+            'incremental_min_interval': 0.3,
             'incremental_fallback_interval': 4.0,
         }
         if is_local_inference_ui_enabled()

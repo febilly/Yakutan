@@ -200,7 +200,11 @@ LOCAL_INCREMENTAL_ASR = True
 # 立即对当前累积音频做一次完整本地识别并产出中间结果。
 LOCAL_INCREMENTAL_TRIGGER_SILENCE_MS = 10
 # 限流：两次增量更新之间的最小间隔（秒），短停顿触发至少间隔该时长一次。
-LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = 3.0
+# 注意别设太大：一次增量识别之后要等满这个间隔，期间出现的停顿一律不触发。
+# 取 3.0 时，说一句 2 秒的话再停下来根本等不到停顿触发，只能等 800ms 的整句断句，
+# 「一停顿就出结果」这个设计等于失效。真正的限流其实来自单线程识别执行器
+# （上一次识别没跑完，下一次自然排队并合并快照），这里只需要一个小的下限。
+LOCAL_INCREMENTAL_MIN_UPDATE_INTERVAL = 0.3
 # 保底：连续该时长（秒）没有任何增量更新时，强制刷新一次中间结果。
 LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 4.0
 
@@ -221,7 +225,13 @@ CHANNELS = 1  # 单声道
 DTYPE = 'int16'  # 数据类型
 BITS = 16  # 每个采样的位数
 FORMAT_PCM = 'pcm'  # 音频数据格式
-BLOCK_SIZE = 1600  # 每个缓冲区的帧数
+# 每个缓冲区的帧数。取 512（16kHz 下 32ms）而不是更大的值，有两个原因：
+#   1. 采集块就是 VAD 能感知到停顿的最小粒度——块越大，从"嘴停下"到"VAD 判静音"
+#      之间就要多等半块到一块的时间（1600 帧时实测多出约 60ms）。
+#   2. 512 正好是 Silero 的一个分析窗，采集块能被整除，不会有不足一窗的余数
+#      滞留在 _pending_samples 里再多压 0~32ms。
+# 若在低端设备/高负载下听到采集断续，可回调到 1024（同样是整数个分析窗）。
+BLOCK_SIZE = 512
 
 # 是否将重采样后的音频保存到本地 WAV（调试用）
 SAVE_POST_RESAMPLE_AUDIO = False
