@@ -2,6 +2,7 @@
 应用状态模块 - 集中管理所有运行时可变状态，消除全局变量
 """
 import asyncio
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, TYPE_CHECKING
 
@@ -73,13 +74,18 @@ class AppState:
         # ---- 语言检测 ----
         self.language_detector = None
 
-        # ---- 字幕状态（供控制面板轮询） ----
+        # ---- 字幕状态 ----
         self.subtitles_state: dict = {
             "original": "",
             "translated": "",
             "reverse_translated": "",
             "ongoing": False,
         }
+        # 字幕版本号 + 条件变量：让 SSE 推送能在结果落地的那一刻被唤醒，
+        # 不用靠定时轮询去"看看变了没"。版本号单调递增，订阅方拿着自己
+        # 见过的版本来等，天然不会漏掉两次更新之间的变化。
+        self._subtitles_version: int = 0
+        self._subtitles_cv = threading.Condition()
 
         # ---- 本地 VAD 发送门控 ----
         self.vad_processor = None  # VADProcessor | None
@@ -95,10 +101,28 @@ class AppState:
         ongoing: bool,
         reverse_translated: str = "",
     ):
-        self.subtitles_state["original"] = original
-        self.subtitles_state["translated"] = translated
-        self.subtitles_state["reverse_translated"] = reverse_translated
-        self.subtitles_state["ongoing"] = ongoing
+        with self._subtitles_cv:
+            self.subtitles_state["original"] = original
+            self.subtitles_state["translated"] = translated
+            self.subtitles_state["reverse_translated"] = reverse_translated
+            self.subtitles_state["ongoing"] = ongoing
+            self._subtitles_version += 1
+            self._subtitles_cv.notify_all()
+
+    def subtitles_snapshot(
+        self,
+        since_version: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ) -> tuple[int, dict]:
+        """取字幕快照；给了 *since_version* 就先等到版本变化或超时。
+
+        返回 ``(版本号, 字幕状态的副本)``。超时返回时版本号与传入的相同，
+        调用方据此判断"这次只是心跳，内容没变"。
+        """
+        with self._subtitles_cv:
+            if since_version is not None and since_version == self._subtitles_version:
+                self._subtitles_cv.wait(timeout)
+            return self._subtitles_version, dict(self.subtitles_state)
 
     def ensure_executor(self):
         """如果 executor 已关闭，重新创建。"""

@@ -6,11 +6,12 @@ import asyncio
 import ctypes
 import json
 import threading
+import time
 import logging
 from ctypes import wintypes
 from typing import List, Optional
 from urllib.parse import urlencode
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, Response, render_template, jsonify, request
 from flask_cors import CORS
 import sys
 import os
@@ -1193,6 +1194,89 @@ def get_subtitles():
         "config_applied_at_ms": int(getattr(config, 'CONFIG_APPLIED_AT_MS', 0) or 0),
         "backend_boot_ms": int(getattr(config, 'BACKEND_BOOT_MS', 0) or 0),
     })
+
+def _subtitles_envelope(subtitles: dict) -> dict:
+    """把字幕正文补成和 /api/subtitles 一样的字段集合。"""
+    snapshot = _snapshot_service_status()
+    payload = dict(subtitles)
+    payload['running'] = snapshot['running']
+    payload['lifecycle'] = snapshot['lifecycle']
+    payload['show_reverse_translation'] = bool(
+        getattr(config, 'ENABLE_REVERSE_TRANSLATION', False)
+    )
+    payload['target_language'] = config.TARGET_LANGUAGE
+    payload['config_applied_at_ms'] = int(getattr(config, 'CONFIG_APPLIED_AT_MS', 0) or 0)
+    payload['backend_boot_ms'] = int(getattr(config, 'BACKEND_BOOT_MS', 0) or 0)
+    return payload
+
+
+def _live_app_state():
+    """拿正在运行的 AppState；服务没起来时返回 None。
+
+    直接问 app_state（main 和这里引的是同一个模块），不经过 main 的命名空间，
+    免得受 main 是否已被 import 影响。
+    """
+    try:
+        from app_state import get_state
+        return get_state()
+    except Exception:
+        return None
+
+
+# 字幕正文之外的字段（运行状态 / 目标语言等）不由 update_subtitles 驱动，
+# 等不到唤醒。心跳周期同时也是这些字段的刷新上限，以及察觉客户端断开的上限。
+_SUBTITLES_STREAM_HEARTBEAT_SECONDS = 5.0
+
+
+@app.route('/api/subtitles/stream', methods=['GET'])
+def stream_subtitles():
+    """SSE 推送字幕：结果落地即推，不经过任何轮询。
+
+    直接读 AppState，绕开 main.subtitles_state 那个每 50ms 同步一次的兼容变量
+    （/api/subtitles 仍然走它，那条路没动）。
+    """
+    def generate():
+        version = None
+        last_payload = None
+        while True:
+            state = _live_app_state()
+            if state is None:
+                # 服务还没起来：先把空字幕推出去，然后慢速重试等它起来
+                payload = _subtitles_envelope({
+                    "original": "", "translated": "",
+                    "reverse_translated": "", "ongoing": False,
+                })
+                if payload != last_payload:
+                    last_payload = payload
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                else:
+                    yield ": waiting-for-service\n\n"
+                version = None
+                time.sleep(1.0)
+                continue
+
+            version, subtitles = state.subtitles_snapshot(
+                since_version=version,
+                timeout=_SUBTITLES_STREAM_HEARTBEAT_SECONDS,
+            )
+            payload = _subtitles_envelope(subtitles)
+            if payload == last_payload:
+                # 内容没变（心跳超时返回）：发注释行保活，顺便探测客户端是否还在
+                yield ": heartbeat\n\n"
+                continue
+            last_payload = payload
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+        },
+    )
+
 
 @app.route('/api/target-language', methods=['POST'])
 def set_target_language():

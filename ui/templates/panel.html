@@ -606,16 +606,53 @@
             lastShowReverseTranslation = showReverseTranslation;
         }
 
+        // 字幕走 SSE 推送（/api/subtitles/stream）：识别/翻译结果落地即到，不等轮询。
+        // 连不上或断开时回落到轮询 /api/subtitles，保证面板不会没字幕。
+        let subtitlesStream = null;
+        let subtitlesViaStream = false;
+
+        function startSubtitlesStream() {
+            if (typeof EventSource === 'undefined') return;
+            try {
+                subtitlesStream = new EventSource('/api/subtitles/stream');
+            } catch (err) {
+                console.warn('字幕推送不可用，回落到轮询:', err);
+                return;
+            }
+            subtitlesStream.onopen = () => { subtitlesViaStream = true; };
+            subtitlesStream.onmessage = (event) => {
+                subtitlesViaStream = true;
+                try {
+                    void applySubtitles(JSON.parse(event.data));
+                } catch (err) {
+                    console.error('字幕推送解析失败:', err);
+                }
+            };
+            // EventSource 自己会重连；这里只把标志放掉，让轮询顶上这段空窗
+            subtitlesStream.onerror = () => { subtitlesViaStream = false; };
+        }
+
         async function fetchState() {
             try {
                 const statusRes = await fetch('/api/status');
                 const statusData = await statusRes.json();
-                const subRes = await fetch('/api/subtitles');
-                const subData = await subRes.json();
 
                 const lifecycle = statusData.lifecycle || (statusData.running ? 'running' : 'stopped');
                 isRunning = lifecycle === 'running';
                 renderToggleButton(getEffectiveToggleState(lifecycle));
+
+                // 推送正常时不再拉字幕；断开期间才回落到轮询
+                if (!subtitlesViaStream) {
+                    const subRes = await fetch('/api/subtitles');
+                    await applySubtitles(await subRes.json());
+                }
+            } catch (err) {
+                console.error("Failed to fetch state:", err);
+            }
+        }
+
+        async function applySubtitles(subData) {
+            try {
                 await applyReverseTranslationMode(!!subData.show_reverse_translation);
 
                 if (subData.target_language && subData.target_language !== currentTargetLanguage) {
@@ -632,7 +669,13 @@
                 const elTrans = document.getElementById('trans-text');
                 const elReverse = document.getElementById('reverse-trans-text');
 
-                if (isRunning) {
+                // 优先用这份数据自带的运行状态：推送比状态轮询快，用轮询那份
+                // 会在刚启动时把推过来的字幕当成"没在跑"而清掉。
+                const running = subData.lifecycle
+                    ? subData.lifecycle === 'running'
+                    : (subData.running !== undefined ? !!subData.running : isRunning);
+
+                if (running) {
                     // If text changes, we want to update and keep it scrolled to right 
                     // (so if it overflows, the rightmost latest text is visible)
                     if (elOrig.textContent !== subData.original) {
@@ -668,7 +711,7 @@
                     elReverse.classList.remove('ongoing');
                 }
             } catch (err) {
-                console.error("Failed to fetch state:", err);
+                console.error("Failed to apply subtitles:", err);
             }
         }
 
@@ -744,6 +787,7 @@
         renderQuickLangButtons();
         initResizeHandles();
         renderToggleButton('stopped');
+        startSubtitlesStream();
         setInterval(fetchState, 300);
         fetchState();
     </script>
