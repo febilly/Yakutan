@@ -978,7 +978,7 @@ def _vrcx_context_endpoint_from_request() -> str:
 @app.route('/')
 def index():
     """主页面"""
-    return render_template('index.html')
+    return render_template('index.html', app_version=config.APP_VERSION)
 
 
 @app.route('/api/config', methods=['GET'])

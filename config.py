@@ -9,6 +9,10 @@ from shared.vrchat_text_limits import (
     normalize_osc_text_max_length,
 )
 
+# Public desktop-app version. Keep this in sync with the release tag.
+APP_VERSION = '2.3.0'
+
+
 def _read_env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:

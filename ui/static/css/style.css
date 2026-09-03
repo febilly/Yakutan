@@ -1367,6 +1367,10 @@ footer p {
     margin: 5px 0;
 }
 
+.app-version {
+    white-space: nowrap;
+}
+
 footer a {
     color: var(--primary-color);
     text-decoration: none;
