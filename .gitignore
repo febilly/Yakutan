@@ -42,6 +42,9 @@ local_asr_models/
 .claude/settings.local.json
 remote_inference_service/README.md
 remote_inference_service/run_*.sh
+remote_inference_service/stop_*.sh
 remote_inference_service/tunnel_to_*.bat
+remote_inference_service/stop_*.bat
 remote_inference_service/*.sbatch
 remote_inference_service/*.service
+
