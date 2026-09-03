@@ -378,6 +378,46 @@ class OSCManager:
             self._find_oscquery_node(root, VRCHAT_MUTE_PATH)
         )
 
+    def inspect_vrchat_oscquery(self, timeout: float = 2.0) -> dict:
+        """同步探查 VRChat 的 OSCQuery 服务，供启动前检查使用（阻塞，最多 timeout 秒）。
+
+        返回 {'detected': bool, 'endpoints': [(host, port)], 'osc_ip': str|None, 'osc_port': int|None}，
+        其中 osc_ip / osc_port 来自 VRChat 的 ?HOST_INFO，即它实际接收 OSC 的地址与端口。
+        """
+        result = {"detected": False, "endpoints": [], "osc_ip": None, "osc_port": None}
+        try:
+            endpoints = self._discover_vrchat_oscquery_endpoints(timeout)
+        except Exception as error:
+            self._emit(f"[OSCQuery] Failed to browse for VRChat: {error!r}", level="warning")
+            return result
+
+        if not endpoints:
+            return result
+
+        result["detected"] = True
+        result["endpoints"] = endpoints
+
+        for host, port in endpoints:
+            host_part = f"[{host}]" if ":" in host else host
+            try:
+                host_info = self._http_get_json(
+                    f"http://{host_part}:{port}/?HOST_INFO", timeout
+                )
+            except Exception as error:
+                logger.debug("[OSCQuery] HOST_INFO query failed on %s:%s: %r", host, port, error)
+                continue
+            if not isinstance(host_info, dict):
+                continue
+            try:
+                osc_port = int(host_info.get("OSC_PORT"))
+            except (TypeError, ValueError):
+                continue
+            result["osc_ip"] = host_info.get("OSC_IP") or None
+            result["osc_port"] = osc_port
+            break
+
+        return result
+
     def _probe_mute_state_blocking(self, timeout: float) -> Optional[bool]:
         endpoints = self._discover_vrchat_oscquery_endpoints(timeout)
         if not endpoints:

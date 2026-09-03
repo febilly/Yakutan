@@ -1,5 +1,5 @@
 """
-检测占用本机指定 UDP 端口的进程（用于 OSC 端口冲突提示）。
+检测占用本机指定 UDP 端口的进程（用于 OSC 端口冲突提示），以及 VRChat 是否在运行。
 """
 from __future__ import annotations
 
@@ -198,6 +198,51 @@ def get_udp_port_occupants(port: int) -> List[Dict[str, object]]:
     except Exception:
         return []
     return _dedupe_entries(raw)
+
+
+def _win_vrchat_running() -> bool:
+    try:
+        proc = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq VRChat.exe", "/NH"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError:
+        return False
+    return "vrchat.exe" in (proc.stdout or "").lower()
+
+
+def _posix_vrchat_running() -> bool:
+    for pattern in ("VRChat.exe", "VRChat"):
+        try:
+            proc = subprocess.run(
+                ["pgrep", "-x", pattern],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except (FileNotFoundError, OSError):
+            return False
+        if proc.returncode == 0 and (proc.stdout or "").strip():
+            return True
+    return False
+
+
+def is_vrchat_running() -> bool:
+    """
+    本机是否有 VRChat 进程在运行。检测失败时返回 False，不阻断服务启动。
+    """
+    try:
+        if sys.platform == "win32":
+            return _win_vrchat_running()
+        return _posix_vrchat_running()
+    except Exception:
+        return False
 
 
 def get_non_vrchat_udp_port_occupants(port: int) -> List[Dict[str, object]]:

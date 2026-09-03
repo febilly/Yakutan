@@ -24,6 +24,7 @@ from text_processor import sanitize_text_fancy_style
 from udp_port_check import (
     get_non_vrchat_udp_port_occupants,
     get_vrchat_udp_port_occupants,
+    is_vrchat_running,
 )
 from vrcx_context_bridge import (
     build_console_script,
@@ -299,7 +300,11 @@ def _osc_udp_port_status_payload() -> dict:
 
 
 def _vrchat_osc_warning_payload(udp_status: Optional[dict] = None) -> dict:
-    """VRChat 未监听 OSC 目标 UDP 端口时返回非阻断启动提示。"""
+    """VRChat 未监听 OSC 目标 UDP 端口时返回非阻断启动提示。
+
+    进一步用 VRChat 自己的 OSCQuery 服务区分三种情况：游戏没开、游戏开着但没打开 OSC、
+    OSC 开着但实际端口和我们配置的发送端口对不上。
+    """
     if bool(getattr(config, 'OSC_COMPAT_MODE', False)):
         return {
             'vrchat_osc_warning_message_id': None,
@@ -311,18 +316,72 @@ def _vrchat_osc_warning_payload(udp_status: Optional[dict] = None) -> dict:
             'vrchat_osc_warning_message_id': None,
             'vrchat_osc_warning_message': '',
         }
+
     port = status.get('osc_udp_port', _osc_udp_port())
-    return {
+    payload = {
+        'vrchat_osc_listening': False,
+        'osc_udp_port': port,
+        'vrchat_udp_port_occupants': status.get('vrchat_udp_port_occupants', []),
+        'vrchat_process_running': False,
+        'vrchat_oscquery_detected': False,
+        'vrchat_osc_actual_port': None,
+    }
+
+    if not is_vrchat_running():
+        payload.update({
+            'vrchat_osc_warning_message_id': 'msg.vrchatOscNotListeningWarning',
+            'vrchat_osc_warning_message': (
+                f'未检测到 VRChat 正在监听本机 UDP {port} 端口。'
+                '您可能未启动游戏，或未开启 OSC 端口。'
+                '如需开启，请在游戏轮盘菜单的 Options（选项）里的 OSC 中打开开关。'
+            ),
+        })
+        return payload
+
+    payload['vrchat_process_running'] = True
+
+    try:
+        from osc_manager import osc_manager
+        oscquery = osc_manager.inspect_vrchat_oscquery(timeout=2.0)
+    except Exception as exc:
+        print(f'[UI] VRChat OSCQuery inspection failed: {exc}')
+        oscquery = {'detected': False, 'osc_port': None}
+
+    payload['vrchat_oscquery_detected'] = bool(oscquery.get('detected'))
+    actual_port = oscquery.get('osc_port')
+
+    if not payload['vrchat_oscquery_detected']:
+        payload.update({
+            'vrchat_osc_warning_message_id': 'msg.vrchatOscDisabledWarning',
+            'vrchat_osc_warning_message': (
+                '检测到 VRChat 正在运行，但它没有开启 OSC。'
+                '请在游戏内打开圆盘菜单（Action Menu）最顶层的 选项/Options → OSC → 已开启/Enabled，'
+                '然后重启本服务。'
+            ),
+        })
+        return payload
+
+    if actual_port and int(actual_port) != int(port):
+        payload['vrchat_osc_actual_port'] = int(actual_port)
+        payload.update({
+            'vrchat_osc_warning_message_id': 'msg.vrchatOscPortMismatchWarning',
+            'vrchat_osc_warning_message': (
+                f'VRChat 实际接收 OSC 的端口是 {int(actual_port)}，'
+                f'与当前设置的发送端口 {port} 不一致，消息可能发不到游戏里。'
+            ),
+        })
+        return payload
+
+    # OSC 已开启但端口上暂时看不到监听（例如占用检测失败），沿用原有的通用提示
+    payload.update({
         'vrchat_osc_warning_message_id': 'msg.vrchatOscNotListeningWarning',
         'vrchat_osc_warning_message': (
             f'未检测到 VRChat 正在监听本机 UDP {port} 端口。'
             '您可能未启动游戏，或未开启 OSC 端口。'
             '如需开启，请在游戏轮盘菜单的 Options（选项）里的 OSC 中打开开关。'
         ),
-        'vrchat_osc_listening': False,
-        'osc_udp_port': port,
-        'vrchat_udp_port_occupants': status.get('vrchat_udp_port_occupants', []),
-    }
+    })
+    return payload
 
 
 def _find_window_titles_containing(keyword: str) -> List[str]:

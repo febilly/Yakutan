@@ -4000,12 +4000,18 @@ function buildVrchatOscNotListeningWarning(payload, t) {
     if (!payload || payload.vrchat_osc_listening === true) {
         return '';
     }
-    if (!payload.vrchat_osc_warning_message_id && !payload.vrchat_osc_warning_message) {
+    const messageId = payload.vrchat_osc_warning_message_id;
+    if (!messageId && !payload.vrchat_osc_warning_message) {
         return '';
     }
     const oscPort = payload.osc_udp_port ?? 9000;
-    const localized = t('msg.vrchatOscNotListeningWarning', { port: oscPort });
-    if (localized && localized !== 'msg.vrchatOscNotListeningWarning') {
+    // 后端会区分“游戏没开”“游戏开着但没开 OSC”“OSC 端口对不上”三种情况
+    const key = messageId || 'msg.vrchatOscNotListeningWarning';
+    const localized = t(key, {
+        port: oscPort,
+        actualPort: payload.vrchat_osc_actual_port ?? '',
+    });
+    if (localized && localized !== key) {
         return localized;
     }
     return payload.vrchat_osc_warning_message || '';
