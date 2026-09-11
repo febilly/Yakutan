@@ -200,10 +200,19 @@ def probe_gpu_devices(*, refresh: bool = False, timeout: float = 30.0) -> list[d
         return _probe_cache
 
     repo_root = Path(__file__).resolve().parent.parent
+    if getattr(sys, "frozen", False):
+        # 打包版里 sys.executable 是 exe 本身，不能再用 `-m 模块` 起子进程：
+        # 那样子进程会重新执行 run_ui 主流程（打开浏览器后因端口被占而退出）。
+        # exe 支持 --probe-gpu 子命令，在本子进程内完成枚举。
+        cmd = [sys.executable, "--probe-gpu"]
+        cwd = None
+    else:
+        cmd = [sys.executable, "-m", "local_inference.gpu_devices"]
+        cwd = str(repo_root)
     try:
         completed = subprocess.run(
-            [sys.executable, "-m", "local_inference.gpu_devices"],
-            cwd=str(repo_root),
+            cmd,
+            cwd=cwd,
             capture_output=True,
             text=True,
             timeout=timeout,
