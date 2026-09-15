@@ -470,9 +470,10 @@ TERMINOLOGY_ENABLED = True
 # 麦克风控制配置
 # ============================================================================
 
-# 选择的麦克风输入设备（PyAudio device index）
-# None 表示使用系统默认输入设备
+# 旧版序号仅用于识别需要重新选择的历史配置，禁止拿它直接打开设备。
 MIC_DEVICE_INDEX = None
+# Windows 保存稳定 WASAPI 端点 ID；其他平台使用枚举令牌。None 跟随系统默认。
+MIC_DEVICE_ID = None
 
 # 是否考虑游戏内麦克风的开关情况
 ENABLE_MIC_CONTROL = False  # True: 根据 VRChat 麦克风状态控制识别的启动/停止
@@ -847,6 +848,7 @@ def get_default_ui_config() -> dict:
             'enable_mic_control': False,
             'mute_delay_seconds': 0.2,
             'mic_device_index': None,
+            'mic_device_id': None,
             'enable_double_mute_clear': True,
         },
         'language_detector': {

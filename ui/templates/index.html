@@ -245,10 +245,13 @@
 
                     <div class="form-group" id="fg-mic-device">
                         <label for="mic-device" data-i18n="label.micDevice">麦克风</label>
-                        <select id="mic-device" class="form-control" onchange="onSettingChange(this)"
-                            data-restart-required="true">
-                            <option value="" data-i18n="option.systemDefault">系统默认</option>
-                        </select>
+                        <div class="mic-select-row">
+                            <select id="mic-device" class="form-control" onchange="onSettingChange(this)"
+                                data-restart-required="true">
+                                <option value="" data-i18n="option.systemDefault">系统默认</option>
+                            </select>
+                            <button type="button" class="btn btn-secondary" onclick="refreshMicDevices(true, true)" data-i18n="button.rescanMics">刷新设备</button>
+                        </div>
                     </div>
                 </section>
 

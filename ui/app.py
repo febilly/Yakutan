@@ -19,7 +19,8 @@ import os
 # 添加父目录到路径以导入config和main
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
-from audio_runtime_guard import hold_portaudio, _suppress_stderr
+from audio_runtime_guard import hold_portaudio
+from audio_devices import audio_devices, MicrophoneSelectionError
 from text_processor import sanitize_text_fancy_style
 from udp_port_check import (
     get_non_vrchat_udp_port_occupants,
@@ -600,6 +601,7 @@ def get_config_dict():
             'enable_mic_control': config.ENABLE_MIC_CONTROL,
             'mute_delay_seconds': config.MUTE_DELAY_SECONDS,
             'mic_device_index': getattr(config, 'MIC_DEVICE_INDEX', None),
+            'mic_device_id': getattr(config, 'MIC_DEVICE_ID', None),
             'enable_double_mute_clear': getattr(config, 'ENABLE_DOUBLE_MUTE_CLEAR', True),
         },
         # 语言检测器配置
@@ -778,12 +780,18 @@ def update_config(config_data):
                 config.MUTE_DELAY_SECONDS = float(mic['mute_delay_seconds'])
             if 'enable_double_mute_clear' in mic:
                 config.ENABLE_DOUBLE_MUTE_CLEAR = bool(mic['enable_double_mute_clear'])
-            if 'mic_device_index' in mic:
+            if 'mic_device_id' in mic:
+                # Keep stale tokens visible until the user reselects. Opening is
+                # the validation boundary; unrelated settings can still be saved.
+                value = mic['mic_device_id']
+                if value is not None and not isinstance(value, str):
+                    raise ValueError('Invalid microphone selection')
+                config.MIC_DEVICE_ID = value or None
+                config.MIC_DEVICE_INDEX = None
+            elif 'mic_device_index' in mic:
                 value = mic['mic_device_index']
-                if value is None or value == '':
-                    config.MIC_DEVICE_INDEX = None
-                else:
-                    config.MIC_DEVICE_INDEX = int(value)
+                config.MIC_DEVICE_INDEX = None if value in (None, '') else int(value)
+                config.MIC_DEVICE_ID = None
         
         # 更新语言检测器配置
         if 'language_detector' in config_data:
@@ -1498,88 +1506,19 @@ def open_panel():
 
 @app.route('/api/audio/input-devices', methods=['GET'])
 def list_input_devices():
-    """列出当前系统可用的麦克风输入设备（PyAudio）。"""
+    """列出当前输入端点；Windows 可在采集中自动刷新。"""
     try:
-        try:
-            import pyaudio
-        except Exception as e:  # pragma: no cover
-            return jsonify({'devices': [], 'default_index': None, 'default_name': None, 'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None), 'error': str(e)})
-
         with hold_portaudio("list_input_devices"):
-            with _suppress_stderr():
-                pa = pyaudio.PyAudio()
-            devices = []
-            default_index = None
-            default_name = None
-            preferred_host_api_index = None
-            try:
-                with _suppress_stderr():
-                    try:
-                        default_info = pa.get_default_input_device_info()
-                        default_index = default_info.get('index')
-                        default_name = str(default_info.get('name') or '').strip() or None
-                    except Exception:
-                        default_index = None
-                        default_name = None
-
-                    # 选择一个 Host API，避免同一设备被不同 Host API 重复枚举
-                    # 优先 WASAPI（更贴近系统设备管理器的“启用/禁用”状态），否则用默认 Host API
-                    try:
-                        host_api_count = pa.get_host_api_count()
-                        for host_api_idx in range(host_api_count):
-                            try:
-                                host_api_info = pa.get_host_api_info_by_index(host_api_idx)
-                            except Exception:
-                                continue
-                            name = str(host_api_info.get('name') or '')
-                            if 'wasapi' in name.lower():
-                                preferred_host_api_index = host_api_idx
-                                break
-                    except Exception:
-                        preferred_host_api_index = None
-
-                    if preferred_host_api_index is None:
-                        try:
-                            preferred_host_api_index = pa.get_default_host_api_info().get('index')
-                        except Exception:
-                            preferred_host_api_index = None
-
-                    count = pa.get_device_count()
-                seen_names = set()
-                for idx in range(count):
-                    try:
-                        info = pa.get_device_info_by_index(idx)
-                    except Exception:
-                        continue
-
-                    if preferred_host_api_index is not None and info.get('hostApi') != preferred_host_api_index:
-                        continue
-
-                    max_in = int(info.get('maxInputChannels', 0) or 0)
-                    if max_in <= 0:
-                        continue
-
-                    name = str(info.get('name') or f'Device {idx}')
-                    name_key = " ".join(name.strip().lower().split())
-                    if name_key in seen_names:
-                        continue
-                    seen_names.add(name_key)
-
-                    devices.append({'index': idx, 'name': name, 'max_input_channels': max_in})
-            finally:
-                try:
-                    pa.terminate()
-                except Exception:
-                    pass
-
-        return jsonify({
-            'devices': devices,
-            'default_index': default_index,
-            'default_name': default_name,
-            'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None),
-        })
+            if request.args.get('refresh') == '1':
+                audio_devices.refresh()
+            payload = audio_devices.list_inputs()
+            payload['supports_hotplug'] = audio_devices.supports_hotplug
+            payload['selected_id'] = getattr(config, 'MIC_DEVICE_ID', None)
+            payload['selected_index'] = getattr(config, 'MIC_DEVICE_INDEX', None)
+        return jsonify(payload)
     except Exception as e:
-        return jsonify({'devices': [], 'default_index': None, 'default_name': None, 'selected_index': getattr(config, 'MIC_DEVICE_INDEX', None), 'error': str(e)}), 500
+        return jsonify({'error': str(e)}), 409 if isinstance(e, MicrophoneSelectionError) else 500
+
 
 
 @app.route('/api/udp-port-check', methods=['GET'])
@@ -1603,6 +1542,13 @@ def start_service():
             'lifecycle': current_lifecycle,
         })
         return jsonify({'success': False, 'message_id': 'msg.serviceAlreadyRunning', 'message': '服务已在运行中'})
+
+    try:
+        with hold_portaudio('validate_microphone_selection'):
+            audio_devices.resolve(config.MIC_DEVICE_ID, config.MIC_DEVICE_INDEX)
+    except MicrophoneSelectionError as e:
+        return jsonify({'success': False, 'message_id': 'option.micReselect',
+                        'message': str(e)}), 400
 
     data = request.json or {}
     bypass_udp = (

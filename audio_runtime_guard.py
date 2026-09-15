@@ -15,6 +15,10 @@ from typing import Iterator
 _PORTAUDIO_LOCK = threading.RLock()
 
 
+class MicrophoneSelectionError(ValueError):
+    """An explicitly selected microphone cannot safely be opened."""
+
+
 @contextmanager
 def _suppress_stderr() -> Iterator[None]:
     try:

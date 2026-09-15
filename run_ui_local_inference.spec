@@ -29,6 +29,8 @@ if _qwen_gguf_vendor.is_dir():
     datas += [(str(_qwen_gguf_vendor), 'local_inference/vendor/qwen_asr_gguf')]
 _llama_dll_upx_exclude = []
 
+datas += collect_data_files('soundcard')
+
 hiddenimports = [
     'dashscope',
     'dashscope.audio.asr',

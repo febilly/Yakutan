@@ -33,6 +33,9 @@ _silero_vad = Path('local_inference/models/silero_vad')
 if _silero_vad.is_dir():
     datas += [(str(_silero_vad), 'local_inference/models/silero_vad')]
 
+# SoundCard loads WASAPI CFFI declarations from a package data header.
+datas += collect_data_files('soundcard')
+
 # 需要包含的隐藏导入
 hiddenimports = [
     'dashscope',

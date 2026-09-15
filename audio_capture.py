@@ -13,7 +13,8 @@ import pyaudio
 import config
 from audio_resampler import AudioResampler
 from audio_debug_recorder import WaveDebugRecorder
-from audio_runtime_guard import hold_portaudio, _suppress_stderr
+from audio_runtime_guard import hold_portaudio
+from audio_devices import audio_devices
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +112,11 @@ async def init_audio_stream(state):
 
     def _init():
         with hold_portaudio("init_audio_stream"):
-            with _suppress_stderr():
-                state.mic = pyaudio.PyAudio()
-            device_index = getattr(config, 'MIC_DEVICE_INDEX', None)
+            state.mic, device_index = audio_devices.acquire(
+                getattr(config, 'MIC_DEVICE_ID', None),
+                getattr(config, 'MIC_DEVICE_INDEX', None),
+            )
+            state._audio_hotplug_enabled = audio_devices.supports_hotplug
             target_rate = int(config.SAMPLE_RATE)
             target_channels = RECOGNIZER_CHANNELS
 
@@ -134,6 +137,11 @@ async def init_audio_stream(state):
                     return requested_channels
 
                 max_in = int(info.get('maxInputChannels', 0) or 0)
+                if info.get('capture_all_channels'):
+                    # WASAPI records its native channel layout; downmix below.
+                    # Requesting one channel from a stereo endpoint can corrupt
+                    # SoundCard's Windows capture data.
+                    return max(1, max_in)
                 device_name = str(info.get('name', '') or '')
                 normalized_name = device_name.lower()
                 is_virtual_mixer = 'voicemeeter' in normalized_name or 'vb-audio' in normalized_name
@@ -228,57 +236,41 @@ async def init_audio_stream(state):
                 state.stream = _open_with(
                     target_rate, state.input_block_size, dev_idx, state.capture_channels,
                 )
-            except Exception as e_open_16k:
+            except Exception:
                 device_rate = _get_device_default_rate(dev_idx)
 
                 if device_rate is not None and device_rate > 0 and device_rate != target_rate:
                     scaled_block = max(256, int(round(config.BLOCK_SIZE * (device_rate / target_rate))))
-                    try:
-                        state.input_sample_rate = int(device_rate)
-                        state.input_block_size = int(scaled_block)
-                        state.capture_channels = _resolve_capture_channels(dev_idx)
-                        _init_resampler(state.input_sample_rate, target_rate)
-                        state.stream = _open_with(
-                            state.input_sample_rate, state.input_block_size,
-                            dev_idx, state.capture_channels,
-                        )
-                        print(
-                            f"[Audio] 设备不支持 {target_rate}Hz，"
-                            f"已使用 {state.input_sample_rate}Hz / {state.capture_channels}ch 采集并实时重采样"
-                        )
-                    except Exception as e_open_device_rate:
-                        try:
-                            state.input_sample_rate = target_rate
-                            state.input_block_size = int(config.BLOCK_SIZE)
-                            state.capture_channels = _resolve_capture_channels(None)
-                            _init_resampler(target_rate, target_rate)
-                            state.stream = _open_with(
-                                target_rate, state.input_block_size, None, state.capture_channels,
-                            )
-                            print(f"[Audio] 指定麦克风设备不可用，已回退到系统默认：{e_open_device_rate}")
-                        except Exception:
-                            raise
+                    state.input_sample_rate = int(device_rate)
+                    state.input_block_size = int(scaled_block)
+                    state.capture_channels = _resolve_capture_channels(dev_idx)
+                    _init_resampler(state.input_sample_rate, target_rate)
+                    state.stream = _open_with(
+                        state.input_sample_rate, state.input_block_size,
+                        dev_idx, state.capture_channels,
+                    )
+                    print(
+                        f"[Audio] 设备不支持 {target_rate}Hz，"
+                        f"已使用 {state.input_sample_rate}Hz / {state.capture_channels}ch 采集并实时重采样"
+                    )
                 else:
-                    try:
-                        state.input_sample_rate = target_rate
-                        state.input_block_size = int(config.BLOCK_SIZE)
-                        state.capture_channels = _resolve_capture_channels(None)
-                        _init_resampler(target_rate, target_rate)
-                        state.stream = _open_with(
-                            target_rate, state.input_block_size, None, state.capture_channels,
-                        )
-                        print(f"[Audio] 指定麦克风设备不可用，已回退到系统默认：{e_open_16k}")
-                    except Exception:
-                        raise
+                    raise
 
             print(f'[Audio] 实际采集格式: {state.input_sample_rate}Hz / {state.capture_channels}ch / 16-bit')
             if state.capture_channels != target_channels:
                 print(f'[Audio] 发送给识别器前将转换为: {target_rate}Hz / {target_channels}ch / 16-bit')
 
             _init_debug_audio_recorders(state.input_sample_rate, target_rate)
+            state.capture_device_id = getattr(state.mic, 'device_id', None)
+            state._audio_selected_token = getattr(config, 'MIC_DEVICE_ID', None)
             return state.stream
 
-    return await loop.run_in_executor(state.audio_executor, _init)
+    try:
+        return await loop.run_in_executor(state.audio_executor, _init)
+    except Exception:
+        # Release a lease even when format negotiation/opening fails.
+        await close_audio_stream(state)
+        raise
 
 
 async def close_audio_stream(state):
@@ -288,17 +280,23 @@ async def close_audio_stream(state):
 
     def _close():
         with hold_portaudio("close_audio_stream"):
-            if state.stream:
-                state.stream.stop_stream()
-                state.stream.close()
-            if state.mic:
-                state.mic.terminate()
-            if state.debug_pre_audio_recorder:
+            if getattr(state, 'stream', None):
+                try:
+                    state.stream.stop_stream()
+                except Exception:
+                    logger.warning('Failed to stop microphone stream', exc_info=True)
+                try:
+                    state.stream.close()
+                except Exception:
+                    logger.warning('Failed to close microphone stream', exc_info=True)
+            if getattr(state, 'mic', None):
+                audio_devices.release(state.mic)
+            if getattr(state, 'debug_pre_audio_recorder', None):
                 saved_file = state.debug_pre_audio_recorder.file_path
                 state.debug_pre_audio_recorder.close()
                 print(f'[Audio] 重采样前的音频已保存到: {saved_file}')
                 state.debug_pre_audio_recorder = None
-            if state.debug_audio_recorder:
+            if getattr(state, 'debug_audio_recorder', None):
                 saved_file = state.debug_audio_recorder.file_path
                 state.debug_audio_recorder.close()
                 print(f'[Audio] 重采样后的音频已保存到: {saved_file}')
@@ -307,6 +305,43 @@ async def close_audio_stream(state):
             state.mic = None
 
     await loop.run_in_executor(state.audio_executor, _close)
+
+
+async def maintain_audio_source(state):
+    """Reopen only capture on endpoint changes; never restart the ASR service.
+
+    Missing explicit endpoints remain selected and are retried once per second.
+    Enumeration and recorder lifetime operations share the single audio worker.
+    """
+    now = time.monotonic()
+    token = getattr(config, 'MIC_DEVICE_ID', None)
+    if (now < getattr(state, '_audio_next_device_check', 0.0)
+            and token == getattr(state, '_audio_selected_token', None)):
+        return bool(state.stream)
+    state._audio_next_device_check = now + 1.0
+    state._audio_selected_token = token
+    loop = asyncio.get_running_loop()
+
+    def resolve():
+        return audio_devices.resolve(token, getattr(config, 'MIC_DEVICE_INDEX', None))
+
+    try:
+        desired_id = await loop.run_in_executor(state.audio_executor, resolve)
+        if state.stream and desired_id == getattr(state, 'capture_device_id', None):
+            state._audio_device_error = None
+            return True
+        await close_audio_stream(state)
+        await init_audio_stream(state)
+        state._audio_device_error = None
+        return True
+    except Exception as exc:
+        if getattr(state, 'mic', None):
+            await close_audio_stream(state)
+        message = str(exc)
+        if message != getattr(state, '_audio_device_error', None):
+            logger.warning('麦克风暂不可用，等待设备恢复: %s', message)
+        state._audio_device_error = message
+        return False
 
 
 async def read_audio_data(state):
@@ -483,9 +518,31 @@ async def audio_capture_task(state, recognizer):
 
     try:
         while not state.stop_event.is_set():
+            if getattr(state, '_audio_hotplug_enabled', False) is True:
+                previous_stream = state.stream
+                ready = await maintain_audio_source(state)
+                if state.stream is not previous_stream:
+                    # Do not carry partial PCM/VAD context across microphones.
+                    _vad_pre_buffer.clear()
+                    state._vad_pending_samples = None
+                    if state.vad_processor is not None:
+                        state.vad_processor.reset()
+                    state._vad_was_speaking = False
+                if not ready:
+                    await asyncio.sleep(0.1)
+                    continue
             # 始终读取音频数据,避免缓冲区积压
             data = await read_audio_data(state)
             if data is None:
+                if getattr(state, '_audio_hotplug_enabled', False) is True:
+                    await close_audio_stream(state)
+                    _vad_pre_buffer.clear()
+                    state._vad_pending_samples = None
+                    if state.vad_processor is not None:
+                        state.vad_processor.reset()
+                    state._vad_was_speaking = False
+                    await asyncio.sleep(0.1)
+                    continue
                 break
             if not data:
                 await asyncio.sleep(0.001)
