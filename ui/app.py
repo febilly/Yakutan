@@ -96,6 +96,7 @@ static_folder = get_resource_path('ui/static')
 app = Flask(__name__, 
             template_folder=template_folder,
             static_folder=static_folder)
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 CORS(app)
 
 VALID_LLM_TRANSLATION_FORMALITY = ('low', 'medium', 'high')
