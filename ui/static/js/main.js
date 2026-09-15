@@ -1216,6 +1216,10 @@ function getLLMParallelFastestModeSelect() {
 }
 
 let activeLLMTemplate = null;
+// Key 输入框是否已从 localStorage 槽位回填完成。
+// 回填完成前禁止持久化/上报 Key：此时输入框为空，写槽位等于删除已存 Key，
+// 发给后端等于清空进程内凭据。
+let llmSecretInputsHydrated = false;
 
 function isValidLLMTemplateName(templateName) {
     return !!(templateName && Object.prototype.hasOwnProperty.call(LLM_TEMPLATE_CONFIGS, templateName));
@@ -1412,7 +1416,9 @@ function setStoredLLMTemplateKey(templateName, value) {
     const normalized = (value || '').trim();
     if (normalized) {
         localStorage.setItem(storageKey, normalized);
-    } else {
+    } else if (llmSecretInputsHydrated) {
+        // 只有在输入框完成回填之后，才允许"清空输入 = 删除已存 Key"。
+        // 启动窗口期的空值写入多半来自模板回退分支，会把用户保存的 Key 误删。
         localStorage.removeItem(storageKey);
     }
 }
@@ -1576,6 +1582,14 @@ function syncSimpleModeLLMTemplateFields() {
 }
 
 function getEffectiveLLMApiKeyForCurrentMode() {
+    // 启动对账可能发生在 loadAPIKeys 回填输入框之前；此时输入框为空，
+    // 直接读它会把空 Key 推给后端。改为从存储槽位取值（旧版数据回退到全局槽）。
+    if (!llmSecretInputsHydrated) {
+        const templateName = getSelectedLLMTemplateName();
+        return getStoredLLMTemplateKey(templateName)
+            || localStorage.getItem('llm_api_key')
+            || '';
+    }
     if (document.body.classList.contains('mode-simple')) {
         return syncSimpleModeLLMTemplateFields().apiKey;
     }
@@ -1903,7 +1917,8 @@ function persistSecretInputValue(inputId) {
     const value = input.value;
     if (value) {
         localStorage.setItem(keyName, value);
-    } else {
+    } else if (llmSecretInputsHydrated) {
+        // 同 setStoredLLMTemplateKey：回填前的空值写入不删除已存 Key。
         localStorage.removeItem(keyName);
     }
 }
@@ -2709,8 +2724,10 @@ function loadAPIKeys() {
     if (storedTemplateKey) {
         document.getElementById('llm-api-key').value = storedTemplateKey;
     } else if (llmKey && !document.body.classList.contains('mode-simple')) {
+        // 旧版数据迁移：全局槽的值只用于显示和启动时上报，
+        // 不回写进模板槽位——避免陈旧的旧 Key 永久顶掉当前模板的 Key。
+        // 用户确认无误后一旦编辑， saveAPIKey 会正常写入两个槽位。
         document.getElementById('llm-api-key').value = llmKey;
-        persistCurrentLLMTemplateKey();
     } else if (document.body.classList.contains('mode-simple')) {
         document.getElementById('llm-api-key').value = '';
     }
@@ -2789,6 +2806,9 @@ function loadAPIKeys() {
             onSettingChange(parallelModeEl);
         });
     }
+
+    // Key 输入框已按当前模板回填完毕；此后空值写入才代表用户真的清空了 Key。
+    llmSecretInputsHydrated = true;
 }
 
 // 处理国际版端点开关变化
@@ -3337,7 +3357,13 @@ function applyServerConfigPayload(config) {
     setLLMParallelFastestModeSelect(
         resolveLLMParallelFastestModeFromStoredTranslation(config.translation),
     );
+    const templateBeforeServerApply = getSelectedLLMTemplateName();
     ensureSelectedLLMTemplate(config.translation);
+    // 服务器配置切到了另一个 LLM 模板时，按新模板重新回填（含 Key 输入框），
+    // 否则输入框里残留的旧模板 Key 会在随后的保存中被写进新模板的槽位。
+    if (llmSecretInputsHydrated && getSelectedLLMTemplateName() !== templateBeforeServerApply) {
+        populateLLMTemplateForm(getSelectedLLMTemplateName());
+    }
     document.getElementById('show-partial-results').checked = config.translation.show_partial_results ?? false;
     document.getElementById('enable-furigana').checked = config.translation.enable_furigana ?? false;
     document.getElementById('enable-pinyin').checked = config.translation.enable_pinyin ?? false;
