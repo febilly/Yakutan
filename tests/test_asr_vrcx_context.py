@@ -457,3 +457,81 @@ def test_qwen_realtime_defers_reconnect_until_speech_finishes(monkeypatch):
     assert len(reconnected) == 1
 
 
+
+
+def test_qwen_context_reconnect_serializes_audio_and_recovers_failure(monkeypatch):
+    import threading
+    import speech_recognizers.qwen_speech_recognizer as mod
+
+    entered = threading.Event()
+    release = threading.Event()
+    sent = threading.Event()
+    instances = []
+
+    class Conversation:
+        def __init__(self, callback, **kwargs):
+            self.callback = callback
+            self.ready = False
+            self.closed = False
+            instances.append(self)
+
+        def connect(self):
+            if len(instances) == 2:
+                entered.set()
+                assert release.wait(3)
+            self.ready = True
+
+        def update_session(self, **kwargs):
+            assert self.ready and not self.closed
+
+        def append_audio(self, data):
+            assert self.ready and not self.closed
+            sent.set()
+
+        def close(self):
+            self.closed = True
+            self.callback.on_close(None, None)
+
+    monkeypatch.setattr(mod, 'OmniRealtimeConversation', Conversation)
+    monkeypatch.setattr(mod, 'refresh_system_proxy_env', lambda: None)
+    r = mod.QwenSpeechRecognizer(DummyCallback())
+    monkeypatch.setattr(r, '_start_keepalive', lambda: None)
+    monkeypatch.setattr(r, '_resolve_corpus_text', lambda: 'context')
+    r.start()
+    errors = []
+
+    def send():
+        try:
+            r.send_audio_frame(b'12')
+        except Exception as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=r._reconnect)
+    sender = threading.Thread(target=send)
+    worker.start()
+    assert entered.wait(3)
+    sender.start()
+    try:
+        assert not sent.wait(0.1)
+    finally:
+        release.set()
+        worker.join(3)
+        sender.join(3)
+    assert not errors
+    assert len(instances) == 2
+    assert sent.is_set()
+    assert not instances[-1].closed
+
+    def fail():
+        raise RuntimeError('connect failed')
+
+    monkeypatch.setattr(Conversation, 'connect', lambda self: fail())
+    import pytest
+    with pytest.raises(RuntimeError, match='connect failed'):
+        r._reconnect()
+    assert r._connection_closed
+    monkeypatch.setattr(Conversation, 'connect', lambda self: setattr(self, 'ready', True))
+    sent.clear()
+    r.send_audio_frame(b'34')
+    assert sent.is_set()
+    r.stop()

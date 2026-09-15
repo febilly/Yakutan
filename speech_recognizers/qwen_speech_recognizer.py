@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from contextlib import suppress
+from functools import wraps
 import threading
 import time
 from typing import Any, Dict, Optional, Set
@@ -29,6 +30,18 @@ from .base_speech_recognizer import (
 from vrcx_context_bridge import build_asr_context_text
 
 __all__ = ["QwenSpeechRecognizer"]
+
+
+def _serialize_transport(method):
+    """Keep SDK writes and connection replacement on one transport at a time.
+
+    SDK callbacks use only _lock, never this lock: close() may join them.
+    """
+    @wraps(method)
+    def serialized(self, *args, **kwargs):
+        with self._transport_lock:
+            return method(self, *args, **kwargs)
+    return serialized
 
 
 class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
@@ -184,6 +197,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
 
     def __init__(self, callback: SpeechRecognitionCallback, **recognition_kwargs: Any) -> None:
         self._lock = threading.Lock()
+        self._transport_lock = threading.RLock()
         self._conversation: Optional[OmniRealtimeConversation] = None
         self._adapter: Optional[_QwenOmniCallbackAdapter] = None
         self._callback: Optional[SpeechRecognitionCallback] = None
@@ -250,6 +264,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
                 raise RuntimeError("Callback already configured; create a new recognizer instance instead.")
             self._callback = callback
 
+    @_serialize_transport
     def start(self) -> None:
         with self._lock:
             if self._conversation is not None:
@@ -293,6 +308,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._teardown_conversation(close=True)
             raise
 
+    @_serialize_transport
     def stop(self) -> None:
         # 标记服务不应该运行（禁用自动重连）
         with self._lock:
@@ -327,6 +343,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._active_transcription_item_ids.clear()
             self._pending_transcription_corpus_text = None
 
+    @_serialize_transport
     def send_audio_frame(self, data: bytes) -> None:
         if not data:
             return
@@ -363,6 +380,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
                 self._connection_closed = True
             raise
 
+    @_serialize_transport
     def pause(self) -> None:
         conversation: Optional[OmniRealtimeConversation] = None
         adapter: Optional[_QwenOmniCallbackAdapter] = None
@@ -392,6 +410,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
                 with suppress(Exception):
                     conversation.close()
 
+    @_serialize_transport
     def resume(self) -> None:
         should_reconnect = False
         self._cancel_pause_finalize_timer()
@@ -437,7 +456,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         if can_reconnect:
             print("[Qwen] 检测到上下文变更且处于空闲状态，正在平滑重建连接以生效新世界/玩家热词...")
             self._trigger_reconnect_async()
-        else:
+        elif not self._reconnecting:
             self._refresh_dynamic_transcription_context()
 
     def _trigger_reconnect_async(self) -> None:
@@ -617,6 +636,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
                 self._applied_transcription_corpus_text = corpus_text
                 self._pending_transcription_corpus_text = None
 
+    @_serialize_transport
     def _refresh_dynamic_transcription_context(self) -> None:
         if self._transcription_params is not None:
             return
@@ -714,6 +734,7 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._pending_transcription_corpus_text = None
         return True
 
+    @_serialize_transport
     def _reconnect(self) -> None:
         """重新建立WebSocket连接"""
         print("[WebSocket] Starting reconnection...")
@@ -760,6 +781,8 @@ class QwenSpeechRecognizer(SpeechRecognizer):
         except Exception as e:
             print(f"[WebSocket] Reconnection failed: {e}")
             self._teardown_conversation(close=True)
+            with self._lock:
+                self._connection_closed = self._should_run
             raise
 
     def _start_keepalive(self) -> None:
