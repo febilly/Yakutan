@@ -24,6 +24,13 @@ ASR_SEND_QUEUE_MIN_FRAMES = 10
 ASR_MAX_AUDIO_FRAME_BYTES = 16 * 1024
 PCM16_SAMPLE_BYTES = 2
 DASHSCOPE_SERVER_VAD_BACKENDS = frozenset({'qwen_audio3', 'dashscope'})
+# VAD 判停前等待发送队列排空的超时：网络劣化/WS 黑洞时 join() 不能无限等待，
+# 否则会永久卡死采集主循环
+SEND_QUEUE_JOIN_TIMEOUT_SECONDS = 8.0
+# send_audio_frame 失败日志的节流间隔，避免死连接时日志风暴
+_SEND_FAIL_LOG_INTERVAL_SECONDS = 5.0
+_last_send_fail_log_at = 0.0
+_send_fail_count_since_log = 0
 
 
 class _SilenceBurst:
@@ -393,12 +400,24 @@ async def read_audio_data(state):
 
 async def send_audio_frame_async(state, recognizer, data: bytes):
     """异步发送音频帧。"""
+    global _last_send_fail_log_at, _send_fail_count_since_log
     loop = asyncio.get_event_loop()
     state.ensure_asr_send_executor()
     try:
         await loop.run_in_executor(state.asr_send_executor, recognizer.send_audio_frame, data)
-    except Exception:
-        pass
+    except Exception as exc:
+        # 发送失败不中断采集，但必须留下可观测信号（原 except: pass 完全吞掉，
+        # 连接死亡后无任何提示）
+        _send_fail_count_since_log += 1
+        now = time.monotonic()
+        if now - _last_send_fail_log_at >= _SEND_FAIL_LOG_INTERVAL_SECONDS:
+            _last_send_fail_log_at = now
+            logger.warning(
+                '[Audio] ASR 发送音频帧失败（自上次日志以来 %d 次）: %r',
+                _send_fail_count_since_log,
+                exc,
+            )
+            _send_fail_count_since_log = 0
 
 
 def _asr_send_queue_maxsize() -> int:
@@ -414,6 +433,25 @@ def _drop_oldest_queue_item(queue: asyncio.Queue) -> None:
         queue.task_done()
     except asyncio.QueueEmpty:
         pass
+
+
+def _drain_send_queue(queue: asyncio.Queue) -> int:
+    """非阻塞排空发送队列，返回丢弃的条目数。
+
+    send_queue.join() 超时后的降级路径：丢弃尚未发出的余量，让调用方得以
+    继续推进，而不是永久等待。
+    """
+    dropped = 0
+    while True:
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return dropped
+        dropped += 1
+        try:
+            queue.task_done()
+        except ValueError:
+            pass
 
 
 class GatePreBuffer:
@@ -466,6 +504,10 @@ async def audio_capture_task(state, recognizer):
             generation, payload = await send_queue.get()
             try:
                 await _send_queue_payload(state, recognizer, generation, payload)
+            except Exception as exc:
+                # 发送异常不得杀死 worker：一旦 worker 死亡，队列的 join()
+                # 将永远无法完成，等待排空的调用方会被永久卡死
+                logger.warning('[Audio] ASR 发送 worker 处理帧失败（跳过该帧）: %r', exc)
             finally:
                 send_queue.task_done()
 
@@ -475,6 +517,7 @@ async def audio_capture_task(state, recognizer):
     _vad_chunk_samples = 512
     _vad_chunk_count = 0
     _vad_last_diag_at = 0.0
+    _vad_diag_interval = 5.0
     _vad_verbose = bool(getattr(config, 'ENABLE_VAD_GATING_VERBOSE', False))
     # 本地门控停止转发真实静音后，补发服务端判停所需的合成静音。
     # DashScope Recognition 后端需要完整判停窗口；其他后端仅保留安全余量。
@@ -606,7 +649,20 @@ async def audio_capture_task(state, recognizer):
                                     # pause/stop 会等待 SDK 内部音频队列排空并完成当前 task，
                                     # 行为与游戏内闭麦一致，可确定触发最终识别结果。
                                     if _vad_recognition_has_audio:
-                                        await send_queue.join()
+                                        try:
+                                            await asyncio.wait_for(
+                                                send_queue.join(),
+                                                timeout=SEND_QUEUE_JOIN_TIMEOUT_SECONDS,
+                                            )
+                                        except asyncio.TimeoutError:
+                                            # 排空超时（发送阻塞在半死连接上）：丢弃余量继续，
+                                            # 避免无限等待卡死采集主循环
+                                            dropped = _drain_send_queue(send_queue)
+                                            print(
+                                                f'[VAD] ASR 发送队列 '
+                                                f'{SEND_QUEUE_JOIN_TIMEOUT_SECONDS:.0f}s 未排空，'
+                                                f'丢弃余量 {dropped} 项后继续结束会话'
+                                            )
                                         _vad_recognition_paused = await _run_recognizer_control_async(
                                             state, recognizer, 'pause'
                                         )
@@ -635,14 +691,12 @@ async def audio_capture_task(state, recognizer):
                         samples[offset:], dtype=np.float32, copy=True
                     )
                 except Exception:
-                    # VAD 错误不应中断音频流
-                    import traceback
+                    # VAD 错误不应中断音频流；verbose 下直接打印堆栈。
+                    # 不依赖诊断节流变量，避免异常处理路径本身再出错冲垮整个采集任务。
                     if _vad_verbose:
-                        now = time.monotonic()
-                        if now - _vad_last_diag_at > _vad_diag_interval:
-                            _vad_last_diag_at = now
-                            print('[VAD] ⚠ 处理异常（静默）')
-                            traceback.print_exc()
+                        import traceback
+                        print('[VAD] ⚠ 处理异常（静默）')
+                        traceback.print_exc()
 
             # 只有在识别激活时才发送音频数据,否则丢弃
             # VAD 门控：静音时不发送音频到 ASR（省流），说话时正常发送；
