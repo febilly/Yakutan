@@ -8,6 +8,7 @@
 
 import asyncio
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -231,3 +232,168 @@ def test_send_failure_is_logged_not_swallowed(caplog):
 
     assert 'ASR 发送音频帧失败' in caplog.text
     assert 'dead connection' in caplog.text
+
+
+class _SequencedVad:
+    """按脚本逐 chunk 给出说话状态，用尽后保持最后一个状态。"""
+
+    def __init__(self, states):
+        self._states = list(states)
+        self.is_speaking = False
+        self.last_confidence = 0.9
+        self.calls = 0
+
+    def process_chunk(self, _chunk):
+        if self.calls < len(self._states):
+            self.is_speaking = self._states[self.calls]
+        self.calls += 1
+
+    def reset(self):
+        self.is_speaking = False
+
+
+class _SlowFlipRecognizer:
+    """pause/resume 会阻塞，用来模拟含 WS 握手/结束 RTT 的会话翻转。"""
+
+    def __init__(self):
+        self.events = []
+        self.pause_started = threading.Event()
+        self.pause_release = threading.Event()
+        self.pause_done = threading.Event()
+
+    def send_audio_frame(self, data):
+        self.events.append(data)
+
+    def pause(self):
+        self.pause_started.set()
+        self.pause_release.wait(timeout=5)
+        self.events.append('pause')
+        self.pause_done.set()
+
+    def resume(self):
+        self.events.append('resume')
+
+
+def test_slow_session_flip_keeps_reading_frames():
+    """翻转在后台串行执行，主循环在 pause 未完成期间必须继续读帧（P2-11）。"""
+    reads = {'total': 0, 'during_pause': 0}
+    recognizer = _SlowFlipRecognizer()
+    state, executor = _make_state(
+        vad_processor=_SequencedVad([True, False, True]),
+        _vad_was_speaking=False,
+    )
+
+    async def fake_read(_state):
+        reads['total'] += 1
+        if recognizer.pause_started.is_set() and not recognizer.pause_done.is_set():
+            reads['during_pause'] += 1
+            # 只有确认主循环在 pause 阻塞期间仍在读帧，才放行 pause；
+            # 若翻转同步阻塞在主循环里，读帧计数不会前进，pause 只能等超时
+            if reads['during_pause'] >= 3:
+                recognizer.pause_release.set()
+                return None
+        await asyncio.sleep(0.005)
+        return FRAME
+
+    try:
+        with (
+            patch.object(audio_capture, 'read_audio_data', side_effect=fake_read),
+            patch.object(audio_capture.config, 'VAD_PRE_SPEECH_DURATION', 0.0),
+        ):
+            asyncio.run(
+                asyncio.wait_for(
+                    audio_capture.audio_capture_task(state, recognizer),
+                    timeout=10,
+                )
+            )
+    finally:
+        executor.shutdown(wait=True)
+
+    assert reads['during_pause'] >= 3, 'pause 期间主循环必须继续读帧，否则会丢语音'
+    assert 'pause' in recognizer.events
+
+
+def test_frames_during_resume_are_held_then_flushed_in_order():
+    """resume 未完成期间到达的语音帧暂存后按原序补发，句首不丢、不乱序。"""
+    speech_frames = [bytes([index]) * 1024 for index in range(1, 5)]
+    silence = b'\x00' * 1024
+    # 语音 1 帧 → 静音 20 帧 → 起声 3 帧。静音段需要长到把已发送的语音帧
+    # 滚出预缓冲（真实判停静音远长于起声预缓冲），否则回补会带上旧语音。
+    vad_script = [True] + [False] * 20 + [True] * 3
+    read_script = [speech_frames[0]] + [silence] * 20 + speech_frames[1:]
+    recognizer = _SlowFlipRecognizer()
+    state, executor = _make_state(
+        vad_processor=_SequencedVad(vad_script),
+        _vad_was_speaking=False,
+    )
+    pending = list(read_script)
+
+    async def fake_read(_state):
+        if pending:
+            return pending.pop(0)
+        recognizer.pause_release.set()
+        await asyncio.sleep(0.05)
+        return None
+
+    try:
+        with (
+            patch.object(audio_capture, 'read_audio_data', side_effect=fake_read),
+            patch.object(audio_capture.config, 'VAD_PRE_SPEECH_DURATION', 0.5),
+        ):
+            asyncio.run(
+                asyncio.wait_for(
+                    audio_capture.audio_capture_task(state, recognizer),
+                    timeout=10,
+                )
+            )
+    finally:
+        executor.shutdown(wait=True)
+
+    delivered = [event for event in recognizer.events if isinstance(event, bytes)]
+    speech = [frame for frame in delivered if any(frame)]
+    assert 'resume' in recognizer.events, 'resume 必须被执行'
+    assert speech == speech_frames, '语音帧必须按原序完整送达，不丢不乱序'
+
+
+def test_stale_generation_flip_is_skipped():
+    """翻转动作携带的代次失效时不得执行，避免跨会话误操作识别器。"""
+    recognizer = _SlowFlipRecognizer()
+    state, executor = _make_state(
+        vad_processor=_SequencedVad([True, False, True]),
+        _vad_was_speaking=False,
+    )
+    reads = {'count': 0}
+
+    async def fake_read(_state):
+        reads['count'] += 1
+        if reads['count'] > 3:
+            # 等 pause 真正进入执行（此时它已通过首个代次检查）后改动代次，
+            # 使排队中的 resume 动作失效
+            for _ in range(200):
+                if recognizer.pause_started.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            if recognizer.pause_started.is_set():
+                state.audio_send_generation += 1
+            recognizer.pause_release.set()
+            await asyncio.sleep(0.05)
+            return None
+        await asyncio.sleep(0.005)
+        return FRAME
+
+    try:
+        with (
+            patch.object(audio_capture, 'read_audio_data', side_effect=fake_read),
+            patch.object(audio_capture.config, 'VAD_PRE_SPEECH_DURATION', 0.5),
+        ):
+            asyncio.run(
+                asyncio.wait_for(
+                    audio_capture.audio_capture_task(state, recognizer),
+                    timeout=10,
+                )
+            )
+    finally:
+        executor.shutdown(wait=True)
+
+    assert recognizer.pause_started.is_set(), 'pause 应已执行'
+    assert 'resume' not in recognizer.events, '代次失效的 resume 必须被跳过'
