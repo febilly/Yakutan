@@ -1239,6 +1239,12 @@ def get_status():
     status['config_applied_at_ms'] = int(getattr(config, 'CONFIG_APPLIED_AT_MS', 0) or 0)
     status['backend_boot_ms'] = int(getattr(config, 'BACKEND_BOOT_MS', 0) or 0)
     status['local_inference_ui_enabled'] = is_local_inference_ui_enabled()
+    # P3-20: 识别链路最近一次致命错误（只读字段）。由 recognition_handler /
+    # main 写入 AppState 动态属性；服务未运行或尚无错误时为 None。
+    live_state = _live_app_state()
+    status['asr_error'] = getattr(live_state, 'last_recognition_error', None)
+    status['asr_error_source'] = getattr(live_state, 'last_recognition_error_source', None)
+    status['asr_error_at_ms'] = getattr(live_state, 'last_recognition_error_at_ms', None)
     return jsonify(status)
 
 @app.route('/api/subtitles', methods=['GET'])

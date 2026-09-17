@@ -60,6 +60,8 @@ from recognition_handler import (
     PAUSE_RESUME_BACKENDS,
     is_effective_mic_control_enabled,
     is_doubao_file_backend,
+    report_recognition_error,
+    get_secondary_translator_lock,
 )
 
 # 配置日志
@@ -156,9 +158,14 @@ def reinitialize_translator_compat():
             return
         cfg = config_from_module(config)
         if _is_primary_translator_config_changed(state, cfg):
-            reinitialize_translator(state, cfg)
+            # P2-14: 重建期间持 state 级次翻译器锁，与识别回调路径
+            # （on_result / _translate_partial_task）的 ensure_secondary_translator
+            # 串行化，避免并发重建导致本地引擎引用计数失衡
+            with get_secondary_translator_lock(state):
+                reinitialize_translator(state, cfg)
         else:
-            update_secondary_translator(state, cfg)
+            with get_secondary_translator_lock(state):
+                update_secondary_translator(state, cfg)
         _refresh_ipc_translator_reference(state)
         loop = state.main_loop
         if loop is not None and loop.is_running():
@@ -354,9 +361,30 @@ def _make_mute_callback(state):
             logger.warning('[ASR] 主事件循环不可用，忽略静音状态变化')
             return
         try:
-            asyncio.run_coroutine_threadsafe(handle_mute_change(state, is_muted), loop)
+            # P2-9: 保存 run_coroutine_threadsafe 返回的 future 并观察其完成
+            # 状态。此前不消费 future，handle_mute_change / start_recognition_async
+            # 抛出的异常（resume 失败、网络错误等）在事件层面完全静默。
+            future = asyncio.run_coroutine_threadsafe(
+                handle_mute_change(state, is_muted), loop,
+            )
         except Exception as e:
             logger.error('[ASR] 投递静音状态变化失败: %s', e)
+            return
+
+        def _on_mute_future_done(fut, _is_muted=is_muted):
+            # 在事件循环线程内执行：回调协程的异常在此落地记录与上报
+            if fut.cancelled():
+                logger.warning('[ASR] 静音状态处理任务被取消 (is_muted=%s)', _is_muted)
+                return
+            exc = fut.exception()
+            if exc is not None:
+                logger.warning(
+                    '[ASR] 处理静音状态变化失败 (is_muted=%s): %s', _is_muted, exc,
+                    exc_info=exc,
+                )
+                report_recognition_error(state, exc, 'mute_callback')
+
+        future.add_done_callback(_on_mute_future_done)
     return handle_mute_change_sync
 
 
@@ -402,263 +430,288 @@ async def main(
     corpus_text: Optional[str] = None
     hot_word_entries: Optional[list] = None
 
-    # 检测并应用系统代理设置
-    system_proxies = refresh_system_proxy_env()
-    print_proxy_info(system_proxies)
-
-    # 初始化 DashScope API Key
-    init_dashscope_api_key()
-    print('Initializing ...')
-
-    # 选择可用的识别后端
-    backend = select_backend(config.PREFERRED_ASR_BACKEND, config.VALID_ASR_BACKENDS)
-    if backend != config.PREFERRED_ASR_BACKEND:
-        print(f'[ASR] 已切换语音识别后端为 {backend}')
-    else:
-        print(f'[ASR] 目标识别后端: {backend}')
-
-    state.current_asr_backend = backend
-    state.recognition_active = False
-    state.recognition_started = False
-
-    # 初始化语言检测器
-    state.language_detector = _create_language_detector()
-
-    # ---- 统一 VAD：在线 API 发送门控（本地 ASR 走识别器内部 VAD，此处不处理） ----
-    # 门控仅对在线后端生效：本地 ASR 需要连续音频（含静音）供其内部 VAD 分段。
-    _online_backend = backend != 'local'
-    _vad_gating_enabled = config.VAD_ENABLED and _online_backend
-
-    if _vad_gating_enabled:
-        try:
-            from local_inference.model_manager import is_silero_cached, download_silero
-            from local_inference.vad_processor import VADProcessor
-
-            if not is_silero_cached():
-                print('[VAD] Silero ONNX 模型未下载，正在自动下载...')
-                download_silero()
-
-            print('[VAD] Silero ONNX 模型就绪，正在初始化...')
-            state.vad_processor = VADProcessor(
-                sample_rate=config.SAMPLE_RATE,
-                threshold=config.LOCAL_VAD_THRESHOLD,
-                min_speech_duration=config.LOCAL_VAD_MIN_SPEECH_DURATION,
-                chunk_duration=512.0 / config.SAMPLE_RATE,
-                pre_speech_duration=config.VAD_PRE_SPEECH_DURATION,
-            )
-            vad_silence_duration = config.clamp_vad_silence_duration(
-                config.LOCAL_VAD_SILENCE_DURATION
-            )
-            state.vad_processor.update_settings({
-                'vad_mode': 'silero',
-                'vad_threshold': config.LOCAL_VAD_THRESHOLD,
-                'min_speech_duration': config.LOCAL_VAD_MIN_SPEECH_DURATION,
-                'silence_duration': vad_silence_duration,
-                'pre_speech_duration': config.VAD_PRE_SPEECH_DURATION,
-            })
-            state.vad_enabled = True
-            import numpy as np
-            state._vad_pending_samples = np.array([], dtype=np.float32)
-            state._vad_was_speaking = False
-            print(f'[VAD] ✓ 在线 API VAD 发送门控已启用')
-            print(f'[VAD]   threshold={state.vad_processor.threshold:.2f} '
-                  f'min_speech={config.LOCAL_VAD_MIN_SPEECH_DURATION:.1f}s '
-                  f'silence={vad_silence_duration:.1f}s '
-                  f'(在线服务端断句阈值同步为 {int(round(vad_silence_duration * 1000))}ms) '
-                  f'pre={config.VAD_PRE_SPEECH_DURATION:.1f}s '
-                  f'mode={state.vad_processor.mode}')
-        except Exception as e:
-            import traceback
-            print(f'[VAD] ✗ 初始化失败，VAD 门控未启用: {e}')
-            traceback.print_exc()
-            state.vad_enabled = False
-    elif not config.VAD_ENABLED:
-        print('[VAD] — VAD 未启用（VAD_ENABLED=False）')
-    else:
-        print('[VAD] — 本地 ASR 后端：门控由识别器内部 VAD 负责，采集侧不做门控')
-
-    # 初始化翻译器（仅在启用翻译时构建；否则识别流程不会用到翻译器，
-    # 且此时构建会因未配置对应 API Key 而在启动阶段直接报错）
-    cfg = config_from_module(config)
-    if config.ENABLE_TRANSLATION:
-        reinitialize_translator(state, cfg)
-        # 本地 Hy-MT2：服务启动时立即加载模型（此时尚无流量，同步加载不阻塞用户）
-        if prewarm_local_engines(state):
-            print('[Translator] 本地 Hy-MT2 模型已在服务启动时加载')
-
-    # 初始化热词（在线：qwen 语料 / qwen_audio3 即时热词 / dashscope 热词表；
-    # 本地：Qwen3-ASR 走与在线 Qwen 相同的语料注入）
-    if config.ENABLE_HOT_WORDS and backend in {'qwen', 'qwen_audio3', 'dashscope', 'local'}:
-        print('\n[热词] 初始化热词资源...')
-        try:
-            hot_words_manager = HotWordsManager(
-                api_key=str(getattr(config, 'DASHSCOPE_API_KEY', '') or '').strip()
-            )
-            hot_words_manager.load_all_hot_words()
-            if backend == 'qwen':
-                words = [
-                    entry.get('text')
-                    for entry in hot_words_manager.get_hot_words()
-                    if entry.get('text')
-                ]
-                if words:
-                    corpus_text = "\n".join(words)
-                    print(f'[热词] 已生成 Qwen 语料文本，共 {len(words)} 条\n')
-                else:
-                    print('[热词] 未加载到热词条目，跳过 Qwen 语料配置\n')
-            elif backend == 'qwen_audio3':
-                # Qwen-Audio-3.0 支持即时热词，直接下发词条与权重，无需创建热词表
-                hot_word_entries = [
-                    entry
-                    for entry in hot_words_manager.get_hot_words()
-                    if entry.get('text')
-                ]
-                if hot_word_entries:
-                    print(f'[热词] 已准备 Qwen-Audio-3.0 即时热词，共 {len(hot_word_entries)} 条\n')
-                else:
-                    print('[热词] 未加载到热词条目，跳过即时热词配置\n')
-            elif backend == 'local':
-                words = [
-                    entry.get('text')
-                    for entry in hot_words_manager.get_hot_words()
-                    if entry.get('text')
-                ]
-                local_engine = getattr(config, 'LOCAL_INFERENCE_ENGINE', 'sensevoice')
-                if words and local_engine == 'qwen3-asr':
-                    corpus_text = "\n".join(words)
-                    print(f'[热词] 已生成本地 Qwen3-ASR 语料文本，共 {len(words)} 条\n')
-                elif words:
-                    print(
-                        f'[热词] 已加载 {len(words)} 条热词；当前本地引擎为 {local_engine}，'
-                        '仅 qwen3-asr 会使用语料注入\n'
-                    )
-                else:
-                    print('[热词] 未加载到热词条目，跳过本地语料配置\n')
-            else:
-                state.vocabulary_id = hot_words_manager.create_vocabulary(
-                    target_model='fun-asr-realtime',
-                )
-                print(f'[热词] 热词表创建成功，ID: {state.vocabulary_id}\n')
-        except Exception as e:
-            print(f'[热词] 热词初始化失败: {e}')
-            print('[热词] 将继续运行但不使用热词\n')
-            state.vocabulary_id = None
-            corpus_text = None
-            hot_word_entries = None
-
+    # P2-13: 后台任务引用前置为 None，初始化中途失败时 finally 也能安全引用
     ipc_client = None
-    if getattr(config, 'IPC_ENABLED', True):
-        ipc_client = IPCClient(translator=state.translator)
-        osc_manager.set_ipc_client(ipc_client)
-        asyncio.create_task(ipc_client.start())
-    else:
-        print('[IPC] IPC is disabled in config, using standalone mode')
-
-    # 启动 OSC 服务器
-    print('[OSC] 启动OSC服务器...')
-    await osc_manager.start_server(app_name="Yakutan")
-
-    # 设置静音状态回调
-    osc_manager.set_mute_callback(_make_mute_callback(state))
-    print('[OSC] 已设置静音状态回调')
-
-    # 创建识别回调
-    callback = VRChatRecognitionCallback(state)
-    callback.loop = asyncio.get_event_loop()
-    state.recognition_callback = callback
-
-    # 使用工厂创建识别实例
-    state.recognition_instance = create_recognizer(
-        backend=backend,
-        callback=callback,
-        sample_rate=config.SAMPLE_RATE,
-        audio_format=config.FORMAT_PCM,
-        source_language=config.SOURCE_LANGUAGE,
-        vocabulary_id=state.vocabulary_id,
-        corpus_text=corpus_text,
-        hot_words=hot_word_entries,
-        enable_vad=config.ENABLE_VAD,
-        vad_threshold=config.VAD_THRESHOLD,
-        keepalive_interval=config.KEEPALIVE_INTERVAL,
-    )
-
-    if state.vocabulary_id and backend == 'dashscope':
-        print(f'[ASR] 使用热词表: {state.vocabulary_id}')
-
-    if backend == 'qwen':
-        vad_status = '启用' if config.ENABLE_VAD else '禁用'
-        print(f'[ASR] VAD状态: {vad_status}')
-        if config.ENABLE_VAD:
-            print(f'[ASR] VAD配置: 阈值={config.VAD_THRESHOLD}, '
-                  f'静音时长={int(round(config.clamp_vad_silence_duration(config.LOCAL_VAD_SILENCE_DURATION) * 1000))}ms '
-                  f'(与本地 VAD 对齐)')
-
-        if config.KEEPALIVE_INTERVAL > 0:
-            print(f'[ASR] WebSocket心跳已启用: 间隔={config.KEEPALIVE_INTERVAL}秒')
-        else:
-            print('[ASR] WebSocket心跳已禁用')
-
-    print('[ASR] 识别实例已创建')
-
-    # 初始化音频流
-    await init_audio_stream(state)
-
-    # 只在主线程中设置信号处理器
-    try:
-        signal.signal(signal.SIGINT, signal_handler)
-    except ValueError:
-        pass
-
-    # 根据配置决定是否立即启动识别
-    effective_mic_control = is_effective_mic_control_enabled(state.current_asr_backend)
-
-    if effective_mic_control:
-        if backend == 'doubao_file' and not config.ENABLE_MIC_CONTROL:
-            print('[模式] 豆包文件转录已强制启用"游戏静音时暂停转录"（仅运行时生效）')
-        stop_hint = '暂停' if backend in PAUSE_RESUME_BACKENDS else '停止'
-        resume_hint = '恢复' if backend in PAUSE_RESUME_BACKENDS else '开始'
-        print("=" * 60)
-        print("[模式] 麦克风控制模式已启用")
-        print("等待VRChat静音状态变化...")
-        print(f"取消静音(MuteSelf=False)将{resume_hint}语音识别")
-        print(f"启用静音(MuteSelf=True)将{stop_hint}语音识别")
-        print("按 'Ctrl+C' 退出程序")
-        print("=" * 60)
-    else:
-        print("=" * 60)
-        print("[模式] 麦克风控制模式已禁用")
-        print("语音识别将立即启动，忽略麦克风开关状态")
-        print("按 'Ctrl+C' 退出程序")
-        print("=" * 60)
-        await start_recognition_async(state)
-        print('[ASR] 语音识别已启动')
-
-    # 创建音频捕获任务
-    emit_lifecycle('running', state.recognition_active)
-
-    capture_task = asyncio.create_task(
-        audio_capture_task(state, state.recognition_instance)
-    )
-
-    # 主动读取一次游戏当前的静音状态，这样开着游戏中途启动也能立刻对齐，
-    # 不必等玩家切换一次麦克风。放在识别实例与音频流就绪之后再探测。
+    ipc_start_task = None
+    capture_task = None
+    sync_task = None
     mute_probe_task = None
-    if effective_mic_control:
-        mute_probe_task = asyncio.create_task(osc_manager.probe_initial_mute_state())
 
-    # ---- 字幕状态同步任务 ----
-    async def _subtitles_sync_loop():
-        """定期将 AppState.subtitles_state 同步到模块级变量。"""
+    # P2-13: 初始化段整体纳入 try/finally —— 启动中途失败（无麦克风、后端
+    # 不可用、本地模型缺失等导致异常逃逸）时同样执行清理：卸载已加载的本地
+    # 翻译模型、停止 OSC、清除 mute 回调、关闭 executor，不再让资源悬挂至
+    # 进程退出。正常停机路径语义保持不变（停机步骤仍在 stop_event 置位后执行）。
+    try:
+        # 检测并应用系统代理设置
+        system_proxies = refresh_system_proxy_env()
+        print_proxy_info(system_proxies)
+
+        # 初始化 DashScope API Key
+        init_dashscope_api_key()
+        print('Initializing ...')
+
+        # 选择可用的识别后端
+        backend = select_backend(config.PREFERRED_ASR_BACKEND, config.VALID_ASR_BACKENDS)
+        if backend != config.PREFERRED_ASR_BACKEND:
+            print(f'[ASR] 已切换语音识别后端为 {backend}')
+        else:
+            print(f'[ASR] 目标识别后端: {backend}')
+
+        state.current_asr_backend = backend
+        state.recognition_active = False
+        state.recognition_started = False
+
+        # 初始化语言检测器
+        state.language_detector = _create_language_detector()
+
+        # ---- 统一 VAD：在线 API 发送门控（本地 ASR 走识别器内部 VAD，此处不处理） ----
+        # 门控仅对在线后端生效：本地 ASR 需要连续音频（含静音）供其内部 VAD 分段。
+        _online_backend = backend != 'local'
+        _vad_gating_enabled = config.VAD_ENABLED and _online_backend
+
+        if _vad_gating_enabled:
+            try:
+                from local_inference.model_manager import is_silero_cached, download_silero
+                from local_inference.vad_processor import VADProcessor
+
+                if not is_silero_cached():
+                    print('[VAD] Silero ONNX 模型未下载，正在自动下载...')
+                    download_silero()
+
+                print('[VAD] Silero ONNX 模型就绪，正在初始化...')
+                state.vad_processor = VADProcessor(
+                    sample_rate=config.SAMPLE_RATE,
+                    threshold=config.LOCAL_VAD_THRESHOLD,
+                    min_speech_duration=config.LOCAL_VAD_MIN_SPEECH_DURATION,
+                    chunk_duration=512.0 / config.SAMPLE_RATE,
+                    pre_speech_duration=config.VAD_PRE_SPEECH_DURATION,
+                )
+                vad_silence_duration = config.clamp_vad_silence_duration(
+                    config.LOCAL_VAD_SILENCE_DURATION
+                )
+                state.vad_processor.update_settings({
+                    'vad_mode': 'silero',
+                    'vad_threshold': config.LOCAL_VAD_THRESHOLD,
+                    'min_speech_duration': config.LOCAL_VAD_MIN_SPEECH_DURATION,
+                    'silence_duration': vad_silence_duration,
+                    'pre_speech_duration': config.VAD_PRE_SPEECH_DURATION,
+                })
+                state.vad_enabled = True
+                import numpy as np
+                state._vad_pending_samples = np.array([], dtype=np.float32)
+                state._vad_was_speaking = False
+                print(f'[VAD] ✓ 在线 API VAD 发送门控已启用')
+                print(f'[VAD]   threshold={state.vad_processor.threshold:.2f} '
+                      f'min_speech={config.LOCAL_VAD_MIN_SPEECH_DURATION:.1f}s '
+                      f'silence={vad_silence_duration:.1f}s '
+                      f'(在线服务端断句阈值同步为 {int(round(vad_silence_duration * 1000))}ms) '
+                      f'pre={config.VAD_PRE_SPEECH_DURATION:.1f}s '
+                      f'mode={state.vad_processor.mode}')
+            except Exception as e:
+                import traceback
+                print(f'[VAD] ✗ 初始化失败，VAD 门控未启用: {e}')
+                traceback.print_exc()
+                state.vad_enabled = False
+        elif not config.VAD_ENABLED:
+            print('[VAD] — VAD 未启用（VAD_ENABLED=False）')
+        else:
+            print('[VAD] — 本地 ASR 后端：门控由识别器内部 VAD 负责，采集侧不做门控')
+
+        # 初始化翻译器（仅在启用翻译时构建；否则识别流程不会用到翻译器，
+        # 且此时构建会因未配置对应 API Key 而在启动阶段直接报错）
+        cfg = config_from_module(config)
+        if config.ENABLE_TRANSLATION:
+            reinitialize_translator(state, cfg)
+            # 本地 Hy-MT2：服务启动时立即加载模型（此时尚无流量，同步加载不阻塞用户）
+            if prewarm_local_engines(state):
+                print('[Translator] 本地 Hy-MT2 模型已在服务启动时加载')
+
+        # 初始化热词（在线：qwen 语料 / qwen_audio3 即时热词 / dashscope 热词表；
+        # 本地：Qwen3-ASR 走与在线 Qwen 相同的语料注入）
+        if config.ENABLE_HOT_WORDS and backend in {'qwen', 'qwen_audio3', 'dashscope', 'local'}:
+            print('\n[热词] 初始化热词资源...')
+            try:
+                hot_words_manager = HotWordsManager(
+                    api_key=str(getattr(config, 'DASHSCOPE_API_KEY', '') or '').strip()
+                )
+                hot_words_manager.load_all_hot_words()
+                if backend == 'qwen':
+                    words = [
+                        entry.get('text')
+                        for entry in hot_words_manager.get_hot_words()
+                        if entry.get('text')
+                    ]
+                    if words:
+                        corpus_text = "\n".join(words)
+                        print(f'[热词] 已生成 Qwen 语料文本，共 {len(words)} 条\n')
+                    else:
+                        print('[热词] 未加载到热词条目，跳过 Qwen 语料配置\n')
+                elif backend == 'qwen_audio3':
+                    # Qwen-Audio-3.0 支持即时热词，直接下发词条与权重，无需创建热词表
+                    hot_word_entries = [
+                        entry
+                        for entry in hot_words_manager.get_hot_words()
+                        if entry.get('text')
+                    ]
+                    if hot_word_entries:
+                        print(f'[热词] 已准备 Qwen-Audio-3.0 即时热词，共 {len(hot_word_entries)} 条\n')
+                    else:
+                        print('[热词] 未加载到热词条目，跳过即时热词配置\n')
+                elif backend == 'local':
+                    words = [
+                        entry.get('text')
+                        for entry in hot_words_manager.get_hot_words()
+                        if entry.get('text')
+                    ]
+                    local_engine = getattr(config, 'LOCAL_INFERENCE_ENGINE', 'sensevoice')
+                    if words and local_engine == 'qwen3-asr':
+                        corpus_text = "\n".join(words)
+                        print(f'[热词] 已生成本地 Qwen3-ASR 语料文本，共 {len(words)} 条\n')
+                    elif words:
+                        print(
+                            f'[热词] 已加载 {len(words)} 条热词；当前本地引擎为 {local_engine}，'
+                            '仅 qwen3-asr 会使用语料注入\n'
+                        )
+                    else:
+                        print('[热词] 未加载到热词条目，跳过本地语料配置\n')
+                else:
+                    state.vocabulary_id = hot_words_manager.create_vocabulary(
+                        target_model='fun-asr-realtime',
+                    )
+                    print(f'[热词] 热词表创建成功，ID: {state.vocabulary_id}\n')
+            except Exception as e:
+                print(f'[热词] 热词初始化失败: {e}')
+                print('[热词] 将继续运行但不使用热词\n')
+                state.vocabulary_id = None
+                corpus_text = None
+                hot_word_entries = None
+
+        if getattr(config, 'IPC_ENABLED', True):
+            ipc_client = IPCClient(translator=state.translator)
+            osc_manager.set_ipc_client(ipc_client)
+            # P3-26: 保存任务引用避免被 GC 中途回收；异常经 done callback
+            # 记录并上报，不再只以 "never retrieved" 形式丢失
+            ipc_start_task = asyncio.create_task(ipc_client.start())
+
+            def _on_ipc_start_done(task):
+                if task.cancelled():
+                    return
+                exc = task.exception()
+                if exc is not None:
+                    logger.error(
+                        '[IPC] IPC 客户端异常退出: %s', exc, exc_info=exc,
+                    )
+                    report_recognition_error(state, exc, 'ipc')
+
+            ipc_start_task.add_done_callback(_on_ipc_start_done)
+        else:
+            print('[IPC] IPC is disabled in config, using standalone mode')
+
+        # 启动 OSC 服务器
+        print('[OSC] 启动OSC服务器...')
+        await osc_manager.start_server(app_name="Yakutan")
+
+        # 设置静音状态回调
+        osc_manager.set_mute_callback(_make_mute_callback(state))
+        print('[OSC] 已设置静音状态回调')
+
+        # 创建识别回调
+        callback = VRChatRecognitionCallback(state)
+        callback.loop = asyncio.get_event_loop()
+        state.recognition_callback = callback
+
+        # 使用工厂创建识别实例
+        state.recognition_instance = create_recognizer(
+            backend=backend,
+            callback=callback,
+            sample_rate=config.SAMPLE_RATE,
+            audio_format=config.FORMAT_PCM,
+            source_language=config.SOURCE_LANGUAGE,
+            vocabulary_id=state.vocabulary_id,
+            corpus_text=corpus_text,
+            hot_words=hot_word_entries,
+            enable_vad=config.ENABLE_VAD,
+            vad_threshold=config.VAD_THRESHOLD,
+            keepalive_interval=config.KEEPALIVE_INTERVAL,
+        )
+
+        if state.vocabulary_id and backend == 'dashscope':
+            print(f'[ASR] 使用热词表: {state.vocabulary_id}')
+
+        if backend == 'qwen':
+            vad_status = '启用' if config.ENABLE_VAD else '禁用'
+            print(f'[ASR] VAD状态: {vad_status}')
+            if config.ENABLE_VAD:
+                print(f'[ASR] VAD配置: 阈值={config.VAD_THRESHOLD}, '
+                      f'静音时长={int(round(config.clamp_vad_silence_duration(config.LOCAL_VAD_SILENCE_DURATION) * 1000))}ms '
+                      f'(与本地 VAD 对齐)')
+
+            if config.KEEPALIVE_INTERVAL > 0:
+                print(f'[ASR] WebSocket心跳已启用: 间隔={config.KEEPALIVE_INTERVAL}秒')
+            else:
+                print('[ASR] WebSocket心跳已禁用')
+
+        print('[ASR] 识别实例已创建')
+
+        # 初始化音频流
+        await init_audio_stream(state)
+
+        # 只在主线程中设置信号处理器
         try:
-            while not state.stop_event.is_set():
-                _sync_subtitles_to_module()
-                await asyncio.sleep(0.05)
-        except asyncio.CancelledError:
+            signal.signal(signal.SIGINT, signal_handler)
+        except ValueError:
             pass
 
-    sync_task = asyncio.create_task(_subtitles_sync_loop())
+        # 根据配置决定是否立即启动识别
+        effective_mic_control = is_effective_mic_control_enabled(state.current_asr_backend)
 
-    try:
+        if effective_mic_control:
+            if backend == 'doubao_file' and not config.ENABLE_MIC_CONTROL:
+                print('[模式] 豆包文件转录已强制启用"游戏静音时暂停转录"（仅运行时生效）')
+            stop_hint = '暂停' if backend in PAUSE_RESUME_BACKENDS else '停止'
+            resume_hint = '恢复' if backend in PAUSE_RESUME_BACKENDS else '开始'
+            print("=" * 60)
+            print("[模式] 麦克风控制模式已启用")
+            print("等待VRChat静音状态变化...")
+            print(f"取消静音(MuteSelf=False)将{resume_hint}语音识别")
+            print(f"启用静音(MuteSelf=True)将{stop_hint}语音识别")
+            print("按 'Ctrl+C' 退出程序")
+            print("=" * 60)
+        else:
+            print("=" * 60)
+            print("[模式] 麦克风控制模式已禁用")
+            print("语音识别将立即启动，忽略麦克风开关状态")
+            print("按 'Ctrl+C' 退出程序")
+            print("=" * 60)
+            await start_recognition_async(state)
+            print('[ASR] 语音识别已启动')
+
+        # 创建音频捕获任务
+        emit_lifecycle('running', state.recognition_active)
+
+        capture_task = asyncio.create_task(
+            audio_capture_task(state, state.recognition_instance)
+        )
+
+        # 主动读取一次游戏当前的静音状态，这样开着游戏中途启动也能立刻对齐，
+        # 不必等玩家切换一次麦克风。放在识别实例与音频流就绪之后再探测。
+        mute_probe_task = None
+        if effective_mic_control:
+            mute_probe_task = asyncio.create_task(osc_manager.probe_initial_mute_state())
+
+        # ---- 字幕状态同步任务 ----
+        async def _subtitles_sync_loop():
+            """定期将 AppState.subtitles_state 同步到模块级变量。"""
+            try:
+                while not state.stop_event.is_set():
+                    _sync_subtitles_to_module()
+                    await asyncio.sleep(0.05)
+            except asyncio.CancelledError:
+                pass
+
+        sync_task = asyncio.create_task(_subtitles_sync_loop())
+
+        # ---- 运行段：等待停机信号（正常停机路径语义与改造前一致） ----
         await state.stop_event.wait()
         emit_lifecycle('stopping', state.recognition_active)
 
@@ -698,6 +751,12 @@ async def main(
 
     finally:
         emit_lifecycle('stopping', state.recognition_active)
+        # P2-13: 初始化中途失败时，已创建但未进入正常停机流程的后台任务也需
+        # 取消，避免悬挂到进程退出；正常停机路径下任务已在上方被取消/等待，
+        # 这里的守卫取消是空操作
+        for _task in (capture_task, sync_task, mute_probe_task, ipc_start_task):
+            if _task is not None and not _task.done():
+                _task.cancel()
         # 等待进行中的本地模型预加载结束后再统一释放，避免“加载完才释放”的泄漏
         if _local_engine_prewarm_futures:
             try:
