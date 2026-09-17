@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Iterable, List, Optional
 
 from proxy_detector import refresh_system_proxy_env
@@ -7,6 +8,8 @@ from proxy_detector import refresh_system_proxy_env
 from .base_speech_recognizer import SpeechRecognitionCallback
 from .dashscope_speech_recognizer import DashscopeSpeechRecognizer
 from vrcx_context_bridge import build_asr_context_text
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["QwenAudio3SpeechRecognizer"]
 
@@ -125,15 +128,25 @@ class QwenAudio3SpeechRecognizer(DashscopeSpeechRecognizer):
         refresh_system_proxy_env()
         # Recognition.start(**kwargs) 会覆盖构造时的同名参数，因此每次会话
         # 都会带上重新计算的上下文；传 None 时 SDK 会把该参数剔除。
-        self._require_recognition().start(raw_input=self._build_raw_input())
+        raw_input = self._build_raw_input()
+        with self._lifecycle_lock:
+            self._require_recognition().start(raw_input=raw_input)
 
     def stop(self) -> None:
         # pause() 已经把底层会话停掉了，闭麦状态下再关闭服务时 SDK 会抛
         # InvalidParameter，这里直接跳过，避免抛出无意义的异常。
+        # _running 是 SDK 私有属性：getattr 兜底，缺失时视为已停止。
         recognition = self._require_recognition()
         if not getattr(recognition, "_running", False):
             return
-        recognition.stop()
+        # 复用基类的锁与失败告警，与其他生命周期操作串行化（P2-15）。
+        super().stop()
+        # 后置状态校验：stop 正常返回后若 _running 仍为真，说明底层会话
+        # 可能未被真正结束（服务端悬挂/继续计费），留下可观测的告警。
+        if getattr(recognition, "_running", False):
+            logger.warning(
+                '[QwenAudio3] stop() 返回后底层会话仍为运行状态，服务端会话可能未正确结束'
+            )
 
     def _build_raw_input(self) -> Optional[Dict[str, Any]]:
         rounds = split_context_rounds(build_asr_context_text(self._corpus_text or ""))

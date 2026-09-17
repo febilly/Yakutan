@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import suppress
+import logging
 import threading
 from typing import Any, Optional
 
@@ -12,6 +12,8 @@ from .base_speech_recognizer import (
     SpeechRecognitionCallback,
     SpeechRecognizer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class _DashscopeCallbackAdapter(RecognitionCallback):
@@ -97,6 +99,11 @@ class DashscopeSpeechRecognizer(SpeechRecognizer):
         self._recognition: Optional[Recognition] = None
         self._adapter: Optional[_DashscopeCallbackAdapter] = None
         self._callback: Optional[SpeechRecognitionCallback] = None
+        # P2-15: mute（state.executor）、VAD 会话翻转（asr_send_executor）与
+        # 音频发送可从不同线程并发进入本类；用可重入锁串行化生命周期关键段，
+        # 避免无保护地并发操作 SDK 内部状态（pause 内部会嵌套调用 send/stop，
+        # resume 会复用 start，因此用 RLock）。
+        self._lifecycle_lock = threading.RLock()
         self.set_callback(callback)
 
     def set_callback(self, callback: SpeechRecognitionCallback) -> None:
@@ -117,13 +124,25 @@ class DashscopeSpeechRecognizer(SpeechRecognizer):
 
     def start(self) -> None:
         refresh_system_proxy_env()
-        self._require_recognition().start()
+        with self._lifecycle_lock:
+            self._require_recognition().start()
 
     def stop(self) -> None:
-        self._require_recognition().stop()
+        with self._lifecycle_lock:
+            try:
+                self._require_recognition().stop()
+            except Exception as e:
+                # stop 失败意味着服务端 task 可能未结束（悬挂/继续计费），
+                # 必须留下可观测的告警而不是静默吞掉；异常继续向上抛，
+                # 由调用方决定后续处理。
+                logger.warning(
+                    '[Dashscope] 停止识别会话失败，服务端会话可能未正确结束: %s', e
+                )
+                raise
 
     def send_audio_frame(self, data: bytes) -> None:
-        self._require_recognition().send_audio_frame(data)
+        with self._lifecycle_lock:
+            self._require_recognition().send_audio_frame(data)
 
     def pause(self) -> None:
         recognition = self._require_recognition()
@@ -137,11 +156,19 @@ class DashscopeSpeechRecognizer(SpeechRecognizer):
         silence_frames = max(1, int(sample_rate * silence_ms / 1000))
         silence_data = b'\x00' * (silence_frames * channels * bytes_per_sample)
 
-        with suppress(Exception):
-            recognition.send_audio_frame(silence_data)
-
-        with suppress(Exception):
-            recognition.stop()
+        with self._lifecycle_lock:
+            try:
+                recognition.send_audio_frame(silence_data)
+            except Exception as e:
+                logger.warning('[Dashscope] 暂停前发送静音帧失败(忽略，继续停止会话): %s', e)
+            try:
+                recognition.stop()
+            except Exception as e:
+                # 静音帧发送或 stop 失败都不阻断闭麦流程，但 stop 失败时
+                # 服务端会话可能悬挂，必须告警留痕。
+                logger.warning(
+                    '[Dashscope] 暂停时停止会话失败，服务端会话可能未正确结束: %s', e
+                )
 
     def resume(self) -> None:
         self.start()

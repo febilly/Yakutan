@@ -186,6 +186,11 @@ def _refresh_ipc_translator_reference(state):
 
 # ============ 识别控制 ============
 
+# P2-8: 延迟停止被取消静音撤销时，等待 in-flight pause（含 qwen end_session /
+# dashscope stop 的网络 RTT）真正完成的时间上限；超时后交由识别器内部锁兜底。
+INFLIGHT_PAUSE_WAIT_SECONDS = 10.0
+
+
 async def stop_recognition_async(state):
     """异步暂停或停止识别服务"""
     if not state.recognition_active:
@@ -194,10 +199,28 @@ async def stop_recognition_async(state):
     loop = asyncio.get_event_loop()
     state.recognition_active = False
 
+    # pause 段含网络 RTT。用 shield 包裹：外层任务（mute_delay_task）被取消
+    # 静音撤销时，CancelledError 不会中止底层 pause 线程；这里在被取消后仍
+    # 限时等待其真正完成，避免后台 pause 与 unmute 触发的 resume/start 并发
+    # 操作同一识别器（P2-8 取消竞态）。
+    pause_future = loop.run_in_executor(state.executor, state.recognition_instance.pause)
     try:
-        await loop.run_in_executor(state.executor, state.recognition_instance.pause)
-    except Exception:
-        pass
+        await asyncio.shield(pause_future)
+    except asyncio.CancelledError:
+        # 任务被取消（典型：用户取消静音）：先等 in-flight pause 落地，再把
+        # 取消向上传播。等待期被再次取消或超时/异常时不再无限阻塞，交由
+        # 识别器内部锁串行化兜底。
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(pause_future), timeout=INFLIGHT_PAUSE_WAIT_SECONDS
+            )
+        except asyncio.CancelledError:
+            logger.warning('[ASR] 等待 in-flight 暂停完成时再次被取消，底层 pause 交由识别器内部锁串行化')
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        logger.warning('[ASR] 暂停识别失败(已忽略): %s', e)
 
     # 闭麦时重置本地 VAD 状态与缓存，确保下一次开麦时有干净的历史。
     if state.vad_processor is not None:
@@ -302,6 +325,20 @@ async def handle_mute_change(state, is_muted):
         if state.mute_delay_task and not state.mute_delay_task.done():
             state.mute_delay_task.cancel()
             print('[ASR] 检测到取消静音，已取消延迟停止任务')
+            # P2-8: 延迟停止可能已进入 in-flight pause（含网络 RTT）。delayed_stop
+            # 内部对 pause 段做了 shield，被取消后仍会等 pause 完成才退出；这里
+            # 限时等待该任务落地后再触发 start/resume，避免后台 pause 线程与
+            # resume/start 并发操作识别器。超时则继续开麦，由识别器内部锁兜底。
+            # 注：asyncio.wait 不会因任务以取消收尾而抛出（若 cancel 落在
+            # delayed_stop 首步之前，任务会直接以 cancelled 结束）。
+            try:
+                done, _pending = await asyncio.wait(
+                    [state.mute_delay_task], timeout=INFLIGHT_PAUSE_WAIT_SECONDS
+                )
+            except asyncio.CancelledError:
+                raise
+            if not done:
+                logger.warning('[ASR] 等待 in-flight 停止任务超时，继续开麦（识别器内部锁兜底）')
 
         if not state.recognition_active:
             print(f'[ASR] 检测到取消静音，{start_word}语音识别...')
