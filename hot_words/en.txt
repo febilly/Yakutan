@@ -1,16 +1,7 @@
-CompSci
 VRChat
-Avatar
-World
-VR headset
-Meta Quest
-Pico 4
-Pat
 Booth
 Japan Shrine
 FUJIYAMA
-Poppy Street
-Chinese Bar
 Kipfel
 Mamehinata
 Manuka
@@ -27,6 +18,3 @@ Lime
 Plum
 Eku
 Deltaflair
-MMD
-DeepL
-Unity
