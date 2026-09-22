@@ -30,6 +30,12 @@ __all__ = ["SonioxSpeechRecognizer", "WEBSOCKETS_AVAILABLE"]
 # Soniox WebSocket API 端点
 SONIOX_WEBSOCKET_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 
+# 断线重连策略：指数退避，封顶 30s，在服务运行期间无限重试
+SONIOX_RECONNECT_INITIAL_DELAY = 1.0
+SONIOX_RECONNECT_MAX_DELAY = 30.0
+# 音频帧被静默丢弃时的日志节流间隔（每 5s 最多一条）
+SONIOX_DROP_LOG_INTERVAL = 5.0
+
 
 class SonioxSpeechRecognizer(SpeechRecognizer):
     """Speech recognizer backed by the Soniox WebSocket API.
@@ -65,6 +71,9 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
         self._should_run: bool = False
         self._paused: bool = False
         self._session_id: Optional[str] = None
+        # 重连状态
+        self._reconnecting: bool = False
+        self._last_drop_log_time: float = 0.0
         
         # 配置参数
         self._api_key = os.environ.get("SONIOX_API_KEY", "") if api_key is None else api_key
@@ -94,7 +103,9 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
 
     def start(self) -> None:
         with self._lock:
-            if self._ws is not None:
+            # 仅在连接确实存活时短路；连接已断开（_connected=False）时必须重建，
+            # 否则残留的 _ws 会让 start() 永远无法恢复（审查 P1-4）。
+            if self._connected and self._ws is not None:
                 return
             self._should_run = True
             self._paused = False
@@ -104,27 +115,45 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
         self._connect()
 
     def _connect(self) -> None:
-        """建立 WebSocket 连接并发送配置"""
+        """建立 WebSocket 连接并发送配置。
+        
+        会话语义（语言提示/上下文/热词/VRCX 上下文）通过 _build_config()
+        在每次建连时重放，因此重连后自动恢复。
+        """
         try:
             print("[Soniox] Connecting to Soniox...")
             refresh_system_proxy_env()
-            self._ws = ws_connect(SONIOX_WEBSOCKET_URL)
+            ws = ws_connect(SONIOX_WEBSOCKET_URL)
             
             # 构建配置消息
             config = self._build_config()
-            self._ws.send(json.dumps(config))
+            ws.send(json.dumps(config))
             
-            # 启动接收线程
-            self._recv_stop_event.clear()
-            self._recv_thread = threading.Thread(
+            # 启动接收线程（stop_event 与 ws 绑定，避免新旧连接串扰）
+            stop_event = threading.Event()
+            recv_thread = threading.Thread(
                 target=self._recv_worker,
+                args=(ws, stop_event),
                 daemon=True,
                 name="SonioxRecvThread"
             )
-            self._recv_thread.start()
-            
             with self._lock:
-                self._connected = True
+                # 锁内提交连接状态：_ws 赋值必须在锁内（审查 P1-4），
+                # 并防御并发建连/已停止的竞态。
+                if not self._should_run or (self._connected and self._ws is not None):
+                    stale = True
+                else:
+                    self._recv_stop_event = stop_event
+                    self._ws = ws
+                    self._recv_thread = recv_thread
+                    self._connected = True
+                    stale = False
+            if stale:
+                # 已停止或已有其他路径完成连接：丢弃本次握手
+                with suppress(Exception):
+                    ws.close()
+                return
+            recv_thread.start()
             
             print("[Soniox] Connection established successfully.")
             
@@ -135,6 +164,52 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
             print(f"[Soniox] Connection failed: {e}")
             self._cleanup()
             raise
+    
+    def _maybe_start_reconnect_thread(self) -> None:
+        """在服务仍应运行且连接已断开时，启动后台受控重连线程（幂等）。"""
+        with self._lock:
+            if not self._should_run:
+                return
+            if self._connected and self._ws is not None:
+                return
+            if self._reconnecting:
+                return
+            self._reconnecting = True
+        thread = threading.Thread(
+            target=self._reconnect_loop,
+            daemon=True,
+            name="SonioxReconnectThread"
+        )
+        thread.start()
+    
+    def _reconnect_loop(self) -> None:
+        """后台重连循环：指数退避（封顶 SONIOX_RECONNECT_MAX_DELAY），
+        在 _should_run 为真期间无限重试，成功或服务停止后退出。
+        """
+        delay = SONIOX_RECONNECT_INITIAL_DELAY
+        try:
+            while True:
+                with self._lock:
+                    if not self._should_run:
+                        print("[Soniox] Service stopped; cancel reconnection.")
+                        return
+                    if self._connected and self._ws is not None:
+                        return
+                print(f"[Soniox] Connection lost; retrying in {delay:.1f}s (auto reconnect, backoff capped at {SONIOX_RECONNECT_MAX_DELAY:.0f}s)...")
+                time.sleep(delay)
+                delay = min(delay * 2.0, SONIOX_RECONNECT_MAX_DELAY)
+                with self._lock:
+                    if not self._should_run:
+                        return
+                try:
+                    self._connect()
+                    print("[Soniox] Reconnected successfully.")
+                    return
+                except Exception as e:
+                    print(f"[Soniox] Reconnect attempt failed: {e}")
+        finally:
+            with self._lock:
+                self._reconnecting = False
 
     def _build_config(self) -> Dict[str, Any]:
         """构建发送给 Soniox 的配置消息"""
@@ -242,15 +317,17 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
         
         return config
 
-    def _recv_worker(self) -> None:
-        """接收线程：从 WebSocket 读取消息并处理"""
+    def _recv_worker(self, ws: Any, stop_event: threading.Event) -> None:
+        """接收线程：从 WebSocket 读取消息并处理。
+        
+        退出时（无论正常关闭还是异常断开）在锁内置 _ws=None、_connected=False；
+        若服务仍应运行（_should_run），则触发受控自动重连。
+        """
+        error: Optional[Exception] = None
         try:
-            while not self._recv_stop_event.is_set():
-                if self._ws is None:
-                    break
-                
+            while not stop_event.is_set():
                 try:
-                    message = self._ws.recv(timeout=1.0)
+                    message = ws.recv(timeout=1.0)
                 except TimeoutError:
                     continue
                 except ConnectionClosedOK:
@@ -266,14 +343,24 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
                 self._handle_message(message)
                 
         except Exception as e:
+            error = e
             print(f"[Soniox] Receive thread error: {e}")
-            if self._callback:
-                self._callback.on_error(e)
         finally:
+            was_current = False
             with self._lock:
-                self._connected = False
-            if self._callback:
-                self._callback.on_session_stopped()
+                if self._ws is ws:
+                    self._ws = None
+                    self._connected = False
+                    was_current = True
+            if was_current:
+                # 仅当本线程仍拥有当前连接时才回调，避免旧连接的退出
+                # 干扰已经重建的新会话。
+                if error is not None and self._callback:
+                    self._callback.on_error(error)
+                if self._callback:
+                    self._callback.on_session_stopped()
+            # 服务仍在运行时触发受控重连（指数退避，无限重试）
+            self._maybe_start_reconnect_thread()
 
     def _handle_message(self, message: str) -> None:
         """处理从 Soniox 接收的消息"""
@@ -370,16 +457,17 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
             self._recv_thread.join(timeout=2.0)
         self._recv_thread = None
         
-        # 关闭 WebSocket
-        if self._ws:
+        # 关闭 WebSocket（接收线程的 finally 通常已先清空 _ws）
+        ws = self._ws
+        if ws:
             with suppress(Exception):
                 # 发送空字符串表示结束
-                self._ws.send("")
+                ws.send("")
             with suppress(Exception):
-                self._ws.close()
-            self._ws = None
+                ws.close()
         
         with self._lock:
+            self._ws = None
             self._connected = False
 
     def send_audio_frame(self, data: bytes) -> None:
@@ -390,27 +478,43 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
             if self._paused:
                 return
             if not self._connected or self._ws is None:
+                # 未连接时静默丢弃会掩盖断线（审查 P1-4）：改为节流日志提示
+                self._log_throttled_drop()
                 return
+            ws = self._ws
         
         try:
             # Soniox 接收原始 PCM 字节数据
-            self._ws.send(data)
+            ws.send(data)
         except Exception as e:
             print(f"[Soniox] Error sending audio: {e}")
             with self._lock:
-                self._connected = False
+                if self._ws is ws:
+                    self._connected = False
+            # 主动关闭以唤醒接收线程，尽快走断线重连路径
+            with suppress(Exception):
+                ws.close()
+    
+    def _log_throttled_drop(self) -> None:
+        """连接未就绪丢弃音频帧时的节流日志（默认每 5s 最多一条）。调用方需持有 _lock。"""
+        now = time.monotonic()
+        if now - self._last_drop_log_time < SONIOX_DROP_LOG_INTERVAL:
+            return
+        self._last_drop_log_time = now
+        print("[Soniox] Not connected; dropping audio frame (auto reconnect in progress)")
 
     def pause(self) -> None:
         with self._lock:
             if self._paused:
                 return
             self._paused = True
+            ws = self._ws if self._connected else None
         
         # 发送 finalize 消息强制结束当前句子
-        if self._ws and self._connected:
+        if ws is not None:
             try:
                 finalize_msg = json.dumps({"type": "finalize"})
-                self._ws.send(finalize_msg)
+                ws.send(finalize_msg)
             except Exception as e:
                 print(f"[Soniox] Error sending finalize: {e}")
 
@@ -419,6 +523,15 @@ class SonioxSpeechRecognizer(SpeechRecognizer):
             if not self._paused:
                 return
             self._paused = False
+            needs_reconnect = not (self._connected and self._ws is not None)
+        
+        if needs_reconnect:
+            # 暂停期间连接已断开：恢复时重建连接（审查 P1-4：resume 不再只清标志位）
+            try:
+                self._connect()
+            except Exception as e:
+                print(f"[Soniox] resume() reconnect failed: {e}; falling back to background reconnect")
+                self._maybe_start_reconnect_thread()
 
     def get_last_request_id(self) -> Optional[str]:
         with self._lock:

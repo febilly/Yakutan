@@ -42,6 +42,53 @@ def _translation_context_prefix() -> str:
     return build_translation_context_prefix(getattr(config, 'CONTEXT_PREFIX', ''))
 
 
+# ── 识别链路错误上报（P3-20）──────────────────────────────────────────
+# 鉴权失败/配额耗尽等致命错误此前只写日志，UI 与 /api/status 消费方完全
+# 无感知（"识别看似正常"）。错误统一记录到 AppState 的动态属性上，
+# ui/app.py 的 /api/status 只读读取。AppState 未启用 __slots__，
+# 动态挂载无需修改 app_state.py；main.py 的静音回调（P2-9）与 IPC
+# 启动任务（P3-26）复用同一入口。
+
+def report_recognition_error(state, error: BaseException, source: str) -> None:
+    """将识别链路错误记录到 *state*（供 /api/status 只读展示）。
+
+    写入三个动态属性：``last_recognition_error``（"异常类型: 消息"）、
+    ``last_recognition_error_source``（错误来源）、
+    ``last_recognition_error_at_ms``（毫秒 Unix 时间戳）。
+    上报自身绝不抛异常，避免污染调用方线程。
+    """
+    if state is None:
+        return
+    try:
+        state.last_recognition_error = f'{type(error).__name__}: {error}'
+        state.last_recognition_error_source = str(source)
+        state.last_recognition_error_at_ms = time.time() * 1000.0
+    except Exception:
+        logger.debug('记录识别错误到状态接口失败', exc_info=True)
+
+
+# ── 次翻译器重建的 state 级锁（P2-14）────────────────────────────────
+# on_result（终句路径，WS 回调线程）与 _translate_partial_task（中间结果
+# 路径，事件循环）可能并发调用 ensure_secondary_translator：两线程同时
+# release_local_engines + 覆盖 state.secondary_*，共享 Hy-MT2 本地引擎的
+# 引用计数可能失衡（提前卸载或泄漏）。锁以 state 动态属性挂载，识别回调
+# 与 main.reinitialize_translator_compat（配置热更新路径）共用同一实例。
+
+_secondary_translator_lock_init = threading.Lock()
+
+
+def get_secondary_translator_lock(state) -> threading.Lock:
+    """获取（必要时惰性创建）挂在 *state* 上的次翻译器重建锁。"""
+    lock = getattr(state, '_secondary_translator_lock', None)
+    if lock is None:
+        with _secondary_translator_lock_init:
+            lock = getattr(state, '_secondary_translator_lock', None)
+            if lock is None:
+                lock = threading.Lock()
+                state._secondary_translator_lock = lock
+    return lock
+
+
 def is_doubao_file_backend(backend: str) -> bool:
     return backend == 'doubao_file'
 
@@ -764,6 +811,9 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
     def on_error(self, error: Exception) -> None:
         logger.error('Speech recognizer failed: %s', error)
+        # P3-20: 鉴权失败/配额耗尽等不可恢复错误上报到状态接口，
+        # 让 /api/status 消费方可以感知“识别已不可用”
+        report_recognition_error(self.state, error, 'recognizer')
 
     async def _translate_partial_task(
         self,
@@ -801,7 +851,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                 actual_secondary_target = resolve_output_target_language(
                     detected_lang, requested_secondary_target,
                 )
-            ensure_secondary_translator(s, actual_secondary_target, config_from_module(config))
+            with get_secondary_translator_lock(s):
+                ensure_secondary_translator(
+                    s, actual_secondary_target, config_from_module(config),
+                )
             use_secondary_output = (
                 actual_secondary_target is not None and s.secondary_translator is not None
             )
@@ -988,9 +1041,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
 
             if osc_text:
                 await osc_manager.send_text(osc_text, ongoing=True)
-
         except Exception:
-            pass
+            # P3-19: 流式翻译任务此前整体静默（except: pass），失败无任何
+            # 可观测信号；这里至少留下带堆栈的告警日志
+            logger.warning('Partial translation task failed', exc_info=True)
         finally:
             self._partial_inflight = max(0, self._partial_inflight - 1)
             self.translating_partial = self._partial_inflight > 0
@@ -1296,8 +1350,12 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
             # 因 finalized_seq / final_output_version 失效并取消，
             # 避免迟到的中间结果在终句之后仍被打印 / 发送到 OSC。
             # （与是否启用翻译无关，中间结果输出消抖始终会被调度）
-            self._finalized_seq += 1
-            self._final_output_version += 1
+            # P3-23: qwen 新旧 conversation 回调线程可能并发到达终句/
+            # 会话结束，计数自增统一移入 _translate_ordering_lock，
+            # 避免丢增量导致乱序判断失效。
+            with self._translate_ordering_lock:
+                self._finalized_seq += 1
+                self._final_output_version += 1
             self._cancel_partial_debounce()
             self._cancel_partial_output_debounce()
 
@@ -1330,7 +1388,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
                     actual_secondary_target = resolve_output_target_language(
                         source_lang, requested_secondary_target,
                     )
-                ensure_secondary_translator(s, actual_secondary_target, config_from_module(config))
+                with get_secondary_translator_lock(s):
+                    ensure_secondary_translator(
+                        s, actual_secondary_target, config_from_module(config),
+                    )
 
                 print(f'原文：{text} [{source_lang_info["language"]}]')
                 if not primary_enabled and actual_target != config.TARGET_LANGUAGE:

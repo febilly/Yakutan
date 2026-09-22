@@ -24,6 +24,13 @@ ASR_SEND_QUEUE_MIN_FRAMES = 10
 ASR_MAX_AUDIO_FRAME_BYTES = 16 * 1024
 PCM16_SAMPLE_BYTES = 2
 DASHSCOPE_SERVER_VAD_BACKENDS = frozenset({'qwen_audio3', 'dashscope'})
+# VAD 判停前等待发送队列排空的超时：网络劣化/WS 黑洞时 join() 不能无限等待，
+# 否则会永久卡死采集主循环
+SEND_QUEUE_JOIN_TIMEOUT_SECONDS = 8.0
+# send_audio_frame 失败日志的节流间隔，避免死连接时日志风暴
+_SEND_FAIL_LOG_INTERVAL_SECONDS = 5.0
+_last_send_fail_log_at = 0.0
+_send_fail_count_since_log = 0
 
 
 class _SilenceBurst:
@@ -393,12 +400,24 @@ async def read_audio_data(state):
 
 async def send_audio_frame_async(state, recognizer, data: bytes):
     """异步发送音频帧。"""
+    global _last_send_fail_log_at, _send_fail_count_since_log
     loop = asyncio.get_event_loop()
     state.ensure_asr_send_executor()
     try:
         await loop.run_in_executor(state.asr_send_executor, recognizer.send_audio_frame, data)
-    except Exception:
-        pass
+    except Exception as exc:
+        # 发送失败不中断采集，但必须留下可观测信号（原 except: pass 完全吞掉，
+        # 连接死亡后无任何提示）
+        _send_fail_count_since_log += 1
+        now = time.monotonic()
+        if now - _last_send_fail_log_at >= _SEND_FAIL_LOG_INTERVAL_SECONDS:
+            _last_send_fail_log_at = now
+            logger.warning(
+                '[Audio] ASR 发送音频帧失败（自上次日志以来 %d 次）: %r',
+                _send_fail_count_since_log,
+                exc,
+            )
+            _send_fail_count_since_log = 0
 
 
 def _asr_send_queue_maxsize() -> int:
@@ -414,6 +433,25 @@ def _drop_oldest_queue_item(queue: asyncio.Queue) -> None:
         queue.task_done()
     except asyncio.QueueEmpty:
         pass
+
+
+def _drain_send_queue(queue: asyncio.Queue) -> int:
+    """非阻塞排空发送队列，返回丢弃的条目数。
+
+    send_queue.join() 超时后的降级路径：丢弃尚未发出的余量，让调用方得以
+    继续推进，而不是永久等待。
+    """
+    dropped = 0
+    while True:
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return dropped
+        dropped += 1
+        try:
+            queue.task_done()
+        except ValueError:
+            pass
 
 
 class GatePreBuffer:
@@ -466,6 +504,10 @@ async def audio_capture_task(state, recognizer):
             generation, payload = await send_queue.get()
             try:
                 await _send_queue_payload(state, recognizer, generation, payload)
+            except Exception as exc:
+                # 发送异常不得杀死 worker：一旦 worker 死亡，队列的 join()
+                # 将永远无法完成，等待排空的调用方会被永久卡死
+                logger.warning('[Audio] ASR 发送 worker 处理帧失败（跳过该帧）: %r', exc)
             finally:
                 send_queue.task_done()
 
@@ -475,6 +517,7 @@ async def audio_capture_task(state, recognizer):
     _vad_chunk_samples = 512
     _vad_chunk_count = 0
     _vad_last_diag_at = 0.0
+    _vad_diag_interval = 5.0
     _vad_verbose = bool(getattr(config, 'ENABLE_VAD_GATING_VERBOSE', False))
     # 本地门控停止转发真实静音后，补发服务端判停所需的合成静音。
     # DashScope Recognition 后端需要完整判停窗口；其他后端仅保留安全余量。
@@ -503,6 +546,130 @@ async def audio_capture_task(state, recognizer):
     # 会话代次（开麦/闭麦/切后端都会 bump）：变化时清空预缓冲，
     # 防止把上一次会话残留的音频补发给新会话
     _vad_pre_generation = getattr(state, 'audio_send_generation', 0)
+    # DashScope 系会话翻转（pause/resume 含 WS 握手与结束 RTT）若在采集主循环内
+    # await，会停在读帧上导致 PyAudio 缓冲溢出丢语音。改为：主循环只登记翻转动作并
+    # 立即继续读帧，由后台任务串行执行；翻转期间本该补发给新会话的语音帧先暂存在
+    # _vad_resume_hold，确保句首不丢。
+    _vad_flip_actions = collections.deque()  # [(generation, 'pause'|'resume'), ...]
+    _vad_flip_wake = asyncio.Event()
+    _vad_flip_stopping = False
+    _vad_resume_hold = collections.deque(maxlen=_asr_send_queue_maxsize())
+    # resume 已登记（含失败重试期间）：门控帧统一路由到 hold 形成单一时间序流。
+    # 若维持双流（pre_buffer 与 hold 并行累积），重试间隙中低于阈值的帧会落入
+    # pre_buffer，与更旧的 hold 帧交错，下次 flush 按「pre 在前、hold 在后」拼接时
+    # 必然乱序；单一流从根上消除交错可能。
+    _vad_resume_pending = False
+    _last_hold_overflow_log_at = 0.0
+
+    def _enqueue_send(generation: int, payload) -> None:
+        try:
+            send_queue.put_nowait((generation, payload))
+        except asyncio.QueueFull:
+            _drop_oldest_queue_item(send_queue)
+            send_queue.put_nowait((generation, payload))
+
+    def _vad_flush_buffered_speech(generation: int) -> None:
+        """把门控期间扣留的起声音频整体补发，保证服务端收到句首。"""
+        nonlocal _vad_recognition_has_audio
+        frames = _vad_pre_buffer.flush()
+        frames.extend(_vad_resume_hold)
+        _vad_resume_hold.clear()
+        if frames:
+            _vad_recognition_has_audio = True
+            for frame in frames:
+                _enqueue_send(generation, frame)
+            if _vad_verbose:
+                print(
+                    f'[VAD] 预缓冲补发 {len(frames)} 帧'
+                    f'（约 {_vad_pre_buffer_seconds:.1f}s）'
+                )
+
+    def _flip_generation_current(generation: int) -> bool:
+        """翻转动作登记时的会话代次是否仍然有效（防跨会话执行）。"""
+        return (
+            state.recognition_active
+            and generation == getattr(state, 'audio_send_generation', 0)
+        )
+
+    async def _vad_pause_flip(generation: int) -> None:
+        """下降沿翻转：排空发送队列（带超时）后结束当前 Recognition 会话。"""
+        nonlocal _vad_recognition_paused, _vad_recognition_has_audio
+        if not _vad_recognition_has_audio:
+            # 登记后前序动作已重置会话：没有待结束的音频
+            return
+        # pause/stop 会等待 SDK 内部音频队列排空并完成当前 task，
+        # 行为与游戏内闭麦一致，可确定触发最终识别结果。
+        try:
+            await asyncio.wait_for(
+                send_queue.join(),
+                timeout=SEND_QUEUE_JOIN_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            # 排空超时（发送阻塞在半死连接上）：丢弃余量继续，
+            # 避免无限等待卡死翻转任务
+            dropped = _drain_send_queue(send_queue)
+            print(
+                f'[VAD] ASR 发送队列 '
+                f'{SEND_QUEUE_JOIN_TIMEOUT_SECONDS:.0f}s 未排空，'
+                f'丢弃余量 {dropped} 项后继续结束会话'
+            )
+        if not _flip_generation_current(generation):
+            return
+        paused = await _run_recognizer_control_async(state, recognizer, 'pause')
+        if not _flip_generation_current(generation):
+            return
+        _vad_recognition_paused = paused
+        if paused:
+            _vad_recognition_has_audio = False
+            print('[VAD] ■ DashScope Recognition 当前会话已结束')
+        elif _vad_end_burst.total_bytes:
+            # 生命周期切换失败时保留合成静音作为降级路径。
+            await send_queue.put((generation, _vad_end_burst))
+
+    async def _vad_resume_flip(generation: int) -> None:
+        """上升沿翻转：恢复会话并补发起声预缓冲与暂存帧。"""
+        nonlocal _vad_recognition_paused, _vad_recognition_has_audio, _vad_resume_pending
+        if not _vad_recognition_paused:
+            # 前序 pause 失败或会话本就活动：无需 resume
+            return
+        resumed = await _run_recognizer_control_async(state, recognizer, 'resume')
+        if not _flip_generation_current(generation):
+            return
+        if not resumed:
+            # 重试：保留单一暂存流不动（pending 仍为 True，间隙帧继续入 hold，
+            # 时间序不乱），并让下一帧重新触发起声以便重试。
+            if state.vad_processor is not None:
+                state.vad_processor.reset()
+            state._vad_was_speaking = False
+            return
+        _vad_recognition_paused = False
+        _vad_recognition_has_audio = False
+        _vad_resume_pending = False
+        print('[VAD] ▶ DashScope Recognition 新会话已开始')
+        _vad_flush_buffered_speech(generation)
+
+    async def _vad_session_flip_loop() -> None:
+        """串行执行 DashScope 系会话翻转，不阻塞采集主循环。"""
+        while True:
+            await _vad_flip_wake.wait()
+            _vad_flip_wake.clear()
+            while _vad_flip_actions:
+                generation, action = _vad_flip_actions.popleft()
+                if not _flip_generation_current(generation):
+                    continue
+                try:
+                    if action == 'pause':
+                        await _vad_pause_flip(generation)
+                    else:
+                        await _vad_resume_flip(generation)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.warning('[VAD] 会话翻转动作 %s 失败: %r', action, exc)
+            if _vad_flip_stopping:
+                return
+
+    flip_task = asyncio.create_task(_vad_session_flip_loop())
 
     # 一次性报告采集侧 VAD 门控状态。
     # 注意：这里的门控只服务于在线 API（静音时暂停发送以省流），本地识别需要连续音频供
@@ -553,8 +720,10 @@ async def audio_capture_task(state, recognizer):
             if _generation != _vad_pre_generation:
                 _vad_pre_generation = _generation
                 _vad_pre_buffer.clear()
+                _vad_resume_hold.clear()
                 _vad_recognition_paused = False
                 _vad_recognition_has_audio = False
+                _vad_resume_pending = False
 
             # ── VAD 侧路分析（不阻塞主通道，且仅在识别激活时进行） ──
             if state.recognition_active and state.vad_enabled and state.vad_processor is not None:
@@ -576,46 +745,28 @@ async def audio_capture_task(state, recognizer):
                             conf = state.vad_processor.last_confidence
                             if is_speaking:
                                 if _vad_rolls_recognition_session and _vad_recognition_paused:
-                                    resumed = await _run_recognizer_control_async(
-                                        state, recognizer, 'resume'
-                                    )
-                                    if not resumed:
-                                        # 保留起声预缓冲，并让下一帧重新触发起声，以便重试。
-                                        state.vad_processor.reset()
-                                        state._vad_was_speaking = False
-                                        break
-                                    _vad_recognition_paused = False
-                                    _vad_recognition_has_audio = False
-                                    print('[VAD] ▶ DashScope Recognition 新会话已开始')
-                                # 开口瞬间：把门控期间扣留的预缓冲音频整体补发，
-                                # 保证服务端收到句首（当前帧随后由发送块正常入队，不重复）
-                                pre_frames = _vad_pre_buffer.flush()
-                                if pre_frames:
-                                    _vad_recognition_has_audio = True
-                                    for pre_frame in pre_frames:
-                                        try:
-                                            send_queue.put_nowait((_generation, pre_frame))
-                                        except asyncio.QueueFull:
-                                            _drop_oldest_queue_item(send_queue)
-                                            send_queue.put_nowait((_generation, pre_frame))
-                                    if _vad_verbose:
-                                        print(f'[VAD] 预缓冲补发 {len(pre_frames)} 帧（约 {_vad_pre_buffer_seconds:.1f}s）')
+                                    # resume（含 WS 重握手 RTT）交由后台翻转任务串行执行，
+                                    # 主循环继续读帧；起声瞬间先把预缓冲（更老）并入
+                                    # hold，之后门控帧统一进入 hold，形成单一时间序流，
+                                    # resume 完成后统一补发，确保句首不丢且不乱序
+                                    _vad_resume_hold.extend(_vad_pre_buffer.flush())
+                                    _vad_resume_pending = True
+                                    _vad_flip_actions.append((_generation, 'resume'))
+                                    _vad_flip_wake.set()
+                                else:
+                                    # 开口瞬间：把门控期间扣留的预缓冲音频整体补发，
+                                    # 保证服务端收到句首（当前帧随后由发送块正常入队，不重复）
+                                    _vad_flush_buffered_speech(_generation)
                                 print(f'[VAD] ▶ SPEECH 开始 (chunk=#{_vad_chunk_count}, 置信度={conf:.3f})')
                             else:
                                 if _vad_rolls_recognition_session:
-                                    # pause/stop 会等待 SDK 内部音频队列排空并完成当前 task，
-                                    # 行为与游戏内闭麦一致，可确定触发最终识别结果。
                                     if _vad_recognition_has_audio:
-                                        await send_queue.join()
-                                        _vad_recognition_paused = await _run_recognizer_control_async(
-                                            state, recognizer, 'pause'
-                                        )
-                                        if _vad_recognition_paused:
-                                            _vad_recognition_has_audio = False
-                                            print('[VAD] ■ DashScope Recognition 当前会话已结束')
-                                        elif _vad_end_burst.total_bytes:
-                                            # 生命周期切换失败时保留合成静音作为降级路径。
-                                            await send_queue.put((_generation, _vad_end_burst))
+                                        # 立即停止发送（保持门控语义）；join+pause
+                                        # （含 end_session RTT）交由后台翻转任务执行，
+                                        # 主循环继续读帧，避免 PyAudio 缓冲溢出丢语音
+                                        _vad_recognition_paused = True
+                                        _vad_flip_actions.append((_generation, 'pause'))
+                                        _vad_flip_wake.set()
                                     else:
                                         print('[VAD] 跳过未送入音频的 DashScope task 结束，避免 EmptyAudio')
                                 elif _vad_end_burst.total_bytes:
@@ -635,48 +786,73 @@ async def audio_capture_task(state, recognizer):
                         samples[offset:], dtype=np.float32, copy=True
                     )
                 except Exception:
-                    # VAD 错误不应中断音频流
-                    import traceback
+                    # VAD 错误不应中断音频流；verbose 下直接打印堆栈。
+                    # 不依赖诊断节流变量，避免异常处理路径本身再出错冲垮整个采集任务。
                     if _vad_verbose:
-                        now = time.monotonic()
-                        if now - _vad_last_diag_at > _vad_diag_interval:
-                            _vad_last_diag_at = now
-                            print('[VAD] ⚠ 处理异常（静默）')
-                            traceback.print_exc()
+                        import traceback
+                        print('[VAD] ⚠ 处理异常（静默）')
+                        traceback.print_exc()
 
             # 只有在识别激活时才发送音频数据,否则丢弃
             # VAD 门控：静音时不发送音频到 ASR（省流），说话时正常发送；
             # 说话结束瞬间的补发静音帧见上方 SPEECH→SILENCE 转换处理
             if state.recognition_active:
                 _gating_active = state.vad_enabled and state.vad_processor is not None
-                if _gating_active:
-                    # 门控激活时每帧都进预缓冲（说话中也持续滚动），
-                    # 供下一次开口时补发句首
-                    _vad_pre_buffer.push(data)
                 _should_send = True
                 if _gating_active:
                     _should_send = (
                         state.vad_processor.is_speaking
                         and not _vad_recognition_paused
                     )
-                if _should_send:
-                    item = (getattr(state, 'audio_send_generation', 0), data)
-                    try:
-                        send_queue.put_nowait(item)
-                    except asyncio.QueueFull:
-                        _drop_oldest_queue_item(send_queue)
-                        send_queue.put_nowait(item)
+                _hold_for_resume = (
+                    _gating_active
+                    and not _should_send
+                    and _vad_rolls_recognition_session
+                    and _vad_recognition_paused
+                    and (
+                        _vad_resume_pending
+                        or state.vad_processor.is_speaking
+                    )
+                )
+                if _hold_for_resume:
+                    # resume 翻转未完成：暂存当前帧（不进预缓冲，保持单一时间序流），
+                    # resume 成功后由翻转任务统一补发，确保句首不丢
+                    if (
+                        _vad_resume_hold.maxlen is not None
+                        and len(_vad_resume_hold) >= _vad_resume_hold.maxlen
+                    ):
+                        # 溢出丢最旧不再静默：留一条节流日志便于发现 resume 响应过慢
                         now = time.monotonic()
-                        if now - last_queue_warning_at > 5.0:
-                            print('[Audio] ASR发送队列已满，丢弃最旧音频帧以保持实时采集')
-                            last_queue_warning_at = now
-                    if _vad_rolls_recognition_session:
-                        _vad_recognition_has_audio = True
-                elif _vad_verbose:
-                    state._vad_drop_count += 1
-                    if state._vad_drop_count == 1 or state._vad_drop_count % 100 == 0:
-                        is_sp = state.vad_processor.is_speaking if state.vad_processor else 'N/A'
-                        print(f'[VAD-gate] 丢弃音频帧 (累计={state._vad_drop_count}, is_speaking={is_sp})')
+                        if now - _last_hold_overflow_log_at > 5.0:
+                            _last_hold_overflow_log_at = now
+                            print(
+                                '[VAD] resume 暂存缓冲已满，丢弃最旧语音帧'
+                                '（resume 响应过慢）'
+                            )
+                    _vad_resume_hold.append(data)
+                else:
+                    if _gating_active:
+                        # 门控激活时每帧都进预缓冲（说话中也持续滚动），
+                        # 供下一次开口时补发句首
+                        _vad_pre_buffer.push(data)
+                    if _should_send:
+                        item = (getattr(state, 'audio_send_generation', 0), data)
+                        try:
+                            send_queue.put_nowait(item)
+                        except asyncio.QueueFull:
+                            _drop_oldest_queue_item(send_queue)
+                            send_queue.put_nowait(item)
+                            now = time.monotonic()
+                            if now - last_queue_warning_at > 5.0:
+                                print('[Audio] ASR发送队列已满，丢弃最旧音频帧以保持实时采集')
+                                last_queue_warning_at = now
+                        if _vad_rolls_recognition_session:
+                            _vad_recognition_has_audio = True
+                    elif _vad_verbose:
+                        state._vad_drop_count += 1
+                        if state._vad_drop_count == 1 or state._vad_drop_count % 100 == 0:
+                            is_sp = state.vad_processor.is_speaking if state.vad_processor else 'N/A'
+                            print(f'[VAD-gate] 丢弃音频帧 (累计={state._vad_drop_count}, is_speaking={is_sp})')
             elif not send_queue.empty():
                 while not send_queue.empty():
                     _drop_oldest_queue_item(send_queue)
@@ -687,7 +863,24 @@ async def audio_capture_task(state, recognizer):
     except Exception as e:
         print(f'Audio capture error: {e}')
     finally:
+        # 通知翻转任务收尾：让它把已登记的动作执行完（有限等待），
+        # 避免采集停止时残留半完成的会话状态；超时则强制取消
+        _vad_flip_stopping = True
+        _vad_flip_wake.set()
         sender_task.cancel()
+        try:
+            await asyncio.wait_for(flip_task, timeout=0.5)
+        except asyncio.TimeoutError:
+            flip_task.cancel()
+            try:
+                await flip_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            flip_task.cancel()
+            logger.warning('[VAD] 会话翻转任务异常退出: %r', exc)
         try:
             await sender_task
         except asyncio.CancelledError:
