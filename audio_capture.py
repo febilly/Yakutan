@@ -44,7 +44,7 @@ def _vad_gate_tail_seconds(backend: str) -> float:
     """Return the unpaced silence needed after the local VAD falling edge.
 
     DashScope Recognition stops receiving real microphone silence as soon as
-    the local gate closes. Qwen-Audio-3.0 and Fun-ASR therefore need a complete
+    the local gate closes. Qwen-Audio-3.1 and Fun-ASR therefore need a complete
     copy of their server-side VAD window, plus the configured safety margin.
     Other online backends retain the legacy margin-only behavior.
     """

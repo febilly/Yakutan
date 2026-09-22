@@ -67,8 +67,8 @@ QWEN_ASR_MODEL = 'qwen3-asr-flash-realtime-2026-02-10'
 QWEN_ASR_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime'
 QWEN_ASR_URL_INTERNATIONAL = 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime'
 
-# Qwen-Audio-3.0 后端使用的模型（与 Fun-ASR 共用 Recognition run-task 协议）
-QWEN_AUDIO3_ASR_MODEL = 'qwen-audio-3.0-asr-flash-streaming'
+# Qwen-Audio-3.1 后端使用的模型（与 Fun-ASR 共用 Recognition run-task 协议）
+QWEN_AUDIO3_ASR_MODEL = 'qwen-audio-3.1-asr-flash-streaming'
 
 # Recognition（run-task）协议的 WebSocket URL；国际版需要切到 dashscope-intl
 DASHSCOPE_RECOGNITION_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference'
@@ -148,7 +148,7 @@ VAD_PRE_SPEECH_DURATION = 0.5
 VAD_SILENCE_DURATION_MIN = 0.2
 VAD_SILENCE_DURATION_MAX = 6.0
 # 在线门控：本地 VAD 判定说话结束后补发合成静音的安全余量（毫秒）。
-# Qwen-Audio-3.0 / Fun-ASR 的本地 VAD 断句会直接结束当前 Recognition task；
+# Qwen-Audio-3.1 / Fun-ASR 的本地 VAD 断句会直接结束当前 Recognition task；
 # 此值仅作为结束失败时的合成静音降级余量。其他在线后端直接发送此余量。
 ONLINE_VAD_END_BURST_MS = 200
 

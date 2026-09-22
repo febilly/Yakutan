@@ -100,7 +100,7 @@ def build_vocabulary(hot_words: Optional[Iterable[Any]]) -> Dict[str, int]:
 
 
 class QwenAudio3SpeechRecognizer(DashscopeSpeechRecognizer):
-    """Qwen-Audio-3.0-ASR-Flash-Streaming 识别器。
+    """Qwen-Audio-3.1-ASR-Flash-Streaming 识别器。
 
     该模型与 Fun-ASR-Realtime 共用 DashScope Recognition（run-task/finish-task）
     协议，因此复用 DashScope 识别器的会话管理，只额外接入两项模型特有能力：

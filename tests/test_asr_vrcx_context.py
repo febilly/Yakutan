@@ -155,7 +155,7 @@ def test_qwen_audio3_start_sends_fresh_vrcx_context_and_hot_words(monkeypatch):
 
     recognizer = qwen_audio3_mod.QwenAudio3SpeechRecognizer(
         callback=DummyCallback(),
-        model="qwen-audio-3.0-asr-flash-streaming",
+        model="qwen-audio-3.1-asr-flash-streaming",
         format="pcm",
         sample_rate=16000,
         hot_words=[
@@ -266,7 +266,7 @@ def test_qwen_audio3_stop_after_pause_is_idempotent(monkeypatch):
 
     recognizer = qwen_audio3_mod.QwenAudio3SpeechRecognizer(
         callback=DummyCallback(),
-        model="qwen-audio-3.0-asr-flash-streaming",
+        model="qwen-audio-3.1-asr-flash-streaming",
         format="pcm",
         sample_rate=16000,
     )

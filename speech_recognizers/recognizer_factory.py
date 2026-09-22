@@ -402,7 +402,7 @@ def is_backend_available(backend: str) -> bool:
     if backend == 'qwen':
         return QwenSpeechRecognizer is not None
     elif backend == 'qwen_audio3':
-        # Qwen-Audio-3.0 在北京与新加坡地域均可用
+        # Qwen-Audio-3.1 在北京与新加坡地域均可用
         return QwenAudio3SpeechRecognizer is not None
     elif backend == 'dashscope':
         # dashscope (Fun-ASR) 仅在中国大陆版可用

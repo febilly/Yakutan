@@ -547,14 +547,14 @@ async def main(
                     else:
                         print('[热词] 未加载到热词条目，跳过 Qwen 语料配置\n')
                 elif backend == 'qwen_audio3':
-                    # Qwen-Audio-3.0 支持即时热词，直接下发词条与权重，无需创建热词表
+                    # Qwen-Audio-3.1 支持即时热词，直接下发词条与权重，无需创建热词表
                     hot_word_entries = [
                         entry
                         for entry in hot_words_manager.get_hot_words()
                         if entry.get('text')
                     ]
                     if hot_word_entries:
-                        print(f'[热词] 已准备 Qwen-Audio-3.0 即时热词，共 {len(hot_word_entries)} 条\n')
+                        print(f'[热词] 已准备 Qwen-Audio-3.1 即时热词，共 {len(hot_word_entries)} 条\n')
                     else:
                         print('[热词] 未加载到热词条目，跳过即时热词配置\n')
                 elif backend == 'local':
