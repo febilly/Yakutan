@@ -10,7 +10,7 @@ from shared.vrchat_text_limits import (
 )
 
 # Public desktop-app version. Keep this in sync with the release tag.
-APP_VERSION = '2.3.1'
+APP_VERSION = '2.4.0'
 
 
 def _read_env_bool(name: str, default: bool = False) -> bool:
