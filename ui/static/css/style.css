@@ -711,6 +711,22 @@ a:focus-visible,
     grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.panel-speech-idle-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 15px;
+    align-items: start;
+}
+
+.panel-speech-idle-row .form-group {
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.panel-speech-idle-row .form-control {
+    max-width: 130px;
+}
+
 .language-setting-item {
     margin-bottom: 0;
 }

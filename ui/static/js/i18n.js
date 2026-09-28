@@ -456,6 +456,10 @@ const translations = {
         'label.enableQuickLangBar': '显示快捷切换按钮',
         'hint.quickLangButtons': '设置小面板底部的4个快捷语言切换按钮',
         'label.quickLangSlot': '按钮',
+        'label.panelSpeechIdleTimer': '显示沉默计时器',
+        'hint.panelSpeechIdleTimer': '显示自上次发言以来沉默的时间',
+        'label.panelSpeechIdleWarning': '橙黄色阈值（分钟）',
+        'label.panelSpeechIdleCritical': '红色阈值（分钟）',
     },
 
     'en': {
@@ -888,6 +892,10 @@ const translations = {
         'label.enableQuickLangBar': 'Show quick switch buttons',
         'hint.quickLangButtons': 'Configure the 4 quick language switch buttons at the bottom of the mini panel',
         'label.quickLangSlot': 'Button',
+        'label.panelSpeechIdleTimer': 'Show silence timer',
+        'hint.panelSpeechIdleTimer': 'Time spent silent since your last speech',
+        'label.panelSpeechIdleWarning': 'Amber after (minutes)',
+        'label.panelSpeechIdleCritical': 'Red after (minutes)',
     },
 
     'ja': {
@@ -1308,6 +1316,10 @@ const translations = {
         'label.enableQuickLangBar': 'クイック切替ボタンを表示',
         'hint.quickLangButtons': 'ミニパネル下部の 4 つの言語クイック切替ボタンを設定します',
         'label.quickLangSlot': 'ボタン',
+        'label.panelSpeechIdleTimer': '無言時間タイマーを表示',
+        'hint.panelSpeechIdleTimer': '最後に話してからの無言時間を表示します',
+        'label.panelSpeechIdleWarning': '橙色になる時間（分）',
+        'label.panelSpeechIdleCritical': '赤色になる時間（分）',
     },
 
     'ko': {
@@ -1728,6 +1740,10 @@ const translations = {
         'label.enableQuickLangBar': '빠른 전환 버튼 표시',
         'hint.quickLangButtons': '미니 패널 하단의 4개 언어 빠른 전환 버튼을 설정합니다',
         'label.quickLangSlot': '버튼',
+        'label.panelSpeechIdleTimer': '침묵 타이머 표시',
+        'hint.panelSpeechIdleTimer': '마지막으로 말한 뒤 침묵한 시간을 표시합니다',
+        'label.panelSpeechIdleWarning': '주황색 전환 (분)',
+        'label.panelSpeechIdleCritical': '빨간색 전환 (분)',
     }
 };
 

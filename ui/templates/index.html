@@ -863,6 +863,31 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="panel-speech-idle-row">
+                            <div class="form-group">
+                                <label class="switch-label">
+                                    <span data-i18n="label.panelSpeechIdleTimer">显示沉默计时器</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="panel-speech-idle-enabled" checked
+                                            onchange="onPanelSpeechIdleSettingsChange()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <small class="form-text" data-i18n="hint.panelSpeechIdleTimer">显示自上次发言以来沉默的时间</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="panel-speech-idle-warning" data-i18n="label.panelSpeechIdleWarning">橙黄色阈值（分钟）</label>
+                                <input type="number" id="panel-speech-idle-warning" class="form-control"
+                                    min="1" max="998" step="1" value="3" inputmode="numeric"
+                                    onchange="onPanelSpeechIdleSettingsChange()">
+                            </div>
+                            <div class="form-group">
+                                <label for="panel-speech-idle-critical" data-i18n="label.panelSpeechIdleCritical">红色阈值（分钟）</label>
+                                <input type="number" id="panel-speech-idle-critical" class="form-control"
+                                    min="2" max="999" step="1" value="6" inputmode="numeric"
+                                    onchange="onPanelSpeechIdleSettingsChange()">
+                            </div>
+                        </div>
                     </div>
                 </section>
 

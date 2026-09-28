@@ -126,10 +126,39 @@
         }
 
         .controls {
+            position: relative;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
+        }
+
+        .speech-idle-timer {
+            position: absolute;
+            /* Center the label between the button's bottom and the window edge. */
+            top: calc(75% + 7.5px);
+            left: 50%;
+            transform: translateX(-50%);
+            min-width: 50px;
+            color: #b8c0ce;
+            font-size: 15px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            line-height: 18px;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .speech-idle-timer[data-level="warning"] {
+            color: #ffca72;
+        }
+
+        .speech-idle-timer[data-level="critical"] {
+            color: #ff9292;
+        }
+
+        .speech-idle-timer[hidden] {
+            display: none;
         }
 
         .btn {
@@ -226,6 +255,7 @@
                     viewBox="0 0 20 20" fill="white">
                     <circle cx="10" cy="10" r="2" opacity="0.6" />
                 </svg></button>
+            <span id="speech-idle-timer" class="speech-idle-timer" title="距上次有效语音输入" aria-live="off">--:--</span>
         </div>
     </div>
 
@@ -241,6 +271,52 @@
         const QUICK_LANG_DEFAULTS = ['en', 'zh-CN', 'ja', 'ko'];
         const QUICK_LANG_BAR_HEIGHT = 27;
         const SERVICE_ACTION_TIMEOUT_MS = 30000;
+        let speechIdleAnchorMs = null;
+        let speechIdleEnabled = true;
+        let speechIdleWarningMinutes = 3;
+        let speechIdleCriticalMinutes = 6;
+
+        function renderSpeechIdleTimer() {
+            const timer = document.getElementById('speech-idle-timer');
+            if (!timer) return;
+            timer.hidden = !speechIdleEnabled;
+            if (!speechIdleEnabled) return;
+            if (speechIdleAnchorMs === null) {
+                timer.textContent = '--:--';
+                timer.dataset.level = 'normal';
+                return;
+            }
+            const elapsed = Math.max(0, Math.floor((performance.now() - speechIdleAnchorMs) / 1000));
+            timer.textContent = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
+            timer.dataset.level = elapsed >= speechIdleCriticalMinutes * 60
+                ? 'critical'
+                : elapsed >= speechIdleWarningMinutes * 60 ? 'warning' : 'normal';
+        }
+
+        function updateSpeechIdleTimer(status) {
+            const settings = status.panel_speech_idle || {};
+            speechIdleEnabled = settings.enabled !== false;
+            const warning = Number(settings.warning_minutes);
+            const critical = Number(settings.critical_minutes);
+            if (Number.isInteger(warning) && Number.isInteger(critical)
+                && warning >= 1 && critical > warning) {
+                speechIdleWarningMinutes = warning;
+                speechIdleCriticalMinutes = critical;
+            }
+            const elapsed = status.speech_idle_seconds;
+            if (!status.running || !Number.isFinite(elapsed)) {
+                speechIdleAnchorMs = null;
+            } else {
+                const now = performance.now();
+                const localElapsed = speechIdleAnchorMs === null ? Infinity : (now - speechIdleAnchorMs) / 1000;
+                // A drop means new eligible speech was heard; otherwise keep the local
+                // monotonic anchor so polling latency cannot make the digits flicker.
+                if (elapsed < localElapsed - 0.5) {
+                    speechIdleAnchorMs = now - elapsed * 1000;
+                }
+            }
+            renderSpeechIdleTimer();
+        }
 
         function renderToggleButton(state) {
             const btn = document.getElementById('toggle-btn');
@@ -640,6 +716,7 @@
                 const lifecycle = statusData.lifecycle || (statusData.running ? 'running' : 'stopped');
                 isRunning = lifecycle === 'running';
                 renderToggleButton(getEffectiveToggleState(lifecycle));
+                updateSpeechIdleTimer(statusData);
 
                 // 推送正常时不再拉字幕；断开期间才回落到轮询
                 if (!subtitlesViaStream) {
@@ -788,6 +865,7 @@
         initResizeHandles();
         renderToggleButton('stopped');
         startSubtitlesStream();
+        setInterval(renderSpeechIdleTimer, 250);
         setInterval(fetchState, 300);
         fetchState();
     </script>

@@ -1991,6 +1991,43 @@ function getNormalizedPanelWidth() {
     return normalizedValue;
 }
 
+function getPanelSpeechIdleSettingsFromForm() {
+    const enabled = document.getElementById('panel-speech-idle-enabled');
+    const warningInput = document.getElementById('panel-speech-idle-warning');
+    const criticalInput = document.getElementById('panel-speech-idle-critical');
+    const readMinutes = (input, fallback, min, max) => {
+        const value = input?.value.trim() ? Number(input.value) : fallback;
+        return Number.isInteger(value) ? Math.min(max, Math.max(min, value)) : fallback;
+    };
+    const warning = readMinutes(warningInput, 3, 1, 998);
+    const critical = readMinutes(criticalInput, 6, warning + 1, 999);
+    if (warningInput) warningInput.value = String(warning);
+    if (criticalInput) {
+        criticalInput.min = String(warning + 1);
+        criticalInput.value = String(critical);
+    }
+    return {
+        speech_idle_enabled: enabled?.checked ?? true,
+        speech_idle_warning_minutes: warning,
+        speech_idle_critical_minutes: critical,
+    };
+}
+
+function applyPanelSpeechIdleSettings(panel = {}) {
+    const enabled = document.getElementById('panel-speech-idle-enabled');
+    const warning = document.getElementById('panel-speech-idle-warning');
+    const critical = document.getElementById('panel-speech-idle-critical');
+    if (enabled) enabled.checked = panel.speech_idle_enabled !== false;
+    if (warning) warning.value = panel.speech_idle_warning_minutes ?? 3;
+    if (critical) critical.value = panel.speech_idle_critical_minutes ?? 6;
+    getPanelSpeechIdleSettingsFromForm();
+}
+
+function onPanelSpeechIdleSettingsChange() {
+    getPanelSpeechIdleSettingsFromForm();
+    onSettingChange();
+}
+
 function getOscSendTargetPortFromForm() {
     const input = document.getElementById('osc-send-target-port');
     if (!input) return 9000;
@@ -3055,6 +3092,7 @@ function loadConfigFromLocalStorage() {
                 document.getElementById('panel-width').value = config.panel.width || 600;
                 getNormalizedPanelWidth();
             }
+            applyPanelSpeechIdleSettings(config.panel || {});
 
             const bypassOscEl = document.getElementById('bypass-osc-udp-port-check');
             if (bypassOscEl && config.osc) {
@@ -3230,6 +3268,7 @@ function loadDefaultConfig() {
 
     // 小面板
     document.getElementById('panel-width').value = 600;
+    applyPanelSpeechIdleSettings();
 
     const bypassOscDefault = document.getElementById('bypass-osc-udp-port-check');
     if (bypassOscDefault) {
@@ -3395,6 +3434,7 @@ function applyServerConfigPayload(config) {
     applyAutoLanguageDetectorIfNeeded();
     document.getElementById('panel-width').value = (config.panel && config.panel.width) || 600;
     getNormalizedPanelWidth();
+    applyPanelSpeechIdleSettings(config.panel || {});
     const bypassOscEl = document.getElementById('bypass-osc-udp-port-check');
     if (bypassOscEl && config.osc) {
         bypassOscEl.checked = config.osc.bypass_udp_port_check ?? false;
@@ -3611,6 +3651,7 @@ function saveConfigToLocalStorage() {
             },
             panel: {
                 width: getNormalizedPanelWidth(),
+                ...getPanelSpeechIdleSettingsFromForm(),
             },
             osc: {
                 send_target_port: getOscSendTargetPortFromForm(),
@@ -3872,6 +3913,7 @@ async function saveConfig(autoSave = false) {
             },
             panel: {
                 width: getNormalizedPanelWidth(),
+                ...getPanelSpeechIdleSettingsFromForm(),
             },
             osc: {
                 send_target_port: getOscSendTargetPortFromForm(),

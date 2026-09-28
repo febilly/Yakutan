@@ -618,6 +618,9 @@ def get_config_dict():
         },
         'panel': {
             'width': getattr(config, 'PANEL_WIDTH', 600),
+            'speech_idle_enabled': config.PANEL_SPEECH_IDLE_ENABLED,
+            'speech_idle_warning_minutes': config.PANEL_SPEECH_IDLE_WARNING_MINUTES,
+            'speech_idle_critical_minutes': config.PANEL_SPEECH_IDLE_CRITICAL_MINUTES,
         },
         # OSC配置
         'osc': {
@@ -828,6 +831,18 @@ def update_config(config_data):
             panel = config_data['panel']
             if 'width' in panel:
                 config.PANEL_WIDTH = max(300, int(panel['width']))
+            warning_minutes = int(panel.get(
+                'speech_idle_warning_minutes', config.PANEL_SPEECH_IDLE_WARNING_MINUTES
+            ))
+            critical_minutes = int(panel.get(
+                'speech_idle_critical_minutes', config.PANEL_SPEECH_IDLE_CRITICAL_MINUTES
+            ))
+            if not 1 <= warning_minutes < critical_minutes <= 999:
+                raise ValueError('Panel speech idle thresholds must be increasing minutes from 1 to 999')
+            config.PANEL_SPEECH_IDLE_WARNING_MINUTES = warning_minutes
+            config.PANEL_SPEECH_IDLE_CRITICAL_MINUTES = critical_minutes
+            if 'speech_idle_enabled' in panel:
+                config.PANEL_SPEECH_IDLE_ENABLED = bool(panel['speech_idle_enabled'])
 
         if 'osc' in config_data:
             osc = config_data['osc']
@@ -1245,6 +1260,14 @@ def get_status():
     status['asr_error'] = getattr(live_state, 'last_recognition_error', None)
     status['asr_error_source'] = getattr(live_state, 'last_recognition_error_source', None)
     status['asr_error_at_ms'] = getattr(live_state, 'last_recognition_error_at_ms', None)
+    status['speech_idle_seconds'] = (
+        live_state.speech_idle_seconds() if status['running'] and live_state else None
+    )
+    status['panel_speech_idle'] = {
+        'enabled': config.PANEL_SPEECH_IDLE_ENABLED,
+        'warning_minutes': config.PANEL_SPEECH_IDLE_WARNING_MINUTES,
+        'critical_minutes': config.PANEL_SPEECH_IDLE_CRITICAL_MINUTES,
+    }
     return jsonify(status)
 
 @app.route('/api/subtitles', methods=['GET'])

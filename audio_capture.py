@@ -740,6 +740,10 @@ async def audio_capture_task(state, recognizer):
                         _vad_chunk_count += 1
                         # 检测 VAD 内部状态变化
                         is_speaking = state.vad_processor.is_speaking
+                        if is_speaking and getattr(state.vad_processor, '_silence_counter', 0) == 0:
+                            mark_speech = getattr(state, 'mark_eligible_speech', None)
+                            if callable(mark_speech):
+                                mark_speech()
                         if is_speaking != state._vad_was_speaking:
                             state._vad_was_speaking = is_speaking
                             conf = state.vad_processor.last_confidence

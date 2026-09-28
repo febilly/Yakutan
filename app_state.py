@@ -3,6 +3,7 @@
 """
 import asyncio
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, TYPE_CHECKING
 
@@ -48,6 +49,8 @@ class AppState:
 
         # ---- 语音识别 ----
         self.recognition_active: bool = False
+        self.mic_muted_for_recognition: bool = False
+        self.last_eligible_speech_at: Optional[float] = None
         self.recognition_started: bool = False
         self.recognition_instance = None      # SpeechRecognizer | None
         self.recognition_callback = None      # VRChatRecognitionCallback | None
@@ -93,6 +96,16 @@ class AppState:
         self._vad_pending_samples = None  # np.ndarray | None, 累积未处理的音频帧
         self._vad_was_speaking: bool = False  # 上一次检测的状态（用于记录状态变化）
         self._vad_drop_count: int = 0  # 门控丢弃音频帧计数器
+
+    def mark_eligible_speech(self) -> None:
+        """Record speech only while its audio is eligible for transcription."""
+        if self.recognition_active and not self.mic_muted_for_recognition:
+            self.last_eligible_speech_at = time.monotonic()
+
+    def speech_idle_seconds(self) -> Optional[float]:
+        if self.last_eligible_speech_at is None:
+            return None
+        return max(0.0, time.monotonic() - self.last_eligible_speech_at)
 
     def update_subtitles(
         self,

@@ -389,6 +389,10 @@ class LocalSpeechRecognizer(SpeechRecognizer):
         if self._vad._is_speaking and self._vad._silence_counter == 0:
             # 本分块是有声内容：此后缓冲与任何既有中间结果快照不再等价。
             self._voiced_chunk_seq += 1
+            activity_state = getattr(self._callback, "state", None)
+            mark_speech = getattr(activity_state, "mark_eligible_speech", None)
+            if callable(mark_speech):
+                mark_speech()
         if speech_segment is not None:
             # 整句提交（断句）：下一句的保底计时从此处重新计。
             self._segment_started_at = time.monotonic()

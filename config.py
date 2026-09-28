@@ -532,6 +532,9 @@ KEEPALIVE_INTERVAL = 30  # 设置为0则禁用心跳功能
 
 # 小面板默认宽度（像素）
 PANEL_WIDTH = 600
+PANEL_SPEECH_IDLE_ENABLED = True
+PANEL_SPEECH_IDLE_WARNING_MINUTES = 3
+PANEL_SPEECH_IDLE_CRITICAL_MINUTES = 6
 
 # 是否显示识别中的部分结果（ongoing）
 SHOW_PARTIAL_RESULTS = False  # True: 显示部分识别结果到聊天框（可能覆盖掉之前的翻译结果）
@@ -864,6 +867,9 @@ def get_default_ui_config() -> dict:
         },
         'panel': {
             'width': 600,
+            'speech_idle_enabled': True,
+            'speech_idle_warning_minutes': 3,
+            'speech_idle_critical_minutes': 6,
         },
         'osc': {
             'send_target_port': 9000,

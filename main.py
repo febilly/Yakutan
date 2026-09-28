@@ -271,6 +271,8 @@ async def start_recognition_async(state):
 
 async def handle_mute_change(state, is_muted):
     """处理静音状态变化的回调函数"""
+    effective_mic_control = is_effective_mic_control_enabled(state.current_asr_backend)
+    state.mic_muted_for_recognition = bool(is_muted) and effective_mic_control
     # 快速开关麦克风以清空消息框：短时间内连续两次收到静音消息则清空聊天框。
     # 该逻辑独立于麦克风控制开关，因此放在最前面处理。
     if is_muted and getattr(config, 'ENABLE_DOUBLE_MUTE_CLEAR', True):
@@ -287,7 +289,7 @@ async def handle_mute_change(state, is_muted):
         else:
             state.last_mute_engaged_time = now
 
-    if not is_effective_mic_control_enabled(state.current_asr_backend):
+    if not effective_mic_control:
         return
 
     if state.recognition_instance is None:
@@ -687,6 +689,7 @@ async def main(
             print('[ASR] 语音识别已启动')
 
         # 创建音频捕获任务
+        state.last_eligible_speech_at = time.monotonic()
         emit_lifecycle('running', state.recognition_active)
 
         capture_task = asyncio.create_task(
