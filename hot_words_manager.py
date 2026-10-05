@@ -44,13 +44,14 @@ class HotWordsManager:
         'ru': 'ru',
     }
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, *, cleanup_existing: bool = True):
         """
         初始化热词管理器
         
         Args:
             api_key: DashScope API Key。传入空字符串表示明确不使用环境凭据；
                 仅独立调用方省略参数时保留 DashScope SDK 的兼容行为。
+            cleanup_existing: 即时热词不依赖服务端词表，应关闭旧词表清理。
         """
         self.api_key = api_key
         self.vocabulary_service = (
@@ -62,7 +63,8 @@ class HotWordsManager:
         self.hot_words = []
         
         # 启动时自动清理旧的热词表
-        self._cleanup_old_vocabularies()
+        if cleanup_existing:
+            self._cleanup_old_vocabularies()
     
     def _cleanup_old_vocabularies(self):
         """清理所有使用当前前缀的旧热词表"""

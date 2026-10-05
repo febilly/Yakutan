@@ -70,6 +70,7 @@ def build_vocabulary(hot_words: Optional[Iterable[Any]]) -> Dict[str, int]:
     """把热词条目转换为即时热词映射 {热词: 权重}。"""
     vocabulary: Dict[str, int] = {}
     super_hot_words = 0
+    invalid_words = 0
 
     for entry in hot_words or ():
         if isinstance(entry, dict):
@@ -80,6 +81,9 @@ def build_vocabulary(hot_words: Optional[Iterable[Any]]) -> Dict[str, int]:
             raw_weight = DEFAULT_HOT_WORD_WEIGHT
 
         if not text or text in vocabulary:
+            continue
+        if (len(text) > 15 if not text.isascii() else len(text.split()) > 7):
+            invalid_words += 1
             continue
         if len(vocabulary) >= MAX_VOCABULARY_ENTRIES:
             break
@@ -96,6 +100,8 @@ def build_vocabulary(hot_words: Optional[Iterable[Any]]) -> Dict[str, int]:
 
         vocabulary[text] = weight
 
+    if invalid_words:
+        logger.warning('[QwenAudio3] 跳过 %s 条超出官方长度限制的热词', invalid_words)
     return vocabulary
 
 

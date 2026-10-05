@@ -29,6 +29,12 @@ class TestHotWordsManagerInit:
         mgr = HotWordsManager(api_key="test-key")
         assert mgr.api_key == "test-key"
 
+    def test_instant_vocabulary_does_not_touch_remote_lists(self, mock_vocabulary_service):
+        from hot_words_manager import HotWordsManager
+        HotWordsManager(api_key="test-key", cleanup_existing=False)
+        mock_vocabulary_service.return_value.list_vocabularies.assert_not_called()
+        mock_vocabulary_service.return_value.delete_vocabulary.assert_not_called()
+
 
 class TestHotWordsFileLoading:
     def test_load_single_hot_words_file(self):

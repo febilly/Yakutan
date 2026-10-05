@@ -534,7 +534,8 @@ async def main(
             print('\n[热词] 初始化热词资源...')
             try:
                 hot_words_manager = HotWordsManager(
-                    api_key=str(getattr(config, 'DASHSCOPE_API_KEY', '') or '').strip()
+                    api_key=str(getattr(config, 'DASHSCOPE_API_KEY', '') or '').strip(),
+                    cleanup_existing=backend != 'qwen_audio3',
                 )
                 hot_words_manager.load_all_hot_words()
                 if backend == 'qwen':
