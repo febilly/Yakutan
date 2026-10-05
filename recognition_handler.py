@@ -1291,6 +1291,10 @@ class VRChatRecognitionCallback(SpeechRecognitionCallback):
         self._last_osc_typing_ongoing = is_ongoing
         if not text:
             return
+        if event.is_final:
+            asr_context = getattr(s, 'asr_context', None)
+            if asr_context is not None:
+                asr_context.add(text)
         # If local VAD gating is disabled or unavailable for an online backend,
         # a real ASR result is the remaining evidence of transcribed speech.
         if s.current_asr_backend != 'local' and not getattr(s, 'vad_enabled', False):

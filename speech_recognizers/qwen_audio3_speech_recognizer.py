@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from proxy_detector import refresh_system_proxy_env
 
 from .base_speech_recognizer import SpeechRecognitionCallback
 from .dashscope_speech_recognizer import DashscopeSpeechRecognizer
-from vrcx_context_bridge import build_asr_context_text
+from vrcx_context_bridge import get_asr_context_terms
 
 logger = logging.getLogger(__name__)
 
@@ -23,47 +23,6 @@ MAX_VOCABULARY_ENTRIES = 2000
 MAX_SUPER_HOT_WORDS = 50
 SUPER_HOT_WORD_WEIGHT = 50
 DEFAULT_HOT_WORD_WEIGHT = 4
-
-
-def split_context_rounds(text: str) -> List[str]:
-    """把上下文文本切成若干轮，满足单轮字符上限与总轮数上限。
-
-    优先在换行处切分以保留原有结构；超长单行按字符硬切。超出轮数上限的
-    尾部内容会被丢弃——`build_asr_context_text` 把热词语料放在最前面，
-    因此保留头部即保留信息量更高的部分。
-    """
-    stripped = (text or "").strip()
-    if not stripped:
-        return []
-
-    rounds: List[str] = []
-    current: List[str] = []
-    current_len = 0
-
-    def flush() -> None:
-        nonlocal current, current_len
-        if current:
-            rounds.append("\n".join(current))
-            current = []
-            current_len = 0
-
-    for raw_line in stripped.splitlines():
-        segments = [
-            raw_line[index:index + MAX_CONTEXT_CHARS_PER_ROUND]
-            for index in range(0, len(raw_line), MAX_CONTEXT_CHARS_PER_ROUND)
-        ] or [""]
-        for segment in segments:
-            extra = len(segment) + (1 if current else 0)
-            if current and current_len + extra > MAX_CONTEXT_CHARS_PER_ROUND:
-                flush()
-                if len(rounds) >= MAX_CONTEXT_ROUNDS:
-                    return rounds[:MAX_CONTEXT_ROUNDS]
-                extra = len(segment)
-            current.append(segment)
-            current_len += extra
-
-    flush()
-    return rounds[:MAX_CONTEXT_ROUNDS]
 
 
 def build_vocabulary(hot_words: Optional[Iterable[Any]]) -> Dict[str, int]:
@@ -111,9 +70,10 @@ class QwenAudio3SpeechRecognizer(DashscopeSpeechRecognizer):
     该模型与 Fun-ASR-Realtime 共用 DashScope Recognition（run-task/finish-task）
     协议，因此复用 DashScope 识别器的会话管理，只额外接入两项模型特有能力：
 
-    - 即时热词：构造时以 ``vocabulary`` 参数下发，整个进程生命周期固定；
-    - 上下文增强：每次 ``start()``/``resume()`` 时用最新 VRCX 上下文重建
-      ``raw_input.context``，因此每个识别分段都能拿到当时的世界/玩家信息。
+    - 即时热词：以 ``vocabulary`` 参数下发；
+    - 上下文增强：一条领域词表 + 最近四条自己/对方的最终识别原文，
+      每条不超过 400 字符。无领域词表时可保留五条发言。启动/恢复时通过
+      ``raw_input.context`` 下发，运行时在后续音频前通过 ``update_context`` 更新。
     """
 
     def __init__(
@@ -122,21 +82,41 @@ class QwenAudio3SpeechRecognizer(DashscopeSpeechRecognizer):
         *,
         corpus_text: Optional[str] = None,
         hot_words: Optional[Iterable[Any]] = None,
+        asr_context_provider: Optional[Callable[[], List[str]]] = None,
         **recognition_kwargs: Any,
     ) -> None:
         self._corpus_text = corpus_text
+        self._asr_context_provider = asr_context_provider
+        self._applied_raw_input: Optional[Dict[str, Any]] = None
         vocabulary = build_vocabulary(hot_words)
         if vocabulary:
             recognition_kwargs.setdefault("vocabulary", vocabulary)
         super().__init__(callback, **recognition_kwargs)
+        if asr_context_provider is not None and not callable(
+            getattr(self._require_recognition(), 'update_context', None)
+        ):
+            raise RuntimeError('Qwen ASR 动态上下文需要 DashScope SDK >= 1.27.5，请更新依赖')
 
     def start(self) -> None:
         refresh_system_proxy_env()
         # Recognition.start(**kwargs) 会覆盖构造时的同名参数，因此每次会话
         # 都会带上重新计算的上下文；传 None 时 SDK 会把该参数剔除。
-        raw_input = self._build_raw_input()
         with self._lifecycle_lock:
+            raw_input = self._build_raw_input()
             self._require_recognition().start(raw_input=raw_input)
+            self._applied_raw_input = raw_input
+
+    def send_audio_frame(self, data: bytes) -> None:
+        with self._lifecycle_lock:
+            recognition = self._require_recognition()
+            raw_input = self._build_raw_input()
+            if raw_input != self._applied_raw_input:
+                # SDK queues continue-task before this audio in the same FIFO.
+                # Only the audio-send thread updates transport; callbacks merely
+                # append history and never contend with stop()'s worker join.
+                recognition.update_context(payload_input=raw_input or {"context": []})
+                self._applied_raw_input = raw_input
+            recognition.send_audio_frame(data)
 
     def stop(self) -> None:
         # pause() 已经把底层会话停掉了，闭麦状态下再关闭服务时 SDK 会抛
@@ -155,7 +135,21 @@ class QwenAudio3SpeechRecognizer(DashscopeSpeechRecognizer):
             )
 
     def _build_raw_input(self) -> Optional[Dict[str, Any]]:
-        rounds = split_context_rounds(build_asr_context_text(self._corpus_text or ""))
+        # Keep reference terms in one message so they cannot consume all five
+        # rounds or bury recent speech. Only names are relevant ASR hints; full
+        # VRCX metadata contains unrelated IDs/statuses and can exhaust the cap.
+        corpus = (self._corpus_text or "").strip()
+        terms = get_asr_context_terms()
+        hints = "VRChat ASR hints:\n" + "; ".join(terms) if terms else ""
+        if corpus and hints:
+            domain = corpus[:199] + "\n" + hints[:200]
+        else:
+            domain = (corpus or hints)[:MAX_CONTEXT_CHARS_PER_ROUND]
+        rounds = [domain] if domain else []
+        history = self._asr_context_provider() if self._asr_context_provider else []
+        history = [text.strip()[:MAX_CONTEXT_CHARS_PER_ROUND]
+                   for text in history if isinstance(text, str) and text.strip()]
+        rounds.extend(history[-(MAX_CONTEXT_ROUNDS - len(rounds)):])
         if not rounds:
             return None
         return {

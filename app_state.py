@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, TYPE_CHECKING
 
 import config
+from asr_context import RecentASRContext
 
 if TYPE_CHECKING:
     from streaming_translation import SmartTargetLanguageSelector
@@ -20,6 +21,7 @@ class AppState:
     """
 
     def __init__(self):
+        self.asr_context = RecentASRContext()
         # ---- 音频采集 ----
         self.mic = None                   # pyaudio.PyAudio 实例
         self.stream = None                # pyaudio.Stream 实例

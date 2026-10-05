@@ -279,23 +279,28 @@ def test_qwen_audio3_stop_after_pause_is_idempotent(monkeypatch):
     assert recognizer._recognition._running is False
 
 
-def test_qwen_audio3_context_rounds_respect_server_limits():
+def test_qwen_audio3_context_rounds_respect_server_limits(monkeypatch):
+    import speech_recognizers.dashscope_speech_recognizer as dashscope_mod
+    import speech_recognizers.qwen_audio3_speech_recognizer as qwen_audio3_mod
     from speech_recognizers.qwen_audio3_speech_recognizer import (
         MAX_CONTEXT_CHARS_PER_ROUND,
         MAX_CONTEXT_ROUNDS,
-        split_context_rounds,
     )
-
-    assert split_context_rounds("   ") == []
-
-    long_lines = "\n".join("x" * 900 for _ in range(10))
-    rounds = split_context_rounds(long_lines)
-
+    from unittest.mock import MagicMock
+    monkeypatch.setattr(dashscope_mod, "Recognition", MagicMock())
+    monkeypatch.setattr(qwen_audio3_mod, "get_asr_context_terms", lambda: ["Alice"])
+    history = [str(i) * 900 for i in range(10)]
+    recognizer = qwen_audio3_mod.QwenAudio3SpeechRecognizer(
+        callback=DummyCallback(), corpus_text="HotTerm" * 900,
+        asr_context_provider=lambda: history,
+    )
+    context = recognizer._build_raw_input()["context"]
+    rounds = [message["content"][0]["text"] for message in context]
     assert len(rounds) == MAX_CONTEXT_ROUNDS
     assert all(len(chunk) <= MAX_CONTEXT_CHARS_PER_ROUND for chunk in rounds)
-
-    packed = split_context_rounds("\n".join(["short line"] * 5))
-    assert packed == ["\n".join(["short line"] * 5)]
+    assert "Alice" in rounds[0]
+    assert rounds[1:] == [text[:400] for text in history[-4:]]
+    assert all(message["role"] == "user" for message in context)
 
 
 def test_soniox_config_merges_vrcx_context_with_existing_context(monkeypatch):

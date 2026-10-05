@@ -20,9 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 class IPCClient:
-    def __init__(self, translator=None):
+    def __init__(self, translator=None, *, asr_context=None):
         import config
         self._translator = translator
+        self._asr_context = asr_context
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._mode = "standalone"
@@ -117,6 +118,8 @@ class IPCClient:
                 if msg_type == MessageType.FOREIGN_SPEECH.value:
                     source_text = data.get("source_text", "")
                     detected_language = data.get("detected_language")
+                    if source_text and self._asr_context is not None:
+                        self._asr_context.add(source_text, foreign=True)
                     if source_text and self._translator is not None:
                         try:
                             self._translator.add_external_speech(source_text)
@@ -169,6 +172,8 @@ class IPCClient:
             await asyncio.sleep(self._poll_interval)
 
     async def _close_connection(self):
+        if self._asr_context is not None:
+            self._asr_context.clear_foreign()
         writer = None
         async with self._lock:
             writer = self._writer

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import dashscope
 import config
@@ -185,6 +185,7 @@ def create_recognizer(
     vocabulary_id: Optional[str] = None,
     corpus_text: Optional[str] = None,
     hot_words: Optional[list] = None,
+    asr_context_provider: Optional[Callable[[], list[str]]] = None,
     enable_vad: bool = True,
     vad_threshold: float = 0.2,
     keepalive_interval: int = 30,
@@ -202,6 +203,7 @@ def create_recognizer(
         vocabulary_id: DashScope 热词表 ID（仅 dashscope 后端使用）
         corpus_text: Qwen 语料文本（qwen 与 local 且 Qwen3-ASR 引擎使用）
         hot_words: 热词条目列表 [{'text': ..., 'weight': ...}]（仅 qwen_audio3 后端使用）
+        asr_context_provider: 最近已完成的自己/对方原文（仅 qwen_audio3 后端使用）
         enable_vad: 是否启用VAD（仅 qwen 后端使用）
         vad_threshold: VAD阈值（仅 qwen 后端使用）
         keepalive_interval: WebSocket心跳间隔（秒，仅 qwen 后端使用，0表示禁用）
@@ -272,10 +274,10 @@ def create_recognizer(
             'max_sentence_silence': _aligned_server_silence_ms(),
             'corpus_text': corpus_text,
             'hot_words': hot_words,
+            'asr_context_provider': asr_context_provider,
         }
 
-        # 该模型自带语种检测，官方参数表也未列出 language_hints；实测服务端会
-        # 静默忽略无法识别的参数，因此非 auto 时照常下发，能生效则生效。
+        # 官方支持 language_hints；auto 时省略，交由模型检测。
         lang_hint = _to_dashscope_language(source_language)
         if lang_hint:
             recognition_kwargs['language_hints'] = [lang_hint]

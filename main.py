@@ -590,7 +590,7 @@ async def main(
                 hot_word_entries = None
 
         if getattr(config, 'IPC_ENABLED', True):
-            ipc_client = IPCClient(translator=state.translator)
+            ipc_client = IPCClient(translator=state.translator, asr_context=state.asr_context)
             osc_manager.set_ipc_client(ipc_client)
             # P3-26: 保存任务引用避免被 GC 中途回收；异常经 done callback
             # 记录并上报，不再只以 "never retrieved" 形式丢失
@@ -633,6 +633,7 @@ async def main(
             vocabulary_id=state.vocabulary_id,
             corpus_text=corpus_text,
             hot_words=hot_word_entries,
+            asr_context_provider=state.asr_context.snapshot,
             enable_vad=config.ENABLE_VAD,
             vad_threshold=config.VAD_THRESHOLD,
             keepalive_interval=config.KEEPALIVE_INTERVAL,
