@@ -61,7 +61,7 @@ VALID_ASR_BACKENDS = {'dashscope', 'qwen', 'qwen_audio3', 'soniox', 'doubao_file
 DASHSCOPE_ASR_MODEL = 'fun-asr-realtime'
 
 # Qwen 后端使用的模型
-QWEN_ASR_MODEL = 'qwen3-asr-flash-realtime-2026-02-10'
+QWEN_ASR_MODEL = 'qwen3-asr-flash-realtime'
 
 # Qwen WebSocket URL
 QWEN_ASR_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime'
