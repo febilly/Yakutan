@@ -165,7 +165,7 @@ class _MainHarness:
             real_set_state(state)
 
         class _FakeIPCClient:
-            def __init__(self, translator=None):
+            def __init__(self, translator=None, *, asr_context=None):
                 harness.ipc_client = harness._make_ipc_client()
 
             def __getattr__(self, name):

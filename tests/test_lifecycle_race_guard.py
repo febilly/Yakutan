@@ -588,7 +588,7 @@ class TestQwenAudio3StopDefensive:
             'qwen_stop_done',
         ]
 
-    @patch('speech_recognizers.qwen_audio3_speech_recognizer.build_asr_context_text', return_value='')
+    @patch('speech_recognizers.qwen_audio3_speech_recognizer.get_asr_context_terms', return_value=[])
     @patch('speech_recognizers.qwen_audio3_speech_recognizer.refresh_system_proxy_env')
     def test_start_serialized_against_inflight_pause(self, _proxy, _ctx):
         """qwen_audio3 start 同样持锁：不与 in-flight pause 并发操作 SDK。"""
