@@ -22,6 +22,7 @@ import config
 from audio_runtime_guard import hold_portaudio
 from audio_devices import audio_devices, MicrophoneSelectionError
 from text_processor import sanitize_text_fancy_style
+from microphone_meter import microphone_meters
 from udp_port_check import (
     get_non_vrchat_udp_port_occupants,
     get_vrchat_udp_port_occupants,
@@ -1256,6 +1257,26 @@ def get_status():
     status['local_inference_ui_enabled'] = is_local_inference_ui_enabled()
     # P3-20: 识别链路最近一次致命错误（只读字段）。由 recognition_handler /
     # main 写入 AppState 动态属性；服务未运行或尚无错误时为 None。
+@app.route('/api/audio/level/stream', methods=['GET'])
+def stream_audio_level():
+    """Keep metering while the page is connected, even if recognition is stopped."""
+    device_id = request.args.get('device_id', '') or None
+
+    def generate():
+        meter = microphone_meters.subscribe(device_id)
+        try:
+            while True:
+                yield f'data: {json.dumps({"level": meter.level()})}\n\n'
+                time.sleep(0.1)
+        finally:
+            microphone_meters.unsubscribe(meter)
+
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache, no-transform',
+        'X-Accel-Buffering': 'no',
+    })
+
+
     live_state = _live_app_state()
     status['asr_error'] = getattr(live_state, 'last_recognition_error', None)
     status['asr_error_source'] = getattr(live_state, 'last_recognition_error_source', None)

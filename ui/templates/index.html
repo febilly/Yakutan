@@ -252,6 +252,10 @@
                             </select>
                             <button type="button" class="btn btn-secondary" onclick="refreshMicDevices(true, true)" data-i18n="button.rescanMics">刷新设备</button>
                         </div>
+                        <div id="mic-level" class="mic-level" role="meter" aria-label="麦克风音量"
+                            aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                            <div id="mic-level-fill" class="mic-level-fill"></div>
+                        </div>
                     </div>
                 </section>
 

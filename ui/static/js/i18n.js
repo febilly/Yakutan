@@ -322,6 +322,7 @@ const translations = {
         'sourceLang.ko': '韩语',
         'hint.sourceLanguage': '建议保持"自动检测"，也可自行输入语言代码',
         'label.micDevice': '麦克风',
+        'label.micLevel': '麦克风音量',
 
         // 智能目标语言
         'section.smartTargetLanguage': '智能目标语言',
@@ -774,6 +775,7 @@ const translations = {
         'label.smartTargetMinSamples': 'Minimum samples',
         'label.recentLanguages': 'Recently detected languages',
         'hint.noRecentLanguages': 'No data yet',
+        'label.micLevel': 'Microphone level',
 
         'label.dependencies': 'Dependencies',
         'label.device': 'Device',
@@ -1218,6 +1220,7 @@ const translations = {
         'label.localInferenceEngine': 'ローカル認識エンジン',
         'label.localInferenceDevice': '計算デバイス',
         'label.localInferenceLanguage': '言語ヒント',
+        'label.micLevel': 'マイク音量',
         'label.localVadMode': 'ローカル VAD モード',
         'label.localVadThreshold': 'ローカル VAD しきい値',
         'label.localMinSpeechDuration': '最短発話長（ミリ秒）',
@@ -1658,6 +1661,7 @@ const translations = {
         'label.localIncrementalFallbackInterval': '최대 업데이트 간격(밀리초)',
         'hint.localIncrementalFallbackInterval': '폴백: 이 시간 동안 업데이트가 전혀 없으면 중간 결과를 강제로 한 번 새로고칩니다.',
         'hint.localInferenceNotChecked': '로컬 ASR 모델 상태를 아직 확인하지 않았습니다',
+        'label.micLevel': '마이크 음량',
         'hint.localInferenceStatus': '처음 사용하기 전에 선택한 엔진의 모델과 런타임을 먼저 다운로드하세요.',
         'hint.localInferenceNeedsDownload': '선택한 엔진이 아직 준비되지 않았습니다. 모델과 런타임을 먼저 다운로드하세요.',
         'status.downloading': '다운로드 중',

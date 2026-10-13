@@ -2549,6 +2549,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     loadEnvStatus();
     refreshMicDevices(true);
     setupMicDeviceAutoRefresh();
+    setupMicLevelMeter();
     updateDashscopeKeyFieldState();
     const statusLoaded = await updateStatus();
     if (!statusLoaded) {
@@ -2728,6 +2729,69 @@ function setupMicDeviceAutoRefresh() {
 
     // 后端设备列表变化更可靠：做一个低频轮询刷新
     setInterval(() => refreshMicDevices(true), 5000);
+}
+
+function renderMicLevel(rms) {
+    const meter = document.getElementById('mic-level');
+    const fill = document.getElementById('mic-level-fill');
+    if (!meter || !fill) return;
+    // Map -60..0 dBFS to the bar so normal speech remains easy to see.
+    const amplitude = Number(rms);
+    const value = Number.isFinite(amplitude) && amplitude > 0
+        ? Math.max(0, Math.min(1, (20 * Math.log10(amplitude) + 60) / 60)) : 0;
+    fill.style.transform = `scaleX(${value})`;
+    fill.style.background = value >= 0.95 ? 'var(--danger-color)'
+        : value >= 0.8 ? 'var(--warning-color)' : 'var(--success-color)';
+    meter.setAttribute('aria-valuenow', String(Math.round(value * 100)));
+    const label = window.i18n ? window.i18n.t('label.micLevel') : '麦克风音量';
+    meter.setAttribute('aria-label', label);
+    meter.title = label;
+}
+
+function setupMicLevelMeter() {
+    const select = document.getElementById('mic-device');
+    if (!select || !document.getElementById('mic-level')) return;
+    let source = null;
+    let selectedId = null;
+    let timer = null;
+    const connect = () => {
+        if (source && selectedId === select.value) return;
+        if (source) source.close();
+        renderMicLevel(0);
+        selectedId = select.value;
+        const connection = new EventSource(`${API_BASE}/audio/level/stream?device_id=${encodeURIComponent(selectedId)}`);
+        source = connection;
+        connection.onmessage = (event) => {
+            if (source !== connection) return;
+            if (select.value !== selectedId) {
+                connect();
+                return;
+            }
+            try {
+                renderMicLevel(JSON.parse(event.data).level);
+            } catch (_) {
+                renderMicLevel(0);
+            }
+        };
+        connection.onerror = () => {
+            if (source === connection) renderMicLevel(0);
+        };
+    };
+    const start = () => {
+        connect();
+        // Also catch selections applied by configuration hydration or device-list refresh.
+        if (timer === null) timer = setInterval(connect, 250);
+    };
+    select.addEventListener('change', connect);
+    window.addEventListener('pagehide', () => {
+        if (source) source.close();
+        source = null;
+        clearInterval(timer);
+        timer = null;
+        renderMicLevel(0);
+    });
+    window.addEventListener('pageshow', start);
+    start();
 }
 
 // 显示配置保存信息
