@@ -8,6 +8,7 @@ import json
 import threading
 import time
 import logging
+import traceback
 from ctypes import wintypes
 from typing import List, Optional
 from urllib.parse import urlencode
@@ -21,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from audio_runtime_guard import hold_portaudio
 from audio_devices import audio_devices, MicrophoneSelectionError
+from error_reporting import asr_backend_key, clear_errors, describe_exception, get_last_error, get_recent_errors, record_error
 from text_processor import sanitize_text_fancy_style
 from microphone_meter import microphone_meters
 from udp_port_check import (
@@ -955,6 +957,9 @@ def run_service_async():
             recognition_active=recognition_active,
         )
     
+    # 新一轮服务：清掉上一轮的错误，网页端只提示本轮出现的问题
+    clear_errors()
+
     # 导入main模块并运行
     try:
         import main
@@ -968,7 +973,12 @@ def run_service_async():
         # 运行完成后获取 main 模块中的 stop_event 引用
         stop_event = main.stop_event
     except Exception as e:
-        print(f'Service error: {e}')
+        # 打完整调用栈：异常消息为空时（如裸 TimeoutError()）光靠 str(e) 什么都看不出来
+        print(f'Service error: {describe_exception(e)}')
+        traceback.print_exc()
+        # 启动阶段的 Key 问题来自识别后端（翻译 Key 出错走翻译自己的上报）
+        backend = _snapshot_service_status().get('backend')
+        record_error('service', e, key=asr_backend_key(backend))
     finally:
         service_loop.close()
         service_loop = None
@@ -1281,6 +1291,9 @@ def stream_audio_level():
     status['asr_error'] = getattr(live_state, 'last_recognition_error', None)
     status['asr_error_source'] = getattr(live_state, 'last_recognition_error_source', None)
     status['asr_error_at_ms'] = getattr(live_state, 'last_recognition_error_at_ms', None)
+    # 最近一次面向用户的错误（服务崩溃、识别服务连接失败/被断开等），网页端据此弹出提示
+    status['last_error'] = get_last_error()
+    status['recent_errors'] = get_recent_errors()
     status['speech_idle_seconds'] = (
         live_state.speech_idle_seconds() if status['running'] and live_state else None
     )

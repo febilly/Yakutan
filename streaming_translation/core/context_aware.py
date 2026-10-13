@@ -1,13 +1,42 @@
 from __future__ import annotations
 
+import logging
 from collections import deque
-from typing import Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
+from typing import Callable, Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..api.base import BaseTranslationAPI
     from terminology_manager import TerminologyManager
 
 CONTEXT_MARKER = "\U0001f524"  # 🔤
+
+logger = logging.getLogger(__name__)
+
+# 翻译 API 出错时只会返回以 "[ERROR]" 开头的字符串。宿主程序可以注册监听，
+# 把这些错误报给用户（例如网页提示），监听参数为 (translator, error_text)。
+_error_listeners: List[Callable[["ContextAwareTranslator", str], None]] = []
+
+
+def add_translation_error_listener(
+    listener: Callable[["ContextAwareTranslator", str], None],
+) -> None:
+    if listener not in _error_listeners:
+        _error_listeners.append(listener)
+
+
+def remove_translation_error_listener(
+    listener: Callable[["ContextAwareTranslator", str], None],
+) -> None:
+    if listener in _error_listeners:
+        _error_listeners.remove(listener)
+
+
+def _notify_translation_error(translator: "ContextAwareTranslator", error_text: str) -> None:
+    for listener in list(_error_listeners):
+        try:
+            listener(translator, error_text)
+        except Exception:
+            logger.debug("translation error listener failed", exc_info=True)
 
 
 class TranslationHistoryEntry:
@@ -173,10 +202,14 @@ class ContextAwareTranslator:
                         )
                     )
 
+            if translated.startswith("[ERROR]"):
+                _notify_translation_error(self, translated)
             return translated
 
         except Exception as e:
-            return f"[ERROR] {e}"
+            translated = f"[ERROR] {e}"
+            _notify_translation_error(self, translated)
+            return translated
 
     def _translate_native(
         self,

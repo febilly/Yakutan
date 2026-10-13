@@ -7,6 +7,7 @@ import threading
 import time
 from typing import Any, Dict, Optional, Set
 
+from error_reporting import describe_websocket_error
 from proxy_detector import refresh_system_proxy_env
 
 from dashscope.audio.qwen_omni import (
@@ -56,9 +57,23 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
         self._user_callback = user_callback
         self._conversation: Optional[OmniRealtimeConversation] = None
         self._items: Dict[str, Dict[str, str]] = {}
+        self._opened = False
+        # SDK 的 _on_error 只写日志不往外抛，这里截留下来，断连/连不上时才能说清原因
+        self.transport_error: Optional[BaseException] = None
 
     def attach_conversation(self, conversation: OmniRealtimeConversation) -> None:
         self._conversation = conversation
+        original_on_error = getattr(conversation, "_on_error", None)
+        if original_on_error is None:
+            return
+
+        def _capture_on_error(ws, error):
+            self.transport_error = error
+            with suppress(Exception):
+                original_on_error(ws, error)
+
+        # connect() 建 WebSocketApp 时才读取 self._on_error，实例属性覆盖即可生效
+        conversation._on_error = _capture_on_error
 
     def detach(self) -> None:
         self._conversation = None
@@ -67,11 +82,33 @@ class _QwenOmniCallbackAdapter(OmniRealtimeCallback):
     # OmniRealtimeCallback interface
     # ------------------------------------------------------------------
     def on_open(self) -> None:  # type: ignore[override]
+        self._opened = True
         self._user_callback.on_session_started()
 
+    def describe_close(self, code, msg) -> Optional[str]:
+        """整理服务端断开连接的原因；正常关闭（1000 且无传输错误）返回 None。"""
+        if isinstance(msg, (bytes, bytearray)):
+            msg = bytes(msg).decode("utf-8", "replace")
+        msg = (msg or "").strip()
+        parts = []
+        if code not in (None, 1000) or msg:
+            parts.append(f"code={code}" + (f", {msg}" if msg else ""))
+        if self.transport_error is not None:
+            parts.append(describe_websocket_error(self.transport_error))
+        if not parts:
+            return None
+        return "; ".join(parts)
+
     def on_close(self, code, msg) -> None:  # type: ignore[override]
-        print(f"[WebSocket] Connection closed: code={code}, msg={msg}")
+        reason = self.describe_close(code, msg)
+        suffix = f" ({reason})" if reason else ""
+        print(f"[WebSocket] Connection closed: code={code}, msg={msg}{suffix}")
         if self._recognizer._notify_closed(self):
+            # 只报告"连上之后被服务端断开"的情况；连接阶段的失败由 start/_reconnect 抛出并上报
+            if reason and self._opened:
+                self._user_callback.on_error(
+                    ConnectionError(f"Qwen 识别服务连接被断开: {reason}")
+                )
             self._user_callback.on_session_stopped()
 
     def on_event(self, message: Dict[str, Any]) -> None:  # type: ignore[override]
@@ -304,9 +341,13 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             # 启动心跳线程
             self._start_keepalive()
             print("[WebSocket] Connection established successfully.")
-        except Exception:
+        except Exception as exc:
+            explained = self._explain_connect_failure(exc, adapter)
             self._teardown_conversation(close=True)
-            raise
+            if explained is exc:
+                raise
+            # 真实原因已写进消息；SDK 那条笼统的 5s 超时只会干扰排查，不再挂在异常链上
+            raise explained from None
 
     @_serialize_transport
     def stop(self) -> None:
@@ -522,6 +563,19 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._pause_finalize_timer = None
         if timer is not None:
             timer.cancel()
+
+    @staticmethod
+    def _explain_connect_failure(
+        error: Exception,
+        adapter: Optional[_QwenOmniCallbackAdapter],
+    ) -> Exception:
+        """SDK 连不上时只抛笼统的“5s 内未建立连接”，用截留到的真实原因（如 401）替换。"""
+        transport_error = adapter.transport_error if adapter is not None else None
+        if transport_error is None:
+            return error
+        return ConnectionError(
+            f"连接 Qwen 识别服务失败: {describe_websocket_error(transport_error)}"
+        )
 
     def _create_adapter(self) -> _QwenOmniCallbackAdapter:
         if self._callback is None:
@@ -779,11 +833,18 @@ class QwenSpeechRecognizer(SpeechRecognizer):
             self._start_keepalive()
             print("[WebSocket] Reconnection successful!")
         except Exception as e:
-            print(f"[WebSocket] Reconnection failed: {e}")
+            explained = self._explain_connect_failure(e, adapter)
+            print(f"[WebSocket] Reconnection failed: {explained}")
             self._teardown_conversation(close=True)
             with self._lock:
                 self._connection_closed = self._should_run
-            raise
+                callback = self._callback
+            if callback is not None:
+                with suppress(Exception):
+                    callback.on_error(explained)
+            if explained is e:
+                raise
+            raise explained from None
 
     def _start_keepalive(self) -> None:
         """启动心跳线程以保持WebSocket连接活跃"""

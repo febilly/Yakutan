@@ -26,6 +26,7 @@ if __name__ == '__main__':
 
 # 必须先完成 CLI 的 .env 引导，再导入任何会读取 config 的业务模块。
 import config
+from error_reporting import describe_exception
 
 if __name__ == '__main__':
     config.apply_cli_env()
@@ -258,7 +259,7 @@ async def start_recognition_async(state):
             state.recognition_started = True
     except Exception as e:
         state.recognition_active = False
-        print(f'[ASR] 启动识别失败: {e}')
+        print(f'[ASR] 启动识别失败: {describe_exception(e)}')
         raise
 
     state.bump_audio_send_generation()
@@ -658,7 +659,11 @@ async def main(
         print('[ASR] 识别实例已创建')
 
         # 初始化音频流
-        await init_audio_stream(state)
+        try:
+            await init_audio_stream(state)
+        except Exception as e:
+            # 声卡库抛出的异常经常不带消息，这里补上"是哪一步失败"
+            raise RuntimeError(f'打开麦克风失败: {describe_exception(e)}') from e
 
         # 只在主线程中设置信号处理器
         try:

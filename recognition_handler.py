@@ -6,8 +6,10 @@ import logging
 import threading
 import time
 from typing import Optional
+from urllib.parse import urlparse
 
 import config
+from error_reporting import asr_backend_key, record_error
 from osc_manager import osc_manager
 from speech_recognizers.base_speech_recognizer import (
     RecognitionEvent,
@@ -25,6 +27,7 @@ from text_processor import (
     build_tagged_translation_display,
 )
 from streaming_translation import (
+    add_translation_error_listener,
     config_from_module,
     ensure_secondary_translator,
     is_streaming_deepl_hybrid_mode,
@@ -56,7 +59,13 @@ def report_recognition_error(state, error: BaseException, source: str) -> None:
     ``last_recognition_error_source``（错误来源）、
     ``last_recognition_error_at_ms``（毫秒 Unix 时间戳）。
     上报自身绝不抛异常，避免污染调用方线程。
+    同时写入 error_reporting，服务停掉后网页端也能看到最后一次错误。
     """
+    try:
+        backend = getattr(state, 'current_asr_backend', None) if state is not None else None
+        record_error(source, error, key=asr_backend_key(backend))
+    except Exception:
+        logger.debug('记录识别错误到错误汇总失败', exc_info=True)
     if state is None:
         return
     try:
@@ -65,6 +74,53 @@ def report_recognition_error(state, error: BaseException, source: str) -> None:
         state.last_recognition_error_at_ms = time.time() * 1000.0
     except Exception:
         logger.debug('记录识别错误到状态接口失败', exc_info=True)
+
+
+# ── 翻译错误上报 ──────────────────────────────────────────────────────
+# 翻译 API 出错只返回 "[ERROR] ..." 字符串，各调用点会悄悄丢掉它，用户只能在
+# 终端里看到。这里统一挂到 ContextAwareTranslator 的错误监听上，标明是哪个
+# 翻译服务、哪个 API Key，报到网页端。
+
+# 翻译 API 类名 -> (显示名, 用到的 API Key)
+_TRANSLATION_API_INFO = {
+    'DeepLAPI': ('DeepL', 'deepl'),
+    'OpenRouterAPI': ('LLM', 'llm'),
+    'OpenRouterStreamingAPI': ('LLM', 'llm'),
+    'QwenMTAPI': ('Qwen-MT', 'dashscope'),
+    'HyMT2API': ('Hy-MT2', None),
+    'GoogleWebAPI': ('Google', None),
+    'GoogleDictionaryAPI': ('Google', None),
+}
+
+
+def _llm_endpoint_host(api) -> Optional[str]:
+    client_mgr = getattr(api, '_client_mgr', None)
+    base_url = getattr(client_mgr, 'base_url', None) or getattr(config, 'LLM_BASE_URL', '')
+    host = urlparse(str(base_url or '')).hostname
+    return host or None
+
+
+def _report_translation_error(translator, error_text: str) -> None:
+    api = getattr(translator, 'translation_api', None)
+    api_label, key = _TRANSLATION_API_INFO.get(
+        type(api).__name__,
+        (getattr(translator, 'api_name', None) or type(api).__name__, None),
+    )
+    key_detail = _llm_endpoint_host(api) if key == 'llm' else None
+    if key_detail:
+        api_label = f'{api_label} ({key_detail})'
+    detail = str(error_text or '')
+    if detail.startswith('[ERROR]'):
+        detail = detail[len('[ERROR]'):].strip()
+    record_error(
+        'translation',
+        f'翻译失败（{api_label}）: {detail or "未知错误"}',
+        key=key,
+        key_detail=key_detail,
+    )
+
+
+add_translation_error_listener(_report_translation_error)
 
 
 # ── 次翻译器重建的 state 级锁（P2-14）────────────────────────────────

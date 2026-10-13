@@ -4095,6 +4095,7 @@ async function updateStatus() {
 
         const t = window.i18n ? window.i18n.t : (key) => key;
         renderServiceLifecycle(status, t);
+        showServiceLastError(status, t);
 
         // 后端时间戳比大面板记录更新 → 有人（小面板等）在别处改了配置 → 拉到大面板
         const serverTs = Number(status.config_applied_at_ms) || 0;
@@ -4112,6 +4113,86 @@ async function updateStatus() {
     } catch (error) {
         console.error('更新状态失败:', error);
         return false;
+    }
+}
+
+// 后端最近的错误（服务崩溃、识别服务连不上/被断开、翻译 API 报错等）。每条错误只弹一次，
+// 用 后端启动时间:错误id 记在 localStorage 里，刷新页面不会重复弹旧错误。
+const ERRORS_SEEN_STORAGE_KEY = 'service_errors_seen';
+const ERRORS_SEEN_MAX = 50;
+let errorsSeenFallback = [];
+
+// 出错的是哪个 API Key：和 API Keys 配置里的名字对应；LLM 接 DeepSeek 时直接叫 DeepSeek API Key
+function getErrorKeyLabel(error, t) {
+    if (error.key === 'llm' && error.key_detail) {
+        if (String(error.key_detail).toLowerCase().includes('deepseek')) {
+            return t('label.deepseekKey');
+        }
+        return `${t('error.key.llm')} (${error.key_detail})`;
+    }
+    const keyName = error.key ? t(`error.key.${error.key}`) : '';
+    if (keyName && keyName !== `error.key.${error.key}`) {
+        return keyName;
+    }
+    return t('error.key.generic');
+}
+
+function buildServiceErrorText(error, t) {
+    const titleKey = error.source === 'translation' ? 'msg.translationErrorTitle' : 'msg.serviceErrorTitle';
+    const lines = [t(titleKey)];
+    if (error.hint) {
+        const hintKey = `error.hint.${error.hint}`;
+        let hintText = t(hintKey, { key: getErrorKeyLabel(error, t) });
+        if (hintText && hintText !== hintKey) {
+            if (error.hint === 'invalidApiKey' && error.key === 'dashscope') {
+                hintText = `${hintText}${t('error.hint.dashscopeRegion')}`;
+            }
+            lines.push(hintText);
+        }
+    }
+    lines.push(t('msg.serviceErrorDetail', { detail: error.message || '' }));
+    return lines.join('\n');
+}
+
+function loadSeenErrorKeys() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(ERRORS_SEEN_STORAGE_KEY) || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+        return errorsSeenFallback;
+    }
+}
+
+function saveSeenErrorKeys(keys) {
+    const trimmed = keys.slice(-ERRORS_SEEN_MAX);
+    errorsSeenFallback = trimmed;
+    try {
+        localStorage.setItem(ERRORS_SEEN_STORAGE_KEY, JSON.stringify(trimmed));
+    } catch (_) {
+        // localStorage 不可用时只在本页内存里记
+    }
+}
+
+function showServiceLastError(status, t) {
+    const errors = Array.isArray(status?.recent_errors)
+        ? status.recent_errors
+        : (status?.last_error ? [status.last_error] : []);
+    if (!errors.length) return;
+
+    const seen = loadSeenErrorKeys();
+    const seenSet = new Set(seen);
+    let changed = false;
+    for (const error of errors) {
+        if (!error || !error.id) continue;
+        const seenKey = `${status.backend_boot_ms || 0}:${error.id}`;
+        if (seenSet.has(seenKey)) continue;
+        seenSet.add(seenKey);
+        seen.push(seenKey);
+        changed = true;
+        showMessage(buildServiceErrorText(error, t), 'error');
+    }
+    if (changed) {
+        saveSeenErrorKeys(seen);
     }
 }
 

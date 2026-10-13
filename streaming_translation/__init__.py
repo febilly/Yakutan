@@ -14,7 +14,12 @@ from .api.google_web import GoogleWebAPI
 from .api.hymt2 import HyMT2API, get_local_engine_runtime_status
 from .api.openrouter import OpenRouterAPI, OpenRouterStreamingAPI, merge_with_draft
 from .api.qwen_mt import QwenMTAPI
-from .core.context_aware import ContextAwareTranslator, TranslationHistoryEntry
+from .core.context_aware import (
+    ContextAwareTranslator,
+    TranslationHistoryEntry,
+    add_translation_error_listener,
+    remove_translation_error_listener,
+)
 from .core.smart_language import SmartTargetLanguageSelector
 from .pipeline import (
     TRANSLATION_API_CLASS_REGISTRY,
@@ -46,6 +51,7 @@ __all__ = [
     "TRANSLATION_API_CLASS_REGISTRY",
     "TranslationConfig",
     "TranslationHistoryEntry",
+    "add_translation_error_listener",
     "config_from_module",
     "clear_translation_contexts",
     "ensure_secondary_translator",
@@ -56,6 +62,7 @@ __all__ = [
     "prewarm_local_engines",
     "release_local_engines",
     "reinitialize_translator",
+    "remove_translation_error_listener",
     "reverse_translation",
     "translate_with_backend",
     "update_secondary_translator",
