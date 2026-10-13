@@ -775,6 +775,7 @@ const translations = {
         'sourceLang.ko': 'Korean',
         'hint.sourceLanguage': 'Recommended to keep "Auto Detect"; you can also type a language code.',
         'label.micDevice': 'Microphone',
+        'label.micLevel': 'Microphone level',
 
         // Smart Target Language
         'section.smartTargetLanguage': 'Smart Target Language',
@@ -791,7 +792,6 @@ const translations = {
         'label.smartTargetMinSamples': 'Minimum samples',
         'label.recentLanguages': 'Recently detected languages',
         'hint.noRecentLanguages': 'No data yet',
-        'label.micLevel': 'Microphone level',
 
         'label.dependencies': 'Dependencies',
         'label.device': 'Device',
@@ -1220,6 +1220,7 @@ const translations = {
         'sourceLang.ko': '韓国語',
         'hint.sourceLanguage': '通常は「自動検出」のままを推奨します。言語コードを直接入力することもできます。',
         'label.micDevice': 'マイク',
+        'label.micLevel': 'マイク音量',
 
         // スマートターゲット言語
         'section.smartTargetLanguage': 'スマートターゲット言語',
@@ -1252,7 +1253,6 @@ const translations = {
         'label.localInferenceEngine': 'ローカル認識エンジン',
         'label.localInferenceDevice': '計算デバイス',
         'label.localInferenceLanguage': '言語ヒント',
-        'label.micLevel': 'マイク音量',
         'label.localVadMode': 'ローカル VAD モード',
         'label.localVadThreshold': 'ローカル VAD しきい値',
         'label.localMinSpeechDuration': '最短発話長（ミリ秒）',
@@ -1661,6 +1661,7 @@ const translations = {
         'sourceLang.ko': '한국어',
         'hint.sourceLanguage': '"자동 감지" 유지를 권장합니다. 언어 코드를 직접 입력할 수도 있습니다.',
         'label.micDevice': '마이크',
+        'label.micLevel': '마이크 음량',
 
         // 스마트 대상 언어
         'section.smartTargetLanguage': '스마트 대상 언어',
@@ -1709,7 +1710,6 @@ const translations = {
         'label.localIncrementalFallbackInterval': '최대 업데이트 간격(밀리초)',
         'hint.localIncrementalFallbackInterval': '폴백: 이 시간 동안 업데이트가 전혀 없으면 중간 결과를 강제로 한 번 새로고칩니다.',
         'hint.localInferenceNotChecked': '로컬 ASR 모델 상태를 아직 확인하지 않았습니다',
-        'label.micLevel': '마이크 음량',
         'hint.localInferenceStatus': '처음 사용하기 전에 선택한 엔진의 모델과 런타임을 먼저 다운로드하세요.',
         'hint.localInferenceNeedsDownload': '선택한 엔진이 아직 준비되지 않았습니다. 모델과 런타임을 먼저 다운로드하세요.',
         'status.downloading': '다운로드 중',

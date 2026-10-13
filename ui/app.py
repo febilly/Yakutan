@@ -22,9 +22,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from audio_runtime_guard import hold_portaudio
 from audio_devices import audio_devices, MicrophoneSelectionError
+from microphone_meter import microphone_meters
 from error_reporting import asr_backend_key, clear_errors, describe_exception, get_last_error, get_recent_errors, record_error
 from text_processor import sanitize_text_fancy_style
-from microphone_meter import microphone_meters
 from udp_port_check import (
     get_non_vrchat_udp_port_occupants,
     get_vrchat_udp_port_occupants,
@@ -1257,16 +1257,6 @@ def get_ipc_status():
         "mode": ipc_client.get_mode()
     })
 
-@app.route('/api/status', methods=['GET'])
-def get_status():
-    """获取服务状态"""
-    status = _snapshot_service_status()
-    status['target_language'] = config.TARGET_LANGUAGE
-    status['config_applied_at_ms'] = int(getattr(config, 'CONFIG_APPLIED_AT_MS', 0) or 0)
-    status['backend_boot_ms'] = int(getattr(config, 'BACKEND_BOOT_MS', 0) or 0)
-    status['local_inference_ui_enabled'] = is_local_inference_ui_enabled()
-    # P3-20: 识别链路最近一次致命错误（只读字段）。由 recognition_handler /
-    # main 写入 AppState 动态属性；服务未运行或尚无错误时为 None。
 @app.route('/api/audio/level/stream', methods=['GET'])
 def stream_audio_level():
     """Keep metering while the page is connected, even if recognition is stopped."""
@@ -1287,6 +1277,16 @@ def stream_audio_level():
     })
 
 
+@app.route('/api/status', methods=['GET'])
+def get_status():
+    """获取服务状态"""
+    status = _snapshot_service_status()
+    status['target_language'] = config.TARGET_LANGUAGE
+    status['config_applied_at_ms'] = int(getattr(config, 'CONFIG_APPLIED_AT_MS', 0) or 0)
+    status['backend_boot_ms'] = int(getattr(config, 'BACKEND_BOOT_MS', 0) or 0)
+    status['local_inference_ui_enabled'] = is_local_inference_ui_enabled()
+    # P3-20: 识别链路最近一次致命错误（只读字段）。由 recognition_handler /
+    # main 写入 AppState 动态属性；服务未运行或尚无错误时为 None。
     live_state = _live_app_state()
     status['asr_error'] = getattr(live_state, 'last_recognition_error', None)
     status['asr_error_source'] = getattr(live_state, 'last_recognition_error_source', None)
