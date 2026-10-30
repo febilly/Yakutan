@@ -60,7 +60,7 @@ echo 模型文件: %HYMT2_MODEL%
 echo 监听端口: %PORT% (仅 127.0.0.1，无需防火墙放行)
 echo.
 
-"%LLAMA_SERVER%" -m "%HYMT2_MODEL%" --port %PORT% --host 127.0.0.1 -c 2048 -ngl 99 --flash-attn
+"%LLAMA_SERVER%" -m "%HYMT2_MODEL%" --port %PORT% --host 127.0.0.1 -c 2048 -ngl 99 --flash-attn --override-kv tokenizer.ggml.eos_token_id=int:120020
 
 if errorlevel 1 (
     echo.

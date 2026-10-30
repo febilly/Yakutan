@@ -269,6 +269,8 @@ class SpeculativeDecoder:
         and may return True to abort (the ASR loop uses it for its repetition circuit breaker).
         """
         res = GenerationResult()
+        if max_tokens <= 0:
+            return res
         tracker = DraftTracker(draft, window=window)
         emitted = res.tokens
         pos0 = pos
@@ -302,6 +304,7 @@ class SpeculativeDecoder:
                 break
 
             chunk = tracker.chunk_for(sampled, len(emitted) - 1)
+            chunk = chunk[:max(0, max_tokens - len(emitted))]
 
             if not chunk:
                 t = clock()

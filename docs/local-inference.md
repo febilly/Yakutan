@@ -24,11 +24,15 @@ Qwen 权重来自 `mradermacher/Qwen3-ASR-1.7B-GGUF`，runtime 与 Silero VAD �
 
 ASR 与 Hy-MT2 的 context 设置 `n_outputs_max=64`；ASR 默认使用 Q8_0 KV，Hy-MT2 保持 f16 KV。共享 worker 的 KV/草稿/语言/上下文相互独立，模型权重与 mtmd 编码器共享。mtmd 编码调用串行，多会话解码仍可合批，每个解码子批最多请求 64 行 logits。
 
+Hy-MT2 输出上限按原文长度取 `max(160, 2 × 字符数)`，本地还受剩余 context 容量约束；推测草稿的验证长度同样受剩余预算限制。仅真实特殊 token 能终止翻译，普通 `$`、`</s>`、`<|im_end|>` 文本不会被误认为结束符。本地提示词包含 BOS。检测到异常尾部复读时最多重试一次，原文本身重复的情况豁免。mtmd 编码仅转发警告和错误日志，避免逐次 INFO 刷屏。
+
 ## 独立推理服务
 
 Windows 可使用现有 `start_server.bat` 或 `remote_inference_service/launcher.py`。客户端在「模型运行方式」选择远程服务，填写同一个 `ws://服务器:18775` 地址供 ASR 和 Hy-MT2 使用；客户端保留本地 VAD。
 
 Windows 服务直接加载同一目录下的模型。Linux 服务也使用 b11985 绑定，需自行构建该版本（启用 CUDA 等目标后端及 mtmd），将运行库放入模型根目录的 `llama_vulkan_b11985` 中；该目录名为跨平台的固定运行时路径。Linux 的外部 Hy-MT2 HTTP 后端仍使用 `--llama-url` 配置。旧版 CUDA runtime 必须先升级，不能沿用 `YAKUTAN_LLAMA_ABI_PROFILE=cuda-2026-08`。
+
+使用外部 `llama-server` 加载当前 Hy-MT2 GGUF 时，启动参数需包含 `--override-kv tokenizer.ggml.eos_token_id=int:120020`，纠正该模型把普通 `$` token 标为 EOS 的元数据。Windows 回退脚本已包含此参数；Linux 外部服务也需加上。
 
 ## 清理旧文件
 
@@ -39,3 +43,5 @@ Windows 服务直接加载同一目录下的模型。Linux 服务也使用 b1198
 ## 来源与许可
 
 原生 mtmd 适配移植自 realtime-subtitle 的 `codex/qwen-local-asr-translation` 分支、提交 `2ca5f7b`。llama.cpp 与 Silero VAD 为 MIT；Qwen3-ASR 与 Hy-MT2 模型为 Apache-2.0；LLVM OpenMP 为 Apache-2.0 with LLVM Exceptions；SenseVoice 以对应仓库许可为准。模型文件与原生运行库不纳入本项目 Git 提交。
+
+增量修复同步至 `a1c3de0`，包含 `be5cb3d`、`21f2f16`、`d841f44`、`a1c3de0`；同时引入长输出上限所依赖的 `593b8cf` 复读检测部分，保持 Yakutan 原有字幕历史与分句流程。

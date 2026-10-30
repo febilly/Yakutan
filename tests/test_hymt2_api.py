@@ -512,7 +512,7 @@ class TestLocalBackend:
             def __init__(self):
                 self.prompts = []
                 self.drafts = []
-            def generate(self, prompt, max_tokens=128, draft=None):
+            def generate(self, prompt, max_tokens=128, draft=None, **kwargs):
                 self.prompts.append(prompt)
                 self.drafts.append(draft)
                 if "Hello" in prompt and "world" not in prompt:
@@ -542,7 +542,7 @@ class TestLocalBackend:
         class FakeLocalEngine:
             def __init__(self):
                 self.calls = 0
-            def generate(self, prompt, max_tokens=128, draft=None):
+            def generate(self, prompt, max_tokens=128, draft=None, **kwargs):
                 self.calls += 1
                 return f"译文{self.calls}", [self.calls]
 
@@ -571,7 +571,7 @@ class TestLocalBackend:
         class FakeLocalEngine:
             def __init__(self):
                 self.calls = 0
-            def generate(self, prompt, max_tokens=128, draft=None):
+            def generate(self, prompt, max_tokens=128, draft=None, **kwargs):
                 self.calls += 1
                 return "ok", [1]
 
@@ -787,7 +787,7 @@ class TestLocalEngineLifecycle:
                 if attempts["n"] == 1:
                     raise RuntimeError("load boom")
 
-            def generate(self, prompt, max_tokens=128, draft=None):
+            def generate(self, prompt, max_tokens=128, draft=None, **kwargs):
                 return "ok", [1]
 
         with patch("streaming_translation.api.hymt2.HyMT2LocalEngine", FailingEngine):

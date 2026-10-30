@@ -193,10 +193,11 @@ class HyMT2Backend:
         self.url = url
         self.max_new_tokens = max_new_tokens
 
-    async def complete(self, prompt: str) -> str:
+    async def complete(self, prompt: str, repeat_penalty: float = 1.0, max_new_tokens: int = 0) -> str:
         body = json.dumps({
             "prompt": CHAT_PREFIX + prompt + CHAT_SUFFIX,
-            "n_predict": self.max_new_tokens,
+            "n_predict": max(self.max_new_tokens, max_new_tokens),
+            "repeat_penalty": repeat_penalty,
             "temperature": 0,
             "cache_prompt": True,
         }).encode("utf-8")
@@ -306,6 +307,19 @@ async def handle_asr(websocket, init: dict[str, Any], manager: ASREngineManager)
             }, ensure_ascii=False))
 
 
+async def _translate(backend: HyMT2Backend, prompt: str, source: str) -> str:
+    from local_inference.repetition_guard import RETRY_REPEAT_PENALTY, is_runaway, max_translation_tokens
+
+    max_new_tokens = max_translation_tokens(source)
+    translation = await backend.complete(prompt, max_new_tokens=max_new_tokens)
+    if is_runaway(translation, source):
+        # One retry with a mild penalty; a second runaway is returned as it is.
+        translation = await backend.complete(
+            prompt, repeat_penalty=RETRY_REPEAT_PENALTY, max_new_tokens=max_new_tokens
+        )
+    return translation
+
+
 async def handle_hymt2(
     websocket, init: dict[str, Any], backend: HyMT2Backend, history_limit: int
 ) -> None:
@@ -324,7 +338,7 @@ async def handle_hymt2(
             if payload.get("type") != "update":
                 raise ValueError("update_required")
             source = _source_text(payload)
-            translation = await backend.complete(_translation_prompt(payload, source, history_limit))
+            translation = await _translate(backend, _translation_prompt(payload, source, history_limit), source)
             previous = str(payload.get("previous_translation") or "")
             is_final = bool(payload.get("is_final"))
             await websocket.send(json.dumps({

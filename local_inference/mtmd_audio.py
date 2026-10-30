@@ -35,6 +35,19 @@ MTMD_INPUT_CHUNK_TYPE_AUDIO = 2
 
 _ProgressCallback = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_float, ctypes.c_void_p)
 
+_LogCallback = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)
+_GGML_LOG_LEVEL_WARN = 3
+_GGML_LOG_LEVEL_ERROR = 4
+
+
+@_LogCallback
+def _on_mtmd_log(level, text, _user_data):
+    # Left alone, mtmd prints several INFO lines to stderr for every encode.
+    if level == _GGML_LOG_LEVEL_WARN:
+        logger.warning("[mtmd] %s", (text or b"").decode("utf-8", "replace").rstrip())
+    elif level == _GGML_LOG_LEVEL_ERROR:
+        logger.error("[mtmd] %s", (text or b"").decode("utf-8", "replace").rstrip())
+
 
 class mtmd_context_params(ctypes.Structure):
     _fields_ = [
@@ -82,6 +95,7 @@ def _load(lib_dir: str):
         return fn
 
     vp, sz = ctypes.c_void_p, ctypes.c_size_t
+    bind("mtmd_log_set", [_LogCallback, vp], None)(_on_mtmd_log, None)
     lib.f_params_default = bind("mtmd_context_params_default", [], mtmd_context_params)
     lib.f_default_marker = bind("mtmd_default_marker", [], ctypes.c_char_p)
     lib.f_init = bind("mtmd_init_from_file", [ctypes.c_char_p, vp, mtmd_context_params], vp)

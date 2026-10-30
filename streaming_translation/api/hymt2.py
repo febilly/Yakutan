@@ -29,6 +29,9 @@ import time
 from typing import Dict, List, Optional
 
 from .base import BaseTranslationAPI
+from local_inference.repetition_guard import (
+    RETRY_REPEAT_PENALTY, is_runaway, max_translation_tokens, source_is_repetitive,
+)
 
 try:
     from websockets.sync.client import connect as _sync_ws_connect
@@ -123,8 +126,9 @@ class HyMT2LocalEngine:
             type_kv=8 if getattr(_config, "LOCAL_MT_KV_Q8", False) else None,
         )
         self.eos_token = self.model.token_eos()
-        self.stop_ids = {self.eos_token}
+        self.stop_ids = set()
         for s in (
+            self.model.token_to_piece(self.eos_token),
             "<｜hy_place▁holder▁no▁2｜>",
             "<｜hy_User｜>",
             "<｜hy_Assistant｜>",
@@ -132,7 +136,7 @@ class HyMT2LocalEngine:
             "<|endoftext|>",
             "</s>",
         ):
-            tid = self.model.token_to_id(s)
+            tid = self._special_token_id(s)
             if tid >= 0:
                 self.stop_ids.add(tid)
         self._engine_lock = threading.Lock()
@@ -142,6 +146,17 @@ class HyMT2LocalEngine:
         self._spec = SpeculativeDecoder(llama_mod, self.ctx, self.model)
         # KV 里当前装着哪串 token（prompt + 已生成），供下一次比公共前缀
         self._cached_tokens: List[int] = []
+
+    def _special_token_id(self, text: str) -> int:
+        """词表里真正的特殊 token 才能当停止符，普通文本返回 -1。
+
+        token_to_id 对普通文本会给出第一个片段（"</s>" -> "</"）；这个 GGUF 的 eos_token_id
+        还指向普通 token "$"。它们一旦进停止符表，译文写到这里就被截断了。
+        """
+        ids = self.model.tokenize(text, add_special=False, parse_special=True)
+        if len(ids) != 1 or ids == self.model.tokenize(text, add_special=False, parse_special=False):
+            return -1
+        return ids[0]
 
     def _prefill(self, tokens: List[int], cached: List[int]) -> int:
         """提交 prompt，返回本次真正送进模型的 token 数。
@@ -187,29 +202,46 @@ class HyMT2LocalEngine:
         prompt: str,
         max_tokens: int = 128,
         draft: Optional[List[int]] = None,
+        repeat_penalty: float = 1.0,
+        stop_on_runaway: bool = False,
     ) -> tuple[str, List[int]]:
         """生成译文；返回 (清洗后的文本, 原始 token)。
 
         ``draft`` 是上一次中间结果的 token：流式修订里新旧译文大段重合，一次前向就能
         验证掉模型认同的部分。验证是精确比对，输出与逐 token 解码一致。
+
+        ``stop_on_runaway``：末尾复读到 RUNAWAY_REPEATS 次就停（先按 token 粗筛，命中再按文本确认）。
         """
         import config as _config
+        from local_inference.repetition_guard import RUNAWAY_REPEATS, tail_repeats, text_units
+
+        def runaway(toks: List[int]) -> bool:
+            if not tail_repeats(toks, RUNAWAY_REPEATS):
+                return False
+            return bool(tail_repeats(text_units(self.model.detokenize(toks)), RUNAWAY_REPEATS))
 
         with self._engine_lock:
             tokens = self.model.tokenize(prompt, add_special=False, parse_special=True)
+            max_tokens = min(int(max_tokens), self._n_ctx - len(tokens))
+            if max_tokens <= 0:
+                raise ValueError("Hy-MT2 prompt leaves no context space for translation")
             # 中途出错时 KV 与 _cached_tokens 会对不上，先作废；成功后再写回真实内容
             cached, self._cached_tokens = self._cached_tokens, []
             n_new = self._prefill(tokens, cached)
 
-            sampler = self._LlamaSampler(temperature=0.0)
+            sampler = self._LlamaSampler(
+                temperature=0.0, repeat_penalty=repeat_penalty, n_vocab=self.model.n_vocab
+            )
             try:
                 use_draft = bool(getattr(_config, "LOCAL_SPECULATIVE_DECODE", True))
                 gen = self._spec.generate(
                     sampler,
                     len(tokens),
                     stop_ids=self.stop_ids,
+                    # 上下文写满后 llama_decode 会失败，译文同样被截断；留在上下文之内。
                     max_tokens=max_tokens,
                     draft=draft if use_draft else None,
+                    on_token=runaway if stop_on_runaway else None,
                 )
             finally:
                 del sampler
@@ -224,7 +256,8 @@ class HyMT2LocalEngine:
             )
 
             raw = self.model.detokenize(gen.tokens)
-            clean = re.split(r"<[|｜].*?[|｜]>", raw)[0].strip()
+            # 只认全角竖线：这个词表没有 <|...|> 这种特殊 token，译文里的它是原文带来的普通文本。
+            clean = re.split(r"<｜.*?｜>", raw)[0].strip()
             for prefix in ("Translation:", "翻译：", "译文："):
                 if clean.startswith(prefix):
                     clean = clean[len(prefix) :].strip()
@@ -783,14 +816,22 @@ class HyMT2API(BaseTranslationAPI):
                     + text
                 )
 
-            prompt = f"<｜hy_User｜>{content}<｜hy_Assistant｜>"
+            prompt = f"<｜hy_begin▁of▁sentence｜><｜hy_User｜>{content}<｜hy_Assistant｜>"
             if self._local_engine is None:
                 display = ""
             else:
                 inference_started = time.monotonic()
+                guard = not source_is_repetitive(text)
+                max_tokens = max_translation_tokens(text)
                 display, out_tokens = self._local_engine.generate(
-                    prompt, draft=self._prev_tokens or None
+                    prompt, max_tokens=max_tokens, draft=self._prev_tokens or None,
+                    stop_on_runaway=guard,
                 )
+                if guard and is_runaway(display):
+                    display, out_tokens = self._local_engine.generate(
+                        prompt, max_tokens=max_tokens, repeat_penalty=RETRY_REPEAT_PENALTY,
+                        stop_on_runaway=True,
+                    )
                 # 同一句的下一次修订拿这次的结果当草稿；整句定稿后这一句就翻篇了。
                 self._prev_tokens = [] if not is_partial else out_tokens
                 # 临时：本地模型每次推理后输出一行日志，记录本次耗时（毫秒）

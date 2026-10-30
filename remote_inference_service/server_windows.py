@@ -385,7 +385,7 @@ class HyMT2Backend:
                     raise RuntimeError(f"GPU与CPU加载Hy-MT2均失败: {cpu_exc}") from exc
             raise exc
 
-    async def complete(self, prompt: str) -> str:
+    async def complete(self, prompt: str, repeat_penalty: float = 1.0, max_new_tokens: int = 0) -> str:
         if self.has_local_model:
             # 优先使用进程内置 HyMT2 本地推理引擎 (免去 llama-server)
             async with self._local_lock:
@@ -396,7 +396,10 @@ class HyMT2Backend:
 
                 full_prompt = CHAT_PREFIX + prompt + CHAT_SUFFIX
                 def call_local() -> str:
-                    clean, _ = self._local_engine.generate(full_prompt, max_tokens=self.max_new_tokens)
+                    clean, _ = self._local_engine.generate(
+                        full_prompt, max_tokens=max(self.max_new_tokens, max_new_tokens),
+                        repeat_penalty=repeat_penalty,
+                    )
                     return clean
                 text = await asyncio.to_thread(call_local)
                 return _normalize_hypothesis(text)
@@ -404,7 +407,8 @@ class HyMT2Backend:
             # 回退到外部 llama-server HTTP 调用
             body = json.dumps({
                 "prompt": CHAT_PREFIX + prompt + CHAT_SUFFIX,
-                "n_predict": self.max_new_tokens,
+                "n_predict": max(self.max_new_tokens, max_new_tokens),
+                "repeat_penalty": repeat_penalty,
                 "temperature": 0,
                 "cache_prompt": True,
             }).encode("utf-8")
@@ -531,6 +535,19 @@ async def handle_asr(websocket, init: dict[str, Any], manager: ASREngineManager)
             }, ensure_ascii=False))
 
 
+async def _translate(backend: HyMT2Backend, prompt: str, source: str) -> str:
+    from local_inference.repetition_guard import RETRY_REPEAT_PENALTY, is_runaway, max_translation_tokens
+
+    max_new_tokens = max_translation_tokens(source)
+    translation = await backend.complete(prompt, max_new_tokens=max_new_tokens)
+    if is_runaway(translation, source):
+        # One retry with a mild penalty; a second runaway is returned as it is.
+        translation = await backend.complete(
+            prompt, repeat_penalty=RETRY_REPEAT_PENALTY, max_new_tokens=max_new_tokens
+        )
+    return translation
+
+
 async def handle_hymt2(
     websocket, init: dict[str, Any], backend: HyMT2Backend, history_limit: int
 ) -> None:
@@ -553,7 +570,7 @@ async def handle_hymt2(
             source = _source_text(payload)
             log("Hy-MT2", f"接到来自 {client} 的翻译请求 (原文: \"{source}\")，准备处理...")
             t0 = time.perf_counter()
-            translation = await backend.complete(_translation_prompt(payload, source, history_limit))
+            translation = await _translate(backend, _translation_prompt(payload, source, history_limit), source)
             cost_ms = round((time.perf_counter() - t0) * 1000, 1)
             previous = str(payload.get("previous_translation") or "")
             is_final = bool(payload.get("is_final"))
