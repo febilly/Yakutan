@@ -9,5 +9,6 @@ protobuf>=3.19.6
 sentencepiece>=0.2.0
 soundfile>=0.12.0
 gguf>=0.18.0
-onnxruntime-directml>=1.19.0
+# SenseVoice and Silero run on CPU; Qwen3-ASR uses llama.cpp mtmd.
+onnxruntime>=1.19.0
 pydub>=0.25.1

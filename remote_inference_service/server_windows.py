@@ -2,7 +2,7 @@
 """Unified WebSocket inference service for Yakutan on Windows hosts (Foreground Console).
 
 与 Linux 版 server.py 的有意差异（WebSocket 协议一致，便于后续抽公共协议模块）：
-- ONNX 默认 DirectML（Linux 为 CUDA）；Qwen 微批池默认关闭以省显存；
+- Qwen3-ASR 使用原生 mtmd；SenseVoice/Silero 使用 CPU ONNX，Qwen 微批池默认关闭；
 - Hy-MT2 优先使用进程内引擎（本地 GGUF 存在时），外部 llama-server 仅作回退；
 - health.ready = 任一 ASR 引擎就绪（Linux 版为全部模型就绪）；
 - 默认仅监听 127.0.0.1；供局域网连接请显式传 --host 0.0.0.0（服务无鉴权）；
@@ -140,23 +140,14 @@ def _require_dir(value: str, label: str) -> Path:
 
 def configure_runtime(runtime_root: Path, models_root: Path) -> None:
     sys.path.insert(0, str(runtime_root))
-    os.environ["YAKUTAN_QWEN_LLAMA_BIN"] = str(models_root / "qwen_llama_vulkan_bin")
-
-    # Windows 桌面环境保留标准桌面 ABI：无条件清除可能残留的 Linux 特化配置 (cuda-2026-08)
+    # Both platforms must use the b11985 ABI; never reuse the older CUDA structs.
     os.environ.pop("YAKUTAN_LLAMA_ABI_PROFILE", None)
-
-    # 允许 Vulkan 在显存不足时借用系统共享内存，避免抛出 ErrorOutOfDeviceMemory
-    os.environ["GGML_VK_ALLOW_SYSMEM_FALLBACK"] = "1"
     import config
     from local_inference import model_manager
 
     model_manager.MODELS_DIR = models_root
+    model_manager.prepare_qwen_llama_runtime_env()
     config.LOCAL_INFERENCE_DEVICE = "auto"
-
-    # Windows 下默认优先 DirectML，亦兼容 CUDA/CPU
-    if "YAKUTAN_ONNX_PROVIDER" not in os.environ:
-        os.environ["YAKUTAN_ONNX_PROVIDER"] = "directml"
-
     config.LOCAL_QWEN_ENCODER_DEVICE = "gpu"
     config.LOCAL_QWEN_LOG_PIPELINE_TIMING = True
 
@@ -175,7 +166,7 @@ def _is_llama_server_online(url: str) -> bool:
 
 
 def _model_status(models_root: Path, llama_url: str = "") -> dict[str, dict[str, Any]]:
-    primary_dll = "llama.dll"
+    from local_inference.model_manager import qwen3_required_paths, llama_runtime_required_paths
     expected = {
         "sensevoice": [
             models_root / "sensevoice-onnx" / "am.mvn",
@@ -183,12 +174,7 @@ def _model_status(models_root: Path, llama_url: str = "") -> dict[str, dict[str,
             models_root / "sensevoice-onnx" / "sense-voice-encoder-int8.onnx",
             models_root / "sensevoice-onnx" / "chn_jpn_yue_eng_ko_spectok.bpe.model",
         ],
-        "qwen3-asr": [
-            models_root / "qwen3-asr" / "qwen3_asr_encoder_frontend.int4.onnx",
-            models_root / "qwen3-asr" / "qwen3_asr_encoder_backend.int4.onnx",
-            models_root / "qwen3-asr" / "qwen3_asr_llm.q4_k.gguf",
-            models_root / "qwen_llama_vulkan_bin" / primary_dll,
-        ],
+        "qwen3-asr": qwen3_required_paths(models_root),
     }
     result: dict[str, dict[str, Any]] = {}
     for name, paths in expected.items():
@@ -198,7 +184,8 @@ def _model_status(models_root: Path, llama_url: str = "") -> dict[str, dict[str,
     # 检查 Hy-MT2 (本地存在 .gguf 即可使用内置引擎；否则检查外部 llama-server)
     hymt2_files = list((models_root / "hymt2").glob("*.gguf"))
     if hymt2_files:
-        result["hymt2"] = {"ready": True, "missing": []}
+        missing = [str(path) for path in llama_runtime_required_paths(models_root) if not path.is_file()]
+        result["hymt2"] = {"ready": not missing, "missing": missing}
     elif llama_url and _is_llama_server_online(llama_url):
         result["hymt2"] = {"ready": True, "missing": []}
     else:
@@ -207,7 +194,7 @@ def _model_status(models_root: Path, llama_url: str = "") -> dict[str, dict[str,
     # 运行时依赖检查
     deps = {
         "sensevoice": ["onnxruntime", "sentencepiece", "kaldi_native_fbank"],
-        "qwen3-asr": ["onnxruntime", "gguf", "kaldi_native_fbank", "soundfile"],
+        "qwen3-asr": ["gguf", "soundfile"],
     }
     for engine, mod_names in deps.items():
         if engine in result and result[engine]["ready"]:

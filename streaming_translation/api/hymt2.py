@@ -117,7 +117,11 @@ class HyMT2LocalEngine:
         self._LlamaSampler = LlamaSampler
         self.model = LlamaModel(str(path), n_gpu_layers=n_gpu_layers, main_gpu=main_gpu)
         self._n_ctx = 2048
-        self.ctx = LlamaContext(self.model, n_ctx=self._n_ctx)
+        import config as _config
+        self.ctx = LlamaContext(
+            self.model, n_ctx=self._n_ctx, n_outputs_max=64,
+            type_kv=8 if getattr(_config, "LOCAL_MT_KV_Q8", False) else None,
+        )
         self.eos_token = self.model.token_eos()
         self.stop_ids = {self.eos_token}
         for s in (

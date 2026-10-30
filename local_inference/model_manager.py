@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import shutil
 import subprocess
 import sys
 import time
+import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import HTTPError
@@ -27,7 +29,8 @@ PROJECT_ROOT = PACKAGE_DIR.parent
 VENDOR_DIR = PACKAGE_DIR / "vendor"
 
 # Qwen3 GGUF 解码依赖的 llama.cpp Vulkan 运行时（Windows DLL / Linux .so），与权重一并放用户可写目录
-QWEN_LLAMA_VULKAN_BIN_DIR_NAME = "qwen_llama_vulkan_bin"
+LLAMA_CPP_TAG = "b11985"
+QWEN_LLAMA_VULKAN_BIN_DIR_NAME = f"llama_vulkan_{LLAMA_CPP_TAG}"
 
 
 def _qwen_llama_vulkan_user_bin() -> Path:
@@ -35,26 +38,20 @@ def _qwen_llama_vulkan_user_bin() -> Path:
 
 
 def _qwen_llama_vulkan_vendor_bin() -> Path:
-    return VENDOR_DIR / "qwen_asr_gguf" / "inference" / "bin"
+    # Versioned bundle path; never load the old inference/bin DLLs with new ctypes.
+    return PACKAGE_DIR / "models" / QWEN_LLAMA_VULKAN_BIN_DIR_NAME
 
 
 def _llama_vulkan_bin_has_core_dlls(path: Path) -> bool:
     if not path.is_dir():
         return False
-    if sys.platform == "win32":
-        # Windows: ggml CPU backend depends on OpenMP runtime in this folder.
-        if not any((path / name).is_file() for name in LLAMA_CPP_OPENMP_DLLS):
-            return False
-        names = ("llama.dll", "ggml.dll", "ggml-base.dll")
-    else:
-        # Linux: OpenMP runtime (libgomp/libomp) is expected from system packages.
-        # We only require llama/ggml core .so files here for readiness checks.
-        names = ("libllama.so", "libggml.so", "libggml-base.so")
-    return all((path / n).is_file() for n in names)
+    if sys.platform == "win32" and not any((path / name).is_file() for name in LLAMA_CPP_OPENMP_DLLS):
+        return False
+    return all((path / name).is_file() for name in _runtime_names())
 
 
 def _qwen3_llama_bin_dir() -> Path:
-    """解析实际含可用 Vulkan 运行时的目录；优先用户数据，其次兼容旧 vendor/bin。"""
+    """解析 b11985 运行时目录；优先用户数据，其次为同版本只读包。"""
     user = _qwen_llama_vulkan_user_bin()
     if _llama_vulkan_bin_has_core_dlls(user):
         return user
@@ -113,7 +110,7 @@ def warn_if_weights_not_resident(label: str, weights_path):
 
 def prepare_qwen_llama_runtime_env() -> None:
     """在首次 import llama/Vulkan 后端前配置 DLL 路径和显存驻留策略。"""
-    os.environ["YAKUTAN_QWEN_LLAMA_BIN"] = str(_qwen_llama_vulkan_user_bin().resolve())
+    os.environ["YAKUTAN_QWEN_LLAMA_BIN"] = str(_qwen3_llama_bin_dir().resolve())
     # llama.cpp 的 Vulkan 后端默认不给 allocation 标记优先级。Windows/WDDM 在显存压力下
     # 会优先把空闲的模型权重换到 shared GPU memory，下一次 forward 才经 PCIe 重新读取。
     # bundled ggml-vulkan.dll 支持该开关；支持 VK_EXT_memory_priority 的驱动会给模型、KV、
@@ -132,7 +129,7 @@ def _default_models_dir() -> Path:
 
 MODELS_DIR = _default_models_dir()
 
-# 单文件运行时 VENDOR_DIR 在 _MEIPASS 下，仅用于读取打包自带的只读副本；可写 vendor 代码见 _qwen_vendor_package_dir()
+# 单文件运行时 VENDOR_DIR 在 _MEIPASS 下，仅用于读取随程序打包的 Python 绑定。
 SENSEVOICE_ONNX_DIR_NAME = "sensevoice-onnx"
 SENSEVOICE_ONNX_REPO = "lovemefan/SenseVoice-onnx"
 SENSEVOICE_ENCODER_ONNX = "sense-voice-encoder-int8.onnx"
@@ -148,19 +145,46 @@ ASR_MODEL_IDS = {
     "qwen3-asr": "Qwen3-ASR-1.7B",
 }
 
-QWEN3_ASR_FILES = [
+QWEN3_ASR_VARIANTS = {
+    "1.7B": {
+        "repo": "mradermacher/Qwen3-ASR-1.7B-GGUF",
+        "revision": "664b960e358348943aefcdc26b3cf09eff1fb0ac",
+        "decoder": "Qwen3-ASR-1.7B.Q6_K.gguf",
+        "mmproj": "Qwen3-ASR-1.7B.mmproj-Q8_0.gguf",
+        "sha256": {
+            "Qwen3-ASR-1.7B.Q6_K.gguf": "534b653ee0074264c80533df9637e9eb556c04457f30cd1ba08fe48dcb608263",
+            "Qwen3-ASR-1.7B.mmproj-Q8_0.gguf": "780b5b48dfbc23c219cc9d3da9fdaccc7da567fa661b3724d19bda50fbcfc8c3",
+        },
+    },
+    "0.6B": {
+        "repo": "ggml-org/Qwen3-ASR-0.6B-GGUF",
+        "revision": "928ab958557df9aa2ef1c93e0e83c7ad0933fae2",
+        "decoder": "Qwen3-ASR-0.6B-Q8_0.gguf",
+        "mmproj": "mmproj-Qwen3-ASR-0.6B-Q8_0.gguf",
+        "sha256": {
+            "Qwen3-ASR-0.6B-Q8_0.gguf": "bca259818b50ca7c4c05e9bdb35a5dc04fa039653a6d6f3f0f331f96f6aa1971",
+            "mmproj-Qwen3-ASR-0.6B-Q8_0.gguf": "41a342b5e4c514e968cb756de6cd1b7be39eff43c44c57a2ef5fc6522e36603d",
+        },
+    },
+}
+QWEN3_ASR_FILES = tuple(QWEN3_ASR_VARIANTS["1.7B"][key] for key in ("decoder", "mmproj"))
+
+QWEN3_ASR_DIR_NAME = "qwen3-asr-gguf"
+
+LOCAL_RUNTIME_REPO = "febilly/realtime-subtitle-local-runtime"
+LOCAL_RUNTIME_REVISION = "dc80402dfe3d6be8d90c93c60bd67a77a4c36115"
+LLAMA_RUNTIME_ZIP = f"llama-{LLAMA_CPP_TAG}-bin-win-vulkan-x64-min.zip"
+LLAMA_RUNTIME_ZIP_SHA256 = "b007fea086a8a788cc9e266b236cb27b750fa76e20fc45453f995a10d3856f25"
+SILERO_VAD_ONNX_SHA256 = "7ed98ddbad84ccac4cd0aeb3099049280713df825c610a8ed34543318f1b2c49"
+LEGACY_QWEN3_ASR_DIR_NAME = "qwen3-asr"
+LEGACY_QWEN3_ASR_FILES = (
     "qwen3_asr_encoder_frontend.int4.onnx",
     "qwen3_asr_encoder_backend.int4.onnx",
     "qwen3_asr_llm.q4_k.gguf",
-]
-
-QWEN3_ASR_DIR_NAME = "qwen3-asr"
-
-# HaujetZhao/Qwen3-ASR-GGUF zip 内仅有 Encoder ONNX×2 + Decoder GGUF；llama.cpp Vulkan DLL 由 download_qwen3_asr() / prefetch_llama_cpp_vulkan_for_pyinstaller_bundle() 从 ggml-org 拉取，不进 Git（手动 workflow「Pack Local Inference model bundles」或本机运行同上函数下载）。
-QWEN3_ASR_MODEL_URL = (
-    "https://github.com/HaujetZhao/Qwen3-ASR-GGUF/releases/download/models/"
-    "Qwen3-ASR-1.7B-gguf.zip"
 )
+LEGACY_RUNTIME_DIR_NAME = "qwen_llama_vulkan_bin"
+LEGACY_ARCHIVE_PATTERNS = ("qwen3-asr-1.7b-gguf.zip*", "llama-cpp-vulkan-*.zip*", "llama-cpp-vulkan.zip*")
+
 LLAMA_CPP_DLL_URL_TEMPLATE = (
     "https://github.com/ggml-org/llama.cpp/releases/download/{tag}/"
     "llama-{tag}-bin-win-vulkan-x64.zip"
@@ -168,7 +192,7 @@ LLAMA_CPP_DLL_URL_TEMPLATE = (
 # 固定版本，不跟随最新 nightly：vendor 下的 ctypes 绑定是照这一版的 ABI 写的，llama.cpp
 # 的 struct 布局隔几百个构建就会变，跟着 latest 走等于把静默传错参数的风险留给实时链路。
 # 升级要连同 vendor/qwen_asr_gguf 一起验证后再改这里。
-LLAMA_CPP_PINNED_TAG = "b8391"
+LLAMA_CPP_PINNED_TAG = LLAMA_CPP_TAG
 # 新版 llama.cpp 把 MSVC 的 libomp140.x86_64.dll 换成了 LLVM 的 libomp.dll，两种都认
 LLAMA_CPP_OPENMP_DLLS = ("libomp140.x86_64.dll", "libomp.dll")
 
@@ -182,7 +206,7 @@ SILERO_VAD_ONNX_URL = (
 _MODEL_SIZE_BYTES = {
     "silero-vad": 1_300_000,
     "sensevoice": 380_000_000,
-    "qwen3-asr": 770_000_000,
+    "qwen3-asr": 2_030_000_000,
     "hymt2": 1_100_000_000,
 }
 
@@ -195,19 +219,10 @@ HF_ENDPOINT_OFFICIAL = "https://huggingface.co"
 # huggingface.co 不通时按顺序回退的镜像站（与官方站同构，resolve 路径一致）
 HF_ENDPOINT_MIRRORS = ("https://hf-mirror.com",)
 
-_QWEN3_VENDOR_URLS = {
-    "asr_engine.py": "https://raw.githubusercontent.com/TheDeathDragon/LiveTranslate/main/qwen_asr_gguf/asr_engine.py",
-    "inference/asr.py": "https://raw.githubusercontent.com/TheDeathDragon/LiveTranslate/main/qwen_asr_gguf/inference/asr.py",
-    "inference/schema.py": "https://raw.githubusercontent.com/TheDeathDragon/LiveTranslate/main/qwen_asr_gguf/inference/schema.py",
-    "inference/encoder.py": "https://raw.githubusercontent.com/TheDeathDragon/LiveTranslate/main/qwen_asr_gguf/inference/encoder.py",
-    "inference/llama.py": "https://raw.githubusercontent.com/TheDeathDragon/LiveTranslate/main/qwen_asr_gguf/inference/llama.py",
-    "inference/utils.py": "https://raw.githubusercontent.com/TheDeathDragon/LiveTranslate/main/qwen_asr_gguf/inference/utils.py",
-}
-
 
 def _qwen_vendor_files_complete(base_dir: Path) -> bool:
-    required = list(_QWEN3_VENDOR_URLS) + ["__init__.py", "inference/__init__.py"]
-    return all((base_dir / relative_path).is_file() for relative_path in required)
+    return all((base_dir / name).is_file() for name in
+               ("__init__.py", "inference/__init__.py", "inference/llama.py"))
 
 
 def apply_cache_env() -> None:
@@ -218,34 +233,7 @@ def apply_cache_env() -> None:
 
 
 def _qwen_vendor_package_dir() -> Path:
-    """Qwen 胶水代码：开发态用仓库 vendor；冻结构建优先用打包进 _MEIPASS 的只读副本，完整则不再依赖 local_asr_models 或联网下载。"""
-    if not getattr(sys, "frozen", False):
-        return VENDOR_DIR / "qwen_asr_gguf"
-    bundle = VENDOR_DIR / "qwen_asr_gguf"
-    if bundle.is_dir() and _qwen_vendor_files_complete(bundle):
-        return bundle
-    return MODELS_DIR / "vendor" / "qwen_asr_gguf"
-
-
-def _seed_qwen_vendor_from_bundle(dest: Path) -> None:
-    """将 exe 内只读 vendor 树合并复制到 dest，避免首次运行向 _MEIPASS 下载且重启后丢失。"""
-    if not getattr(sys, "frozen", False):
-        return
-    bundle_root = VENDOR_DIR / "qwen_asr_gguf"
-    if not bundle_root.is_dir():
-        return
-    binary_suffixes = {".dll", ".so", ".dylib"}
-    for path in bundle_root.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.suffix.lower() in binary_suffixes:
-            continue
-        rel = path.relative_to(bundle_root)
-        dst = dest / rel
-        if dst.exists():
-            continue
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, dst)
+    return VENDOR_DIR / "qwen_asr_gguf"
 
 
 def _silero_onnx_bundle_path() -> Path:
@@ -307,50 +295,20 @@ def _llama_cpp_vulkan_url() -> str:
 
 def _ensure_llama_cpp_vulkan_to(bin_dir: Path, progress_callback=None, *,
                                 allow_vendor_copy: bool = True) -> None:
-    """若 bin_dir 中缺少 llama/ggml 主库，则从 ggml-org llama.cpp win-vulkan x64 release 解压写入。
-
-    ``allow_vendor_copy=False`` 时忽略包内 vendor/bin 那份：打包资源 zip 需要 DLL 实际落在
-    bin_dir 里，不能因为本机 vendor 目录里有一份就跳过。
-    """
-    import zipfile
-
-    if sys.platform != "win32":
-        logger.info("Skipping llama.cpp Vulkan bundle download on %s", sys.platform)
+    if _runtime_ready(bin_dir):
         return
-
-    required_dlls = ["llama.dll", "ggml.dll", "ggml-base.dll"]
-    if _llama_vulkan_bin_has_core_dlls(bin_dir):
+    if allow_vendor_copy and _runtime_ready(_qwen_llama_vulkan_vendor_bin()):
         return
-    if allow_vendor_copy and _llama_vulkan_bin_has_core_dlls(_qwen_llama_vulkan_vendor_bin()):
-        # 打包版可能把运行时放在包内 vendor/bin：那份 _qwen3_llama_bin_dir() 已经会用，
-        # 不必再从 GitHub 拉一份（那边被墙时还会让整个下载算作失败）
-        logger.info("llama.cpp Vulkan 运行时已随程序打包，跳过下载")
-        return
-
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    dll_zip = MODELS_DIR / "llama-cpp-vulkan.zip"
-    _download_file(_llama_cpp_vulkan_url(), dll_zip,
-                   f"llama.cpp Vulkan 运行时 {LLAMA_CPP_PINNED_TAG}", progress_callback)
-    _report(progress_callback, "解压 llama.cpp Vulkan 运行时", 0, None)
-    with zipfile.ZipFile(str(dll_zip), "r") as archive:
-        for member in archive.namelist():
-            basename = os.path.basename(member)
-            if basename in required_dlls or (
-                basename.startswith("ggml-") and basename.endswith(".dll")
-            ) or (
-                basename.startswith("libomp") and basename.endswith(".dll")
-            ):
-                with archive.open(member) as src, open(bin_dir / basename, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
-    dll_zip.unlink(missing_ok=True)
-    logger.info("llama.cpp Vulkan DLLs extracted to %s", bin_dir)
+    _download_llama_runtime(bin_dir, progress_callback)
+    if not _runtime_ready(bin_dir):
+        raise RuntimeError(f"Incomplete llama.cpp {LLAMA_CPP_TAG} runtime: {bin_dir}")
 
 
 def prefetch_llama_cpp_vulkan_for_pyinstaller_bundle() -> None:
-    """将 llama.cpp Vulkan DLL 写入 local_inference/models/qwen_llama_vulkan_bin，供 Qwen3 资源 zip（手动 workflow）或本机缓存。"""
+    """将 b11985 Vulkan runtime 写入用户模型目录，供资源包或本机使用。"""
     apply_cache_env()
     ensure_vendor_sources("qwen3-asr")
-    # 资源 zip 是按 local_asr_models/qwen_llama_vulkan_bin 打的，必须真的下到那里
+    # 资源包需要运行时真实落在用户目录，不能跳过到只读包。
     _ensure_llama_cpp_vulkan_to(_qwen_llama_vulkan_user_bin(), allow_vendor_copy=False)
 
 
@@ -365,50 +323,15 @@ def prefetch_sensevoice_for_pyinstaller_bundle() -> None:
     _download_sensevoice_onnx(dest)
 
 
-def _write_text_if_missing(path: Path, content: str) -> None:
-    if path.exists():
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-def _download_text_file(url: str, dest: Path) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    logger.info("Downloading vendor source: %s", dest.name)
-    request = Request(url, headers={"User-Agent": "Yakutan"})
-    with urlopen(request, timeout=60) as response:
-        dest.write_bytes(response.read())
-
-
-def _ensure_qwen_vendor_scaffold(base_dir: Path) -> None:
-    _write_text_if_missing(
-        base_dir / "__init__.py",
-        "import logging\n\nlogger = logging.getLogger('Yakutan.LocalInference.Qwen3')\n",
-    )
-    _write_text_if_missing(
-        base_dir / "inference" / "__init__.py",
-        "from .. import logger as logger  # noqa: F401\n",
-    )
-
-
 def ensure_vendor_sources(engine: str) -> Path | None:
     if engine == "sensevoice":
         return None
-
-    if engine == "qwen3-asr":
-        base_dir = _qwen_vendor_package_dir()
-        if _qwen_vendor_files_complete(base_dir):
-            return base_dir
-        if getattr(sys, "frozen", False):
-            _seed_qwen_vendor_from_bundle(base_dir)
-        _ensure_qwen_vendor_scaffold(base_dir)
-        for relative_path, url in _QWEN3_VENDOR_URLS.items():
-            dest = base_dir / relative_path
-            if not dest.exists():
-                _download_text_file(url, dest)
-        return base_dir
-
-    raise ValueError(f"Unknown local ASR engine: {engine}")
+    if engine != "qwen3-asr":
+        raise ValueError(f"Unknown local ASR engine: {engine}")
+    package = _qwen_vendor_package_dir()
+    if not _qwen_vendor_files_complete(package):
+        raise RuntimeError("Qwen3-ASR Python bindings are missing; reinstall Yakutan")
+    return package
 
 
 def _vendor_ready(engine: str) -> bool:
@@ -439,7 +362,7 @@ def _ms_model_path(org: str, name: str) -> Path:
 def get_local_model_path(engine: str) -> str | None:
     if engine == "qwen3-asr":
         model_dir = MODELS_DIR / QWEN3_ASR_DIR_NAME
-        return str(model_dir) if model_dir.exists() else None
+        return str(model_dir) if _qwen_model_ready(model_dir) else None
     if engine == "sensevoice":
         resolved = sensevoice_onnx_model_dir()
         return str(resolved) if resolved else None
@@ -465,13 +388,7 @@ def get_local_model_path(engine: str) -> str | None:
 
 
 def is_qwen3_asr_ready() -> bool:
-    model_dir = MODELS_DIR / QWEN3_ASR_DIR_NAME
-    if not model_dir.exists():
-        return False
-    for filename in QWEN3_ASR_FILES:
-        if not (model_dir / filename).exists():
-            return False
-    return _llama_vulkan_bin_has_core_dlls(_qwen3_llama_bin_dir())
+    return get_qwen3_asr_files() is not None and _runtime_ready(_qwen3_llama_bin_dir())
 
 
 def is_asr_models_ready(engine: str) -> bool:
@@ -533,14 +450,20 @@ def get_missing_models(engine: str) -> list[dict]:
 
 
 def download_silero(progress_callback=None) -> None:
-    apply_cache_env()
     if is_silero_cached():
-        logger.info("Silero VAD ONNX already present")
         return
     dest = _silero_onnx_user_path()
-    logger.info("Downloading Silero VAD (ONNX)...")
-    _download_file(SILERO_VAD_ONNX_URL, dest, "Silero VAD", progress_callback)
-    logger.info("Silero VAD downloaded to %s", dest)
+    try:
+        _download_hf_file(
+            LOCAL_RUNTIME_REPO, SILERO_VAD_ONNX_NAME, dest, "silero", progress_callback,
+            revision=LOCAL_RUNTIME_REVISION, sha256=SILERO_VAD_ONNX_SHA256,
+        )
+    except Exception as exc:
+        logger.warning("Silero VAD download from HF failed, trying GitHub: %s", exc)
+        _download_file(SILERO_VAD_ONNX_URL, dest, "silero", progress_callback)
+    if _sha256_file(dest) != SILERO_VAD_ONNX_SHA256:
+        dest.unlink(missing_ok=True)
+        raise OSError("Silero VAD sha256 mismatch")
 
 
 def _download_file(url: str, dest: Path, desc: str = "", progress_callback=None) -> None:
@@ -700,56 +623,18 @@ def _verify_or_discard(part: Path, expected_bytes: int | None, magic: bytes | No
         raise
 
 
-def _extract_members(archive, members, dest_dir: Path, total: int | None,
-                     progress_callback=None, stage: str = "解压 Qwen3-ASR 模型") -> None:
-    """把 zip 里的成员平铺写入 dest_dir，并按写出的字节数报进度。"""
-    done = 0
-    last_report = 0.0
-    for member in members:
-        with archive.open(member) as src, open(dest_dir / os.path.basename(member), "wb") as dst:
-            while True:
-                chunk = src.read(_DOWNLOAD_CHUNK_BYTES)
-                if not chunk:
-                    break
-                dst.write(chunk)
-                done += len(chunk)
-                now = time.monotonic()
-                if now - last_report >= _PROGRESS_INTERVAL_SEC:
-                    last_report = now
-                    _report(progress_callback, stage, done, total)
-    _report(progress_callback, stage, done, total)
-
-
 def download_qwen3_asr(progress_callback=None) -> None:
-    apply_cache_env()
-    ensure_vendor_sources("qwen3-asr")
-
-    import zipfile
-
+    variant = qwen3_asr_variant()
     model_dir = MODELS_DIR / QWEN3_ASR_DIR_NAME
     model_dir.mkdir(parents=True, exist_ok=True)
-    bin_dir = _qwen_llama_vulkan_user_bin()
-    bin_dir.mkdir(parents=True, exist_ok=True)
-
-    if any(not (model_dir / filename).exists() for filename in QWEN3_ASR_FILES):
-        zip_path = MODELS_DIR / "qwen3-asr-1.7b-gguf.zip"
-        _download_file(QWEN3_ASR_MODEL_URL, zip_path, "Qwen3-ASR 模型", progress_callback)
-        with zipfile.ZipFile(str(zip_path), "r") as archive:
-            members = [m for m in archive.namelist() if os.path.basename(m) in QWEN3_ASR_FILES]
-            # 解压 770MB 要几十秒；按已写出的字节报进度，免得界面卡在 100% 上不动
-            total = sum(archive.getinfo(member).file_size for member in members)
-            _extract_members(archive, members, model_dir, total, progress_callback)
-        zip_path.unlink(missing_ok=True)
-
-    if sys.platform == "win32":
-        _ensure_llama_cpp_vulkan_to(bin_dir, progress_callback)
-    else:
-        # Linux runtime still expects system OpenMP libraries (e.g. libgomp/libomp).
-        required_so = ["libllama.so", "libggml.so", "libggml-base.so"]
-        if any(not (bin_dir / filename).exists() for filename in required_so):
-            logger.warning(
-                "Qwen3 llama.cpp Linux .so not auto-downloaded; place them under %s or use system libs",
-                bin_dir,
+    _ensure_llama_cpp_vulkan_to(_qwen_llama_vulkan_user_bin(), progress_callback)
+    for key, stage in (("mmproj", "qwen3-asr-encoder"), ("decoder", "qwen3-asr")):
+        filename = variant[key]
+        dest = model_dir / filename
+        if not dest.is_file():
+            _download_hf_file(
+                variant["repo"], filename, dest, stage, progress_callback,
+                revision=variant["revision"], sha256=variant["sha256"].get(filename),
             )
 
 
@@ -858,7 +743,8 @@ def get_hymt2_status() -> dict:
         "display_name": "Hy-MT2 1.8B",
         "model_file": hymt2_path.name if hymt2_path else None,
         "model_path": str(hymt2_path) if hymt2_path else None,
-        "ready": hymt2_path is not None,
+        "ready": hymt2_path is not None and _runtime_ready(_qwen3_llama_bin_dir()),
+        "runtime_ready": _runtime_ready(_qwen3_llama_bin_dir()),
         "runtime_issues": get_common_runtime_issues(),
     }
 
@@ -895,4 +781,187 @@ def get_all_local_models_status() -> dict:
     return {
         "asr": asr_engines,
         "translation": translation_engines,
+        "legacy": get_legacy_files_status(),
     }
+
+
+def qwen3_asr_variant() -> dict:
+    import config
+
+    size = str(getattr(config, "LOCAL_QWEN_ASR_MODEL", "1.7B") or "1.7B")
+    variant = dict(QWEN3_ASR_VARIANTS.get(size) or QWEN3_ASR_VARIANTS["1.7B"])
+    # Experiments: other files in the same folder, without touching the table.
+    for key, name in (("decoder", "LOCAL_QWEN_ASR_DECODER_FILE"), ("mmproj", "LOCAL_QWEN_ASR_MMPROJ_FILE")):
+        override = str(getattr(config, name, "") or "").strip()
+        if override:
+            variant[key] = override
+    return variant
+
+
+def _qwen_model_ready(path: Path) -> bool:
+    variant = qwen3_asr_variant()
+    return path.is_dir() and all((path / variant[key]).is_file() for key in ("decoder", "mmproj"))
+
+
+def _runtime_names() -> tuple[str, ...]:
+    if sys.platform == "win32":
+        return ("llama.dll", "ggml.dll", "ggml-base.dll", "ggml-vulkan.dll", "mtmd.dll")
+    return ("libllama.so", "libggml.so", "libggml-base.so", "libmtmd.so")
+
+
+def get_qwen3_asr_files(model_dir: str | None = None) -> tuple[Path, Path] | None:
+    """(decoder GGUF, mmproj GGUF) of the configured variant, or None when not downloaded."""
+    base = Path(model_dir) if model_dir else None
+    if base is None:
+        found = get_local_model_path("qwen3-asr")
+        if not found:
+            return None
+        base = Path(found)
+    variant = qwen3_asr_variant()
+    decoder, mmproj = base / variant["decoder"], base / variant["mmproj"]
+    return (decoder, mmproj) if decoder.is_file() and mmproj.is_file() else None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(_DOWNLOAD_CHUNK_BYTES), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _download_hf_file(repo_id: str, filename: str, dest: Path, stage: str, progress_callback=None,
+                      *, revision: str = "main", sha256: str | None = None) -> None:
+    failures: list[str] = []
+    for endpoint in _ordered_hf_endpoints(repo_id, filename):
+        host = urlparse(endpoint).netloc or endpoint
+        try:
+            logger.info("Downloading %s from %s", filename, host)
+            _stream_download(_hf_file_url(endpoint, repo_id, filename, revision), dest, stage, progress_callback)
+            if sha256 and _sha256_file(dest) != sha256:
+                dest.unlink(missing_ok=True)
+                raise OSError("sha256 mismatch")
+            return
+        except Exception as exc:
+            logger.warning("%s download from %s failed: %s", filename, host, exc)
+            failures.append(f"{host}: {exc}")
+    raise RuntimeError(f"{filename} download failed (" + "; ".join(failures) + ")")
+
+
+def _download_llama_runtime(destination: Path, progress_callback=None) -> None:
+    if _runtime_ready(destination):
+        return
+    if sys.platform != "win32":
+        raise RuntimeError("Automatic llama.cpp runtime download is currently supported on Windows only")
+    destination.mkdir(parents=True, exist_ok=True)
+    tag = LLAMA_CPP_TAG
+    archive_path = MODELS_DIR / LLAMA_RUNTIME_ZIP
+    try:
+        _download_hf_file(
+            LOCAL_RUNTIME_REPO, LLAMA_RUNTIME_ZIP, archive_path, "llama-runtime", progress_callback,
+            revision=LOCAL_RUNTIME_REVISION, sha256=LLAMA_RUNTIME_ZIP_SHA256,
+        )
+    except Exception as exc:
+        logger.warning("llama.cpp runtime download from HF failed, trying GitHub: %s", exc)
+        archive_path = MODELS_DIR / f"llama-cpp-vulkan-{tag}.zip"
+        _download_file(
+            LLAMA_CPP_DLL_URL_TEMPLATE.format(tag=tag), archive_path, "llama-runtime", progress_callback,
+        )
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        for member in archive.namelist():
+            name = os.path.basename(member)
+            if not name:
+                continue
+            if name in _runtime_names() or (
+                name.endswith(".dll") and name.startswith(("ggml-", "libomp"))
+            ):
+                with archive.open(member) as source, open(destination / name, "wb") as target:
+                    shutil.copyfileobj(source, target)
+    archive_path.unlink(missing_ok=True)
+
+
+def _legacy_files() -> list[Path]:
+    """Known obsolete files in Yakutan's own model root; never follow links."""
+    found: list[Path] = []
+    model_dir = MODELS_DIR / LEGACY_QWEN3_ASR_DIR_NAME
+    found.extend(model_dir / name for name in LEGACY_QWEN3_ASR_FILES)
+    runtime_dir = MODELS_DIR / LEGACY_RUNTIME_DIR_NAME
+    runtime_stems = {"llama", "ggml", "ggml-base", "ggml-cpu", "ggml-vulkan",
+                     "libllama", "libggml", "libggml-base", "libggml-cpu", "libggml-vulkan",
+                     "ggml-rpc", "libomp", "libomp140.x86_64"}
+    runtime_stems.update(f"ggml-cpu-{arch}" for arch in (
+        "alderlake", "cannonlake", "cascadelake", "cooperlake", "haswell", "icelake",
+        "ivybridge", "piledriver", "sandybridge", "sapphirerapids", "skylakex", "sse42", "x64", "zen4",
+    ))
+    if runtime_dir.is_dir():
+        found.extend(
+            path for path in runtime_dir.iterdir()
+            if path.suffix.lower() in (".dll", ".so")
+            and path.stem.lower() in runtime_stems
+        )
+    if MODELS_DIR.is_dir():
+        found.extend(
+            path for pattern in LEGACY_ARCHIVE_PATTERNS for path in MODELS_DIR.glob(pattern)
+            if LLAMA_CPP_TAG not in path.name
+        )
+    root = MODELS_DIR.resolve()
+    return [path for path in found if path.is_file() and not path.is_symlink()
+            and path.resolve().is_relative_to(root)
+            and not path.parent.is_symlink()
+            and not getattr(path.parent, "is_junction", lambda: False)()]
+
+
+def qwen3_required_paths(models_root: Path) -> list[Path]:
+    """Pure path calculation shared by health checks and the standalone launcher."""
+    variant = qwen3_asr_variant()
+    model_dir = models_root / QWEN3_ASR_DIR_NAME
+    paths = [model_dir / variant[key] for key in ("decoder", "mmproj")]
+    return paths + llama_runtime_required_paths(models_root)
+
+
+def llama_runtime_required_paths(models_root: Path) -> list[Path]:
+    runtime_dir = models_root / QWEN_LLAMA_VULKAN_BIN_DIR_NAME
+    paths = [runtime_dir / name for name in _runtime_names()]
+    if sys.platform == "win32":
+        openmp = next((name for name in LLAMA_CPP_OPENMP_DLLS
+                       if (runtime_dir / name).is_file()), "libomp.dll")
+        paths.append(runtime_dir / openmp)
+    return paths
+
+
+def get_legacy_files_status() -> dict:
+    files = _legacy_files()
+    return {
+        "bytes": sum(path.stat().st_size for path in files),
+        "count": len(files),
+        "models_dir": str(MODELS_DIR.resolve()),
+        "can_cleanup": is_qwen3_asr_ready(),
+    }
+
+
+def remove_legacy_files() -> dict:
+    """Delete the old model and runtime; a file still in use (old version running) stays."""
+    removed_bytes = 0
+    failed: list[str] = []
+    for path in _legacy_files():
+        try:
+            size = path.stat().st_size
+            path.unlink()
+            removed_bytes += size
+        except OSError as exc:
+            logger.warning("Could not delete %s: %s", path, exc)
+            failed.append(path.name)
+    for name in (LEGACY_QWEN3_ASR_DIR_NAME, LEGACY_RUNTIME_DIR_NAME):
+        directory = MODELS_DIR / name
+        if (directory.is_symlink() or getattr(directory, "is_junction", lambda: False)()
+                or not directory.resolve().is_relative_to(MODELS_DIR.resolve())):
+            continue
+        try:
+            directory.rmdir()
+        except OSError:
+            pass  # missing, or holds files that are not ours
+    return {"removed_bytes": removed_bytes, "failed": failed}
+
+
+def _runtime_ready(path: Path) -> bool:
+    return _llama_vulkan_bin_has_core_dlls(path)

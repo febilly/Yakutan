@@ -1,6 +1,6 @@
 name: Pack Local Inference model bundles
 
-# 仅手动运行：生成 SenseVoice ONNX 与 Qwen3-ASR（ONNX+GGUF+Vulkan DLL）两个资源 zip，
+# 仅手动运行：生成 SenseVoice ONNX 与 Qwen3-ASR（Q6_K GGUF+Q8_0 mmproj+b11985 Vulkan DLL）两个资源 zip，
 # 上传到指定 GitHub Release。**不上传** Actions artifact。
 
 on:
@@ -102,7 +102,7 @@ jobs:
         shell: pwsh
         run: |
           $qwenSrc = $null
-          foreach ($rel in @("local_asr_models/qwen3-asr", "local_inference/models/qwen3-asr")) {
+          foreach ($rel in @("local_asr_models/qwen3-asr-gguf", "local_inference/models/qwen3-asr-gguf")) {
             $candidate = Join-Path "." $rel
             if (Test-Path $candidate) {
               $qwenSrc = $candidate
@@ -110,17 +110,16 @@ jobs:
             }
           }
           if (-not $qwenSrc) {
-            throw "缺少 Qwen3-ASR 模型目录（已检查 local_asr_models/qwen3-asr 与 local_inference/models/qwen3-asr）"
+            throw "缺少 Qwen3-ASR 模型目录（已检查 local_asr_models/qwen3-asr-gguf 与 local_inference/models/qwen3-asr-gguf）"
           }
           foreach ($f in @(
-            "qwen3_asr_encoder_frontend.int4.onnx",
-            "qwen3_asr_encoder_backend.int4.onnx",
-            "qwen3_asr_llm.q4_k.gguf"
+            "Qwen3-ASR-1.7B.Q6_K.gguf",
+            "Qwen3-ASR-1.7B.mmproj-Q8_0.gguf"
           )) {
             if (-not (Test-Path (Join-Path $qwenSrc $f))) { throw "缺少 Qwen 模型文件: $f" }
           }
           $qwenBinSrc = $null
-          foreach ($rel in @("local_asr_models/qwen_llama_vulkan_bin", "local_inference/models/qwen_llama_vulkan_bin")) {
+          foreach ($rel in @("local_asr_models/llama_vulkan_b11985", "local_inference/models/llama_vulkan_b11985")) {
             $candidate = Join-Path "." $rel
             if (Test-Path $candidate) {
               $qwenBinSrc = $candidate
@@ -128,9 +127,9 @@ jobs:
             }
           }
           if (-not $qwenBinSrc) {
-            throw "缺少 Qwen Vulkan DLL 目录（已检查 local_asr_models/qwen_llama_vulkan_bin 与 local_inference/models/qwen_llama_vulkan_bin）"
+            throw "缺少 Qwen Vulkan DLL 目录（已检查 local_asr_models/llama_vulkan_b11985 与 local_inference/models/llama_vulkan_b11985）"
           }
-          foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll")) {
+          foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll", "ggml-vulkan.dll", "mtmd.dll")) {
             if (-not (Test-Path (Join-Path $qwenBinSrc $f))) { throw "缺少 llama Vulkan DLL: $f" }
           }
           # 新版 llama.cpp 把 libomp140.x86_64.dll 换成了 libomp.dll，两种都算数
@@ -139,10 +138,10 @@ jobs:
           }
           $stageRoot = Join-Path "./dist" "_qwen_pack_layout"
           $bundleRoot = Join-Path $stageRoot "zip_root"
-          $qwenDest = Join-Path $bundleRoot "local_asr_models/qwen3-asr"
+          $qwenDest = Join-Path $bundleRoot "local_asr_models/qwen3-asr-gguf"
           New-Item -ItemType Directory -Path $qwenDest -Force | Out-Null
           Copy-Item -Path (Join-Path $qwenSrc "*") -Destination $qwenDest -Force
-          $qwenBinDest = Join-Path $bundleRoot "local_asr_models/qwen_llama_vulkan_bin"
+          $qwenBinDest = Join-Path $bundleRoot "local_asr_models/llama_vulkan_b11985"
           New-Item -ItemType Directory -Path $qwenBinDest -Force | Out-Null
           Copy-Item -Path (Join-Path $qwenBinSrc "*") -Destination $qwenBinDest -Force
           $readmeCn = "请把local_asr_models文件夹放在与主程序exe同级目录下"
@@ -162,8 +161,8 @@ jobs:
           if (-not (Test-Path (Join-Path $hymt2Src $modelFile))) {
             throw "缺少 Hy-MT2 权重: $modelFile"
           }
-          $hymt2BinSrc = "./local_asr_models/qwen_llama_vulkan_bin"
-          foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll")) {
+          $hymt2BinSrc = "./local_asr_models/llama_vulkan_b11985"
+          foreach ($f in @("llama.dll", "ggml.dll", "ggml-base.dll", "ggml-vulkan.dll", "mtmd.dll")) {
             if (-not (Test-Path (Join-Path $hymt2BinSrc $f))) { throw "缺少 llama Vulkan DLL: $f" }
           }
           if (-not (Get-ChildItem -Path $hymt2BinSrc -Filter "libomp*.dll")) {
@@ -175,10 +174,10 @@ jobs:
           New-Item -ItemType Directory -Path $dest -Force | Out-Null
           # 排除 .part：下载中断留下的半截文件不能进包
           Copy-Item -Path (Join-Path $hymt2Src "*") -Destination $dest -Force -Exclude "*.part"
-          # Hy-MT2 与 Qwen3-ASR 共用同一套 llama.cpp 运行时。两个包各带一份（约 75MB，占
-          # 本包 7%），换来「解压即用」；只装翻译模型的用户不必再去下 Qwen 包。两个包由同一次
+          # Hy-MT2 与 Qwen3-ASR 共用同一套 b11985 运行时。两个包各带一份，
+          # 只装翻译模型的用户不必再去下 Qwen 包。两个包由同一次
           # 运行产出，文件一致，先后解压互相覆盖没有影响。
-          $binDest = Join-Path $bundleRoot "local_asr_models/qwen_llama_vulkan_bin"
+          $binDest = Join-Path $bundleRoot "local_asr_models/llama_vulkan_b11985"
           New-Item -ItemType Directory -Path $binDest -Force | Out-Null
           Copy-Item -Path (Join-Path $hymt2BinSrc "*") -Destination $binDest -Force
           $readmeCn = "请把local_asr_models文件夹放在与主程序exe同级目录下"

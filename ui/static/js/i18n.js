@@ -27,6 +27,10 @@ let currentLanguage = DEFAULT_LANGUAGE;
 // 翻译文本
 const translations = {
     'zh-CN': {
+        "btn.localLegacyCleanup": "清理旧模型/旧运行时",
+        "msg.localLegacyCleanupConfirm": "确认清理 {path} 中的旧 Qwen3-ASR 模型和运行时（{size} MiB）？请先确认新版识别与翻译已正常运行。新模型、SenseVoice 和 Hy-MT2 将保留。",
+        "msg.localLegacyCleanupPartial": "有 {count} 个文件未能删除，可能正在被旧版本使用。",
+        "msg.localLegacyCleanupFailed": "清理旧文件失败",
         // 页面标题和头部
         'page.title': 'Yakutan 控制面板',
         'header.title': '🎤 Yakutan 控制面板',
@@ -258,9 +262,9 @@ const translations = {
         'localInference.vramTotal': '合计显存',
         'label.localEncoderDevice': '音频编码器运行位置',
         'option.encoderDeviceAuto': '跟随上面的运行位置',
-        'option.encoderDeviceGpu': '显卡（DirectML）',
+        'option.encoderDeviceGpu': '显卡（llama.cpp）',
         'option.encoderDeviceCpu': 'CPU',
-        'hint.localEncoderDevice': '放显卡上明显更快（24 秒音频约 400ms → 70ms），代价是多占显存。放 CPU 则不受显卡上其他负载影响，边打游戏边用更稳。',
+        'hint.localEncoderDevice': 'mtmd 编码器可放在显卡或 CPU。显卡通常更快并占用额外显存；CPU 可减少与游戏争用显卡资源。',
         'label.sonioxKey': 'Soniox API Key（可选）',
         'hint.sonioxKey': '支持60+语言的语音识别。',
         'label.pauseOnMute': '游戏静音时暂停转录',
@@ -480,6 +484,10 @@ const translations = {
     },
 
     'en': {
+        "btn.localLegacyCleanup": "Clean old models/runtime",
+        "msg.localLegacyCleanupConfirm": "Remove old Qwen3-ASR files from {path} ({size} MiB)? Verify recognition and translation with the new version first. New models, SenseVoice and Hy-MT2 will be kept.",
+        "msg.localLegacyCleanupPartial": "Could not remove {count} files; an older version may still be using them.",
+        "msg.localLegacyCleanupFailed": "Could not clean old files",
         // Page title and header
         'page.title': 'Yakutan Control Panel',
         'header.title': '🎤 Yakutan Control Panel',
@@ -711,9 +719,9 @@ const translations = {
         'localInference.vramTotal': 'Total VRAM',
         'label.localEncoderDevice': 'Audio encoder runs on',
         'option.encoderDeviceAuto': 'Same as above',
-        'option.encoderDeviceGpu': 'GPU (DirectML)',
+        'option.encoderDeviceGpu': 'GPU (llama.cpp)',
         'option.encoderDeviceCpu': 'CPU',
-        'hint.localEncoderDevice': 'Much faster on the GPU (24s of audio: ~400ms to ~70ms) at the cost of VRAM. On CPU it is unaffected by other GPU load, which is steadier while gaming.',
+        'hint.localEncoderDevice': 'Run the mtmd encoder on GPU or CPU. GPU is usually faster and uses more VRAM; CPU reduces competition with games for GPU resources.',
         'label.sonioxKey': 'Soniox API Key (optional)',
         'hint.sonioxKey': 'Supports 60+ languages for speech recognition.',
         'label.pauseOnMute': 'Pause recognition when muted in game',
@@ -933,6 +941,10 @@ const translations = {
     },
 
     'ja': {
+        "btn.localLegacyCleanup": "旧モデル・ランタイムを削除",
+        "msg.localLegacyCleanupConfirm": "{path} の旧 Qwen3-ASR ファイル（{size} MiB）を削除しますか？先に新版の認識と翻訳を確認してください。新モデル、SenseVoice、Hy-MT2 は保持します。",
+        "msg.localLegacyCleanupPartial": "{count} 個のファイルを削除できませんでした。旧版が使用中の可能性があります。",
+        "msg.localLegacyCleanupFailed": "旧ファイルの削除に失敗しました",
         'page.title': 'Yakutan コントロールパネル',
         'header.title': '🎤 Yakutan コントロールパネル',
         'status.notRunning': 'サービス停止中',
@@ -1157,9 +1169,9 @@ const translations = {
         'localInference.vramTotal': 'VRAM 合計',
         'label.localEncoderDevice': '音声エンコーダの実行場所',
         'option.encoderDeviceAuto': '上の設定に従う',
-        'option.encoderDeviceGpu': 'GPU（DirectML）',
+        'option.encoderDeviceGpu': 'GPU（llama.cpp）',
         'option.encoderDeviceCpu': 'CPU',
-        'hint.localEncoderDevice': 'GPU に置くと大幅に速くなります（24 秒の音声で約 400ms → 70ms）が VRAM を消費します。CPU なら GPU の他の負荷に影響されず、ゲーム中でも安定します。',
+        'hint.localEncoderDevice': 'mtmd エンコーダは GPU または CPU で実行できます。GPU は通常高速ですが VRAM を使います。CPU はゲームとの GPU 競合を減らせます。',
         'label.sonioxKey': 'Soniox API Key（任意）',
         'hint.sonioxKey': '60 以上の言語の音声認識に対応しています。',
         'label.pauseOnMute': 'ゲームでミュート中は文字起こしを停止',
@@ -1374,6 +1386,10 @@ const translations = {
     },
 
     'ko': {
+        "btn.localLegacyCleanup": "이전 모델/런타임 정리",
+        "msg.localLegacyCleanupConfirm": "{path}의 이전 Qwen3-ASR 파일({size} MiB)을 삭제할까요? 새 버전의 인식과 번역을 먼저 확인하세요. 새 모델, SenseVoice, Hy-MT2는 유지됩니다.",
+        "msg.localLegacyCleanupPartial": "파일 {count}개를 삭제하지 못했습니다. 이전 버전에서 사용 중일 수 있습니다.",
+        "msg.localLegacyCleanupFailed": "이전 파일 정리에 실패했습니다",
         'page.title': 'Yakutan 제어판',
         'header.title': '🎤 Yakutan 제어판',
         'status.notRunning': '서비스 중지됨',
@@ -1598,9 +1614,9 @@ const translations = {
         'localInference.vramTotal': '총 VRAM',
         'label.localEncoderDevice': '오디오 인코더 실행 위치',
         'option.encoderDeviceAuto': '위 설정과 동일',
-        'option.encoderDeviceGpu': 'GPU(DirectML)',
+        'option.encoderDeviceGpu': 'GPU(llama.cpp)',
         'option.encoderDeviceCpu': 'CPU',
-        'hint.localEncoderDevice': 'GPU에 두면 훨씬 빠릅니다(24초 오디오 약 400ms → 70ms). 대신 VRAM을 더 씁니다. CPU는 GPU의 다른 부하에 영향받지 않아 게임 중에도 안정적입니다.',
+        'hint.localEncoderDevice': 'mtmd 인코더를 GPU 또는 CPU에서 실행합니다. GPU는 보통 더 빠르지만 VRAM을 사용하며, CPU는 게임과의 GPU 자원 경합을 줄입니다。',
         'label.sonioxKey': 'Soniox API Key (선택)',
         'hint.sonioxKey': '60개 이상의 언어 음성 인식을 지원합니다.',
         'label.pauseOnMute': '게임 음소거 시 전사 일시중지',

@@ -1,6 +1,6 @@
 numpy>=1.24.0
-# 1.29 targets CUDA 13.  gpu4038 has CUDA 12 and the matching cuDNN 9 runtime.
-onnxruntime-gpu==1.20.2
+# Qwen3-ASR uses native llama.cpp; ONNX is only needed by CPU SenseVoice/Silero.
+onnxruntime>=1.19.0
 kaldi_native_fbank
 protobuf>=3.19.6
 sentencepiece>=0.2.0

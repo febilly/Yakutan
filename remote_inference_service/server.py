@@ -66,22 +66,20 @@ def _require_dir(value: str, label: str) -> Path:
 
 def configure_runtime(runtime_root: Path, models_root: Path) -> None:
     sys.path.insert(0, str(runtime_root))
-    os.environ["YAKUTAN_QWEN_LLAMA_BIN"] = str(models_root / "qwen_llama_vulkan_bin")
-    os.environ["YAKUTAN_LLAMA_ABI_PROFILE"] = "cuda-2026-08"
-    os.environ.pop("GGML_VK_ALLOW_SYSMEM_FALLBACK", None)
+    # Both platforms must use the b11985 ABI; never reuse the older CUDA structs.
+    os.environ.pop("YAKUTAN_LLAMA_ABI_PROFILE", None)
     import config
     from local_inference import model_manager
 
     model_manager.MODELS_DIR = models_root
+    model_manager.prepare_qwen_llama_runtime_env()
     config.LOCAL_INFERENCE_DEVICE = "auto"
-    # CUDA EP is preferred on the server; encoder.py safely falls back to CPU
-    # until onnxruntime-gpu is present.
-    os.environ["YAKUTAN_ONNX_PROVIDER"] = "cuda"
     config.LOCAL_QWEN_ENCODER_DEVICE = "gpu"
     config.LOCAL_QWEN_LOG_PIPELINE_TIMING = True
 
 
 def _model_status(models_root: Path) -> dict[str, dict[str, Any]]:
+    from local_inference.model_manager import qwen3_required_paths
     expected = {
         "sensevoice": [
             models_root / "sensevoice-onnx" / "am.mvn",
@@ -89,12 +87,7 @@ def _model_status(models_root: Path) -> dict[str, dict[str, Any]]:
             models_root / "sensevoice-onnx" / "sense-voice-encoder-int8.onnx",
             models_root / "sensevoice-onnx" / "chn_jpn_yue_eng_ko_spectok.bpe.model",
         ],
-        "qwen3-asr": [
-            models_root / "qwen3-asr" / "qwen3_asr_encoder_frontend.int4.onnx",
-            models_root / "qwen3-asr" / "qwen3_asr_encoder_backend.int4.onnx",
-            models_root / "qwen3-asr" / "qwen3_asr_llm.q4_k.gguf",
-            models_root / "qwen_llama_vulkan_bin" / "libllama.so",
-        ],
+        "qwen3-asr": qwen3_required_paths(models_root),
         "hymt2": list((models_root / "hymt2").glob("*.gguf")),
     }
     result: dict[str, dict[str, Any]] = {}

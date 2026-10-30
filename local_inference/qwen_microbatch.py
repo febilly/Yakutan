@@ -66,7 +66,7 @@ class QwenMicroBatchEngine:
         if self.core is None:
             raise RuntimeError("Qwen base engine is unavailable")
         self.m = self.core.llama_mod
-        self.max_sequences = max(1, int(max_sequences))
+        self.max_sequences = min(64, max(1, int(max_sequences)))
         self.n_ctx_per_sequence = max(256, int(n_ctx_per_sequence))
         # n_ctx is the aggregate KV budget; n_seq_max enables distinct sequence
         # IDs within that one context.  Model weights remain in ``core.model``.
@@ -77,6 +77,8 @@ class QwenMicroBatchEngine:
             n_ubatch=512,
             n_seq_max=self.max_sequences,
             embeddings=False,
+            n_outputs_max=64,
+            type_kv=8 if getattr(config, "LOCAL_QWEN_ASR_KV_Q8", True) else None,
         )
         seq_rm = self.m.llama.llama_memory_seq_rm
         seq_rm.argtypes = [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32]
@@ -153,6 +155,20 @@ class QwenMicroBatchEngine:
 
         if not active:
             return
+        # A full speculative draft needs 64 logits rows. Consume each sub-batch
+        # before decoding the next, so no round can grow the shared output buffer.
+        group = []
+        rows = 0
+        for state, tokens in active:
+            if group and rows + len(tokens) > 64:
+                self._decode_active(group)
+                group, rows = [], 0
+            group.append((state, tokens))
+            rows += len(tokens)
+        if group:
+            self._decode_active(group)
+
+    def _decode_active(self, active: list[tuple[_Sequence, list[int]]]) -> None:
         total = sum(len(tokens) for _, tokens in active)
         batch = self.m.LlamaBatch(max(total * 4, 256), 0, self.max_sequences)
         try:
@@ -208,8 +224,8 @@ class QwenMicroBatchEngine:
         if len(requests) > self.max_sequences:
             raise ValueError("Qwen microbatch exceeds configured sequence count")
         t_batch_start = time.perf_counter()
-        # This is a real ONNX batch.  The audio side no longer issues one GPU
-        # encoder execution per WebSocket request.
+        # The shared mtmd encoder serializes audio calls; the text decoder batches
+        # them using independent sequence IDs and a bounded logits buffer.
         embeddings, encoder_seconds = self.core.encoder.encode_batch([request.audio for request in requests])
         states: list[_Sequence] = []
         try:

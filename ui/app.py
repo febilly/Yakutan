@@ -1198,6 +1198,22 @@ def get_local_inference_download_progress():
     return jsonify({'success': True, **_snapshot_local_inference_download_state()})
 
 
+@app.route('/api/local-inference/legacy-cleanup', methods=['POST'])
+def cleanup_legacy_local_models():
+    if not is_local_inference_build_enabled():
+        return jsonify({'success': False, 'message': 'Local inference is disabled in this build'}), 404
+    from local_inference.model_manager import is_qwen3_asr_ready, remove_legacy_files
+    # The button is deliberately separate from download/migration. New files must
+    # be present before an explicit user action can remove the previous version.
+    with local_inference_download_lock:
+        if local_inference_download_state.get('running'):
+            return jsonify({'success': False, 'message': 'A model download is running'}), 409
+        if not is_qwen3_asr_ready():
+            return jsonify({'success': False, 'message': 'Download the new Qwen3-ASR model and runtime first'}), 409
+        result = remove_legacy_files()
+    return jsonify({'success': True, **result})
+
+
 @app.route('/api/credentials/status', methods=['GET'])
 @app.route('/api/env', methods=['GET'])
 def get_credential_status():

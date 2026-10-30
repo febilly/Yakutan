@@ -293,13 +293,16 @@ class TestOtherEnginesReportProgress:
         monkeypatch.setattr(mm, "apply_cache_env", lambda: None)
         monkeypatch.setattr(mm, "is_silero_cached", lambda: False)
         monkeypatch.setattr(mm, "_silero_onnx_user_path", lambda: dest)
-        monkeypatch.setattr(mm, "SILERO_VAD_ONNX_URL", f"{server.base_url}/silero.onnx")
+        import hashlib
+        monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda *args: [server.base_url])
+        monkeypatch.setattr(mm, "_hf_file_url", lambda *args: f"{server.base_url}/silero.onnx")
+        monkeypatch.setattr(mm, "SILERO_VAD_ONNX_SHA256", hashlib.sha256(PAYLOAD).hexdigest())
         seen = []
 
         mm.download_silero(lambda stage, done, total: seen.append((stage, done, total)))
 
         assert dest.read_bytes() == PAYLOAD
-        assert seen[-1] == ("Silero VAD", len(PAYLOAD), len(PAYLOAD))
+        assert seen[-1] == ("silero", len(PAYLOAD), len(PAYLOAD))
 
     def test_sensevoice_downloads_every_file_with_a_counter(self, server, tmp_path, monkeypatch):
         monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda repo, name: [server.base_url])
@@ -331,34 +334,25 @@ class TestOtherEnginesReportProgress:
         assert (tmp_path / mm.SENSEVOICE_ENCODER_ONNX).read_bytes() == keep
         assert len(server.requested_paths) == len(mm.SENSEVOICE_ONNX_FILES) - 1
 
-    def test_qwen3_extraction_reports_bytes(self, tmp_path, monkeypatch):
-        """解压 770MB 要几十秒；这一段没有进度的话面板会长时间停在 100%。"""
-        import zipfile
-
+    def test_qwen3_downloads_pinned_files_with_progress(self, tmp_path, monkeypatch):
         monkeypatch.setattr(mm, "MODELS_DIR", tmp_path)
-        monkeypatch.setattr(mm, "apply_cache_env", lambda: None)
-        monkeypatch.setattr(mm, "ensure_vendor_sources", lambda engine: None)
         monkeypatch.setattr(mm, "_ensure_llama_cpp_vulkan_to", lambda *a, **kw: None)
-
-        contents = {name: bytes([index]) * 1000 for index, name in enumerate(mm.QWEN3_ASR_FILES)}
-
-        def _fake_download(url, dest, desc="", progress_callback=None):
-            with zipfile.ZipFile(str(dest), "w") as archive:
-                for name, blob in contents.items():
-                    archive.writestr(f"Qwen3-ASR-1.7B/{name}", blob)
-            mm._report(progress_callback, desc, 1, 1)
-
-        monkeypatch.setattr(mm, "_download_file", _fake_download)
+        calls = []
+        def download(repo, filename, dest, stage, progress=None, **kwargs):
+            calls.append((repo, filename, kwargs))
+            dest.write_bytes(PAYLOAD)
+            mm._report(progress, stage, len(PAYLOAD), len(PAYLOAD))
+        monkeypatch.setattr(mm, "_download_hf_file", download)
         seen = []
-
-        mm.download_qwen3_asr(lambda stage, done, total: seen.append((stage, done, total)))
-
-        model_dir = tmp_path / mm.QWEN3_ASR_DIR_NAME
-        for name, blob in contents.items():
-            assert (model_dir / name).read_bytes() == blob
-        extract = [entry for entry in seen if entry[0].startswith("解压")]
-        assert extract[-1] == ("解压 Qwen3-ASR 模型", 3000, 3000)
-        assert not (tmp_path / "qwen3-asr-1.7b-gguf.zip").exists()
+        mm.download_qwen3_asr(lambda *args: seen.append(args))
+        variant = mm.qwen3_asr_variant()
+        assert len(calls) == 2
+        for repo, filename, kwargs in calls:
+            assert repo == "mradermacher/Qwen3-ASR-1.7B-GGUF"
+            assert kwargs == {"revision": variant["revision"], "sha256": variant["sha256"][filename]}
+        assert {row[0] for row in seen} == {"qwen3-asr-encoder", "qwen3-asr"}
+        mm.download_qwen3_asr()
+        assert len(calls) == 2
 
 
 # ── 面板进度：worker -> 状态快照 -> HTTP 接口 ────────────────────────────────
@@ -493,7 +487,7 @@ class TestLlamaRuntime:
             pytest.skip("只有 Windows 检查 OpenMP DLL")
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
-        for name in ("llama.dll", "ggml.dll", "ggml-base.dll", openmp_dll):
+        for name in (*mm._runtime_names(), openmp_dll):
             (bin_dir / name).write_bytes(b"MZ")
 
         assert mm._llama_vulkan_bin_has_core_dlls(bin_dir) is True
@@ -514,13 +508,14 @@ class TestLlamaRuntime:
             pytest.skip("只有 Windows 走 DLL 下载分支")
         vendor_bin = tmp_path / "vendor_bin"
         vendor_bin.mkdir()
-        for name in ("llama.dll", "ggml.dll", "ggml-base.dll", "libomp140.x86_64.dll"):
+        for name in (*mm._runtime_names(), "libomp140.x86_64.dll"):
             (vendor_bin / name).write_bytes(b"MZ")
         monkeypatch.setattr(mm, "_qwen_llama_vulkan_vendor_bin", lambda: vendor_bin)
 
         def _boom(*args, **kwargs):
             raise AssertionError("不应触发下载")
 
+        monkeypatch.setattr(mm, "_download_hf_file", _boom)
         monkeypatch.setattr(mm, "_download_file", _boom)
         mm._ensure_llama_cpp_vulkan_to(tmp_path / "user_bin")
 

@@ -41,12 +41,14 @@ BOLD = "\033[1m"
 RESET = "\033[0m"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 MODELS_ROOT = PROJECT_ROOT / "local_asr_models"
 SERVER_PY = PROJECT_ROOT / "remote_inference_service" / "server_windows.py"
 
 
 def check_models(models_dir: Path) -> dict[str, dict[str, Any]]:
-    primary_dll = "llama.dll" if sys.platform == "win32" else "libllama.so"
+    from local_inference.model_manager import qwen3_required_paths, llama_runtime_required_paths
     expected = {
         "SenseVoice (ASR 极速语音识别)": [
             models_dir / "sensevoice-onnx" / "am.mvn",
@@ -54,12 +56,7 @@ def check_models(models_dir: Path) -> dict[str, dict[str, Any]]:
             models_dir / "sensevoice-onnx" / "sense-voice-encoder-int8.onnx",
             models_dir / "sensevoice-onnx" / "chn_jpn_yue_eng_ko_spectok.bpe.model",
         ],
-        "Qwen3-ASR (高精度语音识别)": [
-            models_dir / "qwen3-asr" / "qwen3_asr_encoder_frontend.int4.onnx",
-            models_dir / "qwen3-asr" / "qwen3_asr_encoder_backend.int4.onnx",
-            models_dir / "qwen3-asr" / "qwen3_asr_llm.q4_k.gguf",
-            models_dir / "qwen_llama_vulkan_bin" / primary_dll,
-        ],
+        "Qwen3-ASR (高精度语音识别)": qwen3_required_paths(models_dir),
         "Hy-MT2 (实时流式翻译)": list((models_dir / "hymt2").glob("*.gguf")),
     }
     result = {}
@@ -67,6 +64,8 @@ def check_models(models_dir: Path) -> dict[str, dict[str, Any]]:
         missing_paths = [p for p in paths if not p.is_file()]
         if name.startswith("Hy-MT2") and not paths:
             missing_paths = [models_dir / "hymt2" / "*.gguf"]
+        elif name.startswith("Hy-MT2"):
+            missing_paths.extend(p for p in llama_runtime_required_paths(models_dir) if not p.is_file())
         result[name] = {
             "ready": len(missing_paths) == 0,
             "missing": [p.name for p in missing_paths],

@@ -80,26 +80,21 @@ def test_model_status_reports_missing_and_ready(tmp_dir: Path | None = None):
         status = _model_status(models)
         assert status["sensevoice"]["ready"] is True
 
-        # Hy-MT2：放入任意 gguf 即就绪（进程内引擎）
+        # Hy-MT2 weights alone are insufficient without the pinned runtime.
         hymt2_dir = models / "hymt2"
         hymt2_dir.mkdir(parents=True)
         (hymt2_dir / "Hy-MT2-test.gguf").write_bytes(b"x")
         status = _model_status(models)
-        assert status["hymt2"]["ready"] is True
+        assert status["hymt2"]["ready"] is False
 
-        # Qwen3-ASR：文件齐备 + Windows 下要求 llama.dll
-        qwen_dir = models / "qwen3-asr"
-        qwen_dir.mkdir(parents=True)
-        for name in ("qwen3_asr_encoder_frontend.int4.onnx",
-                     "qwen3_asr_encoder_backend.int4.onnx",
-                     "qwen3_asr_llm.q4_k.gguf"):
-            (qwen_dir / name).write_bytes(b"x")
-        vulkan_dir = models / "qwen_llama_vulkan_bin"
-        vulkan_dir.mkdir(parents=True)
-        dll_name = "llama.dll" if sys.platform == "win32" else "libllama.so"
-        (vulkan_dir / dll_name).write_bytes(b"x")
+        # New native files and the complete b11985 runtime are required.
+        from local_inference.model_manager import qwen3_required_paths
+        for path in qwen3_required_paths(models):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"x")
         status = _model_status(models)
         assert status["qwen3-asr"]["ready"] is True
+        assert status["hymt2"]["ready"] is True
 
 
 def test_session_state_defaults():

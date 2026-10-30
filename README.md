@@ -282,6 +282,11 @@ python run_ui.py
   - https://github.com/FunAudioLLM/SenseVoice
   - https://github.com/ggml-org/llama.cpp
   - https://github.com/HaujetZhao/Qwen3-ASR-GGUF
+  - https://github.com/QwenLM/Qwen3-ASR
+  - https://huggingface.co/mradermacher/Qwen3-ASR-1.7B-GGUF
+  - https://huggingface.co/febilly/realtime-subtitle-local-runtime
+
+本地与远程推理的新版模型目录、运行时版本及旧文件清理说明见 [本地推理说明](docs/local-inference.md)。
 
 ## 许可证
 

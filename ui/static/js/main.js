@@ -592,6 +592,7 @@ function renderDownloadProgress(box, state) {
 }
 
 function renderLocalInferenceStatus(payload) {
+    renderLegacyLocalModels(payload);
     const box = document.getElementById('local-inference-status');
     const button = document.getElementById('local-inference-download-btn');
     const badge = document.getElementById('local-inference-badge');
@@ -751,6 +752,40 @@ async function refreshLocalInferenceStatus() {
         renderLocalInferenceStatus(payload);
     } catch (error) {
         console.warn('获取本地模型状态失败:', error);
+    }
+}
+
+let legacyLocalModels = null;
+
+function renderLegacyLocalModels(payload) {
+    legacyLocalModels = payload?.models?.legacy || null;
+    const button = document.getElementById('local-legacy-cleanup-btn');
+    const size = document.getElementById('local-legacy-cleanup-size');
+    if (!button) return;
+    button.hidden = !legacyLocalModels?.count;
+    button.disabled = !!payload?.download?.running || !legacyLocalModels?.can_cleanup;
+    if (size) size.textContent = legacyLocalModels?.count
+        ? `${(legacyLocalModels.bytes / 1024 / 1024).toFixed(1)} MiB` : '';
+}
+
+async function cleanupLegacyLocalModels() {
+    const t = window.i18n ? window.i18n.t : (key) => key;
+    if (!legacyLocalModels?.count || !legacyLocalModels.can_cleanup) return;
+    if (!confirm(t('msg.localLegacyCleanupConfirm', {
+        path: legacyLocalModels.models_dir,
+        size: (legacyLocalModels.bytes / 1024 / 1024).toFixed(1),
+    }))) return;
+    const button = document.getElementById('local-legacy-cleanup-btn');
+    if (button) button.disabled = true;
+    try {
+        const response = await fetch(`${API_BASE}/local-inference/legacy-cleanup`, { method: 'POST' });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.message || t('msg.localLegacyCleanupFailed'));
+        if (result.failed?.length) alert(t('msg.localLegacyCleanupPartial', { count: result.failed.length }));
+    } catch (error) {
+        alert(`${t('msg.localLegacyCleanupFailed')}: ${error.message}`);
+    } finally {
+        await refreshLocalInferenceStatus();
     }
 }
 

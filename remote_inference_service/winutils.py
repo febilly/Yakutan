@@ -11,7 +11,7 @@ import socket
 REQUIRED_MODULES: list[tuple[str, str]] = [
     ("websockets", "websockets>=14.0"),
     ("numpy", "numpy>=1.24.0"),
-    ("onnxruntime", "onnxruntime / onnxruntime-directml / onnxruntime-gpu"),
+    ("onnxruntime", "onnxruntime (CPU, SenseVoice/Silero)"),
     ("kaldi_native_fbank", "kaldi_native_fbank"),
     ("sentencepiece", "sentencepiece>=0.2.0"),
     ("soundfile", "soundfile>=0.12.0"),

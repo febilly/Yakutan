@@ -4,6 +4,7 @@ import json
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 from local_inference.remote_client import (
     RemoteASREngine,
@@ -53,7 +54,7 @@ def test_health_probe_reports_models():
 
 def test_remote_asr_handshake_and_transcribe_payload():
     ws = FakeWS([
-        {"type": "init_ok", "service": "asr", "engine": "qwen3-asr"},
+        {"type": "init_ok", "service": "asr", "engine": "qwen3-asr", "protocol_version": 1},
         {
             "type": "recognition",
             "request_id": 1,
@@ -79,3 +80,24 @@ def test_remote_asr_handshake_and_transcribe_payload():
     assert request["reset_draft"] is True
     assert request["audio_base64"]
     assert engine._context == "你好"
+
+
+def test_incompatible_handshake_closes_socket():
+    ws = FakeWS([{"type": "init_ok", "service": "asr", "engine": "qwen3-asr", "protocol_version": 99}])
+    with patch("local_inference.remote_client._sync_ws_connect", return_value=ws):
+        engine = RemoteASREngine("qwen3-asr", "ws://127.0.0.1:18775")
+        with pytest.raises(RuntimeError, match="握手不兼容"):
+            engine._connect_locked()
+    assert ws.closed and engine._ws is None
+
+
+def test_unrelated_response_is_rejected_and_connection_closed():
+    ws = FakeWS([
+        {"type": "init_ok", "service": "asr", "engine": "qwen3-asr", "protocol_version": 1},
+        {"type": "recognition", "request_id": 999, "result": {"text": "wrong request"}},
+    ])
+    with patch("local_inference.remote_client._sync_ws_connect", return_value=ws):
+        engine = RemoteASREngine("qwen3-asr", "ws://127.0.0.1:18775")
+        with pytest.raises(RuntimeError):
+            engine.transcribe(np.zeros(160, dtype=np.float32))
+    assert ws.closed and engine._ws is None

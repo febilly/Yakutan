@@ -114,20 +114,19 @@ class RemoteASREngine:
         if _sync_ws_connect is None:
             raise RuntimeError("缺少 websockets 依赖，无法连接远端推理服务")
         ws = _sync_ws_connect(self.server_url, open_timeout=self.timeout)
-        ws.send(json.dumps({
-            "type": "init",
-            "service": "asr",
-            "protocol_version": PROTOCOL_VERSION,
-            "engine": self.engine,
-            "sample_rate": 16000,
-        }))
-        reply = _recv_json(ws, self.timeout)
-        if reply.get("type") != "init_ok" or reply.get("service") != "asr":
+        try:
+            ws.send(json.dumps({
+                "type": "init", "service": "asr", "protocol_version": PROTOCOL_VERSION,
+                "engine": self.engine, "sample_rate": 16000,
+            }))
+            reply = _recv_json(ws, self.timeout)
+            if (reply.get("type"), reply.get("service"), reply.get("engine"), reply.get("protocol_version")) != (
+                "init_ok", "asr", self.engine, PROTOCOL_VERSION,
+            ):
+                raise RuntimeError(f"远端 ASR 握手不兼容: {reply}")
+        except Exception:
             ws.close()
-            raise RuntimeError(f"远端 ASR 握手失败: {reply}")
-        if reply.get("engine") != self.engine:
-            ws.close()
-            raise RuntimeError(f"远端 ASR 引擎不匹配: {reply}")
+            raise
         self._ws = ws
         return ws
 
@@ -158,7 +157,7 @@ class RemoteASREngine:
                     reply = _recv_json(ws, self.timeout)
                     if reply.get("type") == "error":
                         raise RuntimeError(f"远端 ASR 错误: {reply}")
-                    if reply.get("type") != "recognition":
+                    if reply.get("type") != "recognition" or reply.get("request_id") != self._request_id:
                         raise RuntimeError(f"远端 ASR 响应不兼容: {reply}")
                     result = reply.get("result")
                     if isinstance(reply.get("context"), str):

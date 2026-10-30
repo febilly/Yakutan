@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -9,20 +8,13 @@ import numpy as np
 import config
 from .gpu_devices import describe_device, resolve_device
 from .model_manager import (
-    MODELS_DIR,
-    ensure_vendor_sources,
-    get_local_model_path,
+    get_qwen3_asr_files,
     prepare_qwen_llama_runtime_env,
     warn_if_weights_not_resident,
 )
 
 logger = logging.getLogger(__name__)
 QWEN_SAMPLE_RATE = 16000
-
-# 注：音频编码器后端在 DirectML 下要求固定输入形状，vendor 用单一 pad_to 秒数兜住所有音频，
-# 于是 2s 的句子也在算 30s 的注意力。试过在调用前改写 h_target_len 做分档，实测是负优化
-# ——会话只认构造时那一个形状，换成别的会永久退化（2s 音频 50ms → 210ms，跑 20 次也不收敛）。
-# 想吃到这个收益只能在构造会话时就定小形状，代价是超过它的音频掉出快路径，属于另一个取舍。
 
 _LANG_MAP = {
     "zh": "Chinese",
@@ -59,72 +51,66 @@ _LANG_MAP = {
 
 
 class Qwen3ASREngine:
-    """Speech-to-text using Qwen3-ASR (ONNX + GGUF)."""
+    """Speech-to-text using Qwen3-ASR (llama.cpp mtmd + GGUF)."""
 
     def __init__(
         self,
         model_dir: str | None = None,
-        use_dml: bool | None = None,
-        chunk_size: float = 30.0,
+        use_gpu_encoder: bool | None = None,
         *,
         corpus_text: str | None = None,
     ) -> None:
         prepare_qwen_llama_runtime_env()
-        vendor_dir = ensure_vendor_sources("qwen3-asr")
-        if vendor_dir is None:
-            raise RuntimeError("Qwen3-ASR vendor sources are unavailable")
-        vendor_parent = str(vendor_dir.parent)
-        if vendor_parent not in sys.path:
-            sys.path.insert(0, vendor_parent)
+        from .qwen3_asr_mtmd import MtmdQwenASR
 
-        from qwen_asr_gguf.inference.asr import QwenASREngine
-        from qwen_asr_gguf.inference.schema import ASREngineConfig
+        files = get_qwen3_asr_files(model_dir)
+        if files is None:
+            raise RuntimeError("Qwen3-ASR model files are not downloaded")
+        decoder_path, mmproj_path = files
 
-        resolved_model_dir = model_dir or get_local_model_path("qwen3-asr") or str(MODELS_DIR / "qwen3-asr")
-
-        # GGUF 解码器的运行位置（SenseVoice 固定 CPU，只有 Qwen3-ASR 用得上 GPU）
+        # 解码器和音频编码器都跑在 llama.cpp 上（同一个 ggml 后端）
         requested_device = getattr(config, "LOCAL_INFERENCE_DEVICE", "auto")
         n_gpu_layers, main_gpu, effective_device = resolve_device(requested_device)
-        # ONNX 音频编码器可以和 GGUF 解码器分开放：'auto' 跟随解码器，也可单独钉在 CPU 或显卡上。
-        if use_dml is None:
-            use_dml = self._want_encoder_on_gpu(effective_device)
+        # 编码器可以和解码器分开放：'auto' 跟随解码器，也可单独钉在 CPU 或显卡上。
+        if use_gpu_encoder is None:
+            use_gpu_encoder = self._want_encoder_on_gpu(effective_device)
         n_ctx = int(getattr(config, "LOCAL_QWEN_ASR_N_CTX", 2048))
-        engine_cfg = ASREngineConfig(
-            model_dir=resolved_model_dir,
-            use_dml=use_dml,
-            n_ctx=n_ctx,
-            chunk_size=chunk_size,
-            memory_num=1,
-            verbose=True,
-            enable_aligner=False,
-            pad_to=int(chunk_size),
-            n_gpu_layers=n_gpu_layers,
-            main_gpu=main_gpu,
-        )
-        gguf = next(Path(resolved_model_dir).glob("*.gguf"), None)
-        if gguf is not None and n_gpu_layers > 0:
-            with warn_if_weights_not_resident("Qwen3-ASR 解码器", gguf):
-                self._engine = QwenASREngine(engine_cfg)
+
+        def load():
+            return MtmdQwenASR(
+                str(decoder_path),
+                str(mmproj_path),
+                n_ctx=n_ctx,
+                n_gpu_layers=n_gpu_layers,
+                main_gpu=main_gpu,
+                encoder_on_gpu=use_gpu_encoder,
+                kv_q8=bool(getattr(config, "LOCAL_QWEN_ASR_KV_Q8", False)),
+            )
+
+        if n_gpu_layers > 0:
+            with warn_if_weights_not_resident("Qwen3-ASR 解码器", decoder_path):
+                self._engine = load()
         else:
-            self._engine = QwenASREngine(engine_cfg)
+            self._engine = load()
         self.language: str | None = None
         self._context = ""
         self._corpus_text = (corpus_text or "").strip()
-        self.model_dir = resolved_model_dir
+        self.model_dir = str(Path(decoder_path).parent)
+        self.decoder_path = str(decoder_path)
+        self.mmproj_path = str(mmproj_path)
         self.device = effective_device
-        self._encoder_on_gpu = bool(getattr(self._engine.encoder, "active_gpu", False))
+        self._encoder_on_gpu = bool(self._engine.encoder.active_gpu)
         # 上一次中间结果的 token，作为下一次的推测解码草稿；整句结束后清空。
         self._draft_tokens: list[int] = []
         self._spec = None
-        provider = getattr(self._engine.encoder, 'provider', '')
-        encoder_actual = provider if self._encoder_on_gpu else "CPU"
         logger.info(
-            "Qwen3-ASR loaded: %s (device=%s -> %s, GGUF: %s 层卸载到该卡, ONNX 编码器实际=%s)",
-            resolved_model_dir,
+            "Qwen3-ASR loaded: decoder=%s encoder=%s (device=%s -> %s, %s 层卸载到该卡, 编码器=%s)",
+            Path(decoder_path).name,
+            Path(mmproj_path).name,
             requested_device,
             describe_device(effective_device),
             n_gpu_layers if n_gpu_layers > 0 else 0,
-            encoder_actual,
+            "GPU" if self._encoder_on_gpu else "CPU",
         )
 
     def create_shared_context_worker(self):
@@ -134,6 +120,8 @@ class Qwen3ASREngine:
         worker.language = None
         worker._context = ""
         worker._corpus_text = ""
+        worker.decoder_path = self.decoder_path
+        worker.mmproj_path = self.mmproj_path
         worker.model_dir = self.model_dir
         worker.device = self.device
         worker._encoder_on_gpu = self._encoder_on_gpu
@@ -347,7 +335,7 @@ class Qwen3ASREngine:
             n_vfy = int(result["n_verifies"])
             per_wait = f"{wait_s * 1000 / n_waits:.1f}" if n_waits else "-"
             logger.info(
-                "[qwen3-asr] timing audio=%.2fs onnx_encode=%.0fms llm_prefill=%.0fms "
+                "[qwen3-asr] timing audio=%.2fs encode=%.0fms llm_prefill=%.0fms "
                 "llm_generate=%.0fms sum=%.0fms prefill_positions=%s gen_tokens=%s "
                 "passes=%s ms_per_pass=%s draft=%s/%s | submit=%.0fms(%s次) "
                 "gpuwait=%.0fms(%s次,每次%sms) verify=%.0fms(%s次) rest=%.0fms",

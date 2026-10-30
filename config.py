@@ -107,7 +107,7 @@ DOUBAO_ASR_MAX_BUFFER_SECONDS = 60
 # 本地 ASR 引擎
 # 可选: 'sensevoice', 'qwen3-asr'（已移除 Fun-ASR-Nano）
 # sensevoice：INT8 ONNX，固定 CPU（约 1.5–2.5GB 内存；发布版可内置模型）
-# qwen3-asr：GGUF 解码跟随"运行位置"（GPU→走 Vulkan；CPU→CPU）；ONNX 音频编码见
+# qwen3-asr：GGUF 解码跟随"运行位置"（GPU→走 Vulkan；CPU→CPU）；mtmd 音频编码见
 #            LOCAL_QWEN_ENCODER_DEVICE，可单独放 CPU 或显卡。显存占用见 QWEN3_ASR_VRAM_MB。
 LOCAL_INFERENCE_ENGINE = 'sensevoice'
 _VALID_LOCAL_INFERENCE_ENGINES = frozenset({'sensevoice', 'qwen3-asr'})
@@ -161,10 +161,16 @@ def clamp_vad_silence_duration(seconds: float) -> float:
 # 只对 Qwen3-ASR 的 GGUF 解码器生效——SenseVoice 是 INT8 ONNX，固定跑 CPU。
 LOCAL_INFERENCE_DEVICE = 'auto'
 
-# Qwen3-ASR 的 ONNX 音频编码器跑在哪：'auto'（跟随上面的运行位置）、'cpu'、'gpu'（DirectML）。
+# Native Qwen3-ASR: Q6_K decoder + Q8_0 mmproj, llama.cpp b11985.
+LOCAL_QWEN_ASR_MODEL = '1.7B'
+LOCAL_QWEN_ASR_KV_Q8 = True
+# Keep translation KV in f16, matching the validated source default.
+LOCAL_MT_KV_Q8 = False
+
+# Qwen3-ASR 的 mtmd 音频编码器跑在哪：'auto'（跟随上面的运行位置）、'cpu'、'gpu'（llama.cpp）。
 # 编码器和 GGUF 解码器是两个独立的模型，可以分开放：
-#   - 放显卡：24s 音频的编码 400ms → 70ms；显存多占约 0.45GB
-#   - 放 CPU：不占显存，而且完全不受显卡上其他负载（比如游戏）影响
+#   - 放显卡：通常编码更快，但需要额外显存
+#   - 放 CPU：降低与游戏等 GPU 工作负载的资源竞争
 # 显卡满载时编码器放 CPU 的耗时几乎不变，放显卡则会跟着变慢 2.6 倍，所以边打游戏边用时 'cpu' 是合理选择。
 LOCAL_QWEN_ENCODER_DEVICE = 'auto'
 _VALID_QWEN_ENCODER_DEVICES = frozenset({'auto', 'cpu', 'gpu'})
@@ -173,7 +179,7 @@ if LOCAL_QWEN_ENCODER_DEVICE not in _VALID_QWEN_ENCODER_DEVICES:
 
 
 def sanitize_qwen_encoder_device(value) -> str:
-    """把 ONNX 音频编码器的运行位置收敛成 'auto' / 'cpu' / 'gpu'。"""
+    """把 mtmd 音频编码器的运行位置收敛成 'auto' / 'cpu' / 'gpu'。"""
     normalized = str(value or '').strip().lower()
     return normalized if normalized in _VALID_QWEN_ENCODER_DEVICES else 'auto'
 
@@ -187,14 +193,14 @@ LOCAL_SPECULATIVE_DECODE = True
 # 只重算发生变化的部分。GPU 上约省 5%，CPU 上 prefill 是大头、收益明显。
 LOCAL_MT_PROMPT_CACHE = True
 
-# Qwen3-ASR 由两个独立模型组成，各自的显存占用（MB，实测于 RTX 3080）。
+# Qwen3-ASR 由两个独立模型组成，各自的显存占用（MB，来源项目估计值，实际占用受设备与上下文影响）。
 # 网页面板据此分项显示，而不是笼统给一个总数——因为两部分可以分开放在 CPU/显卡上。
 QWEN3_ASR_VRAM_MB = {
-    'decoder': 1612,  # 识别解码器（GGUF LLM 1.7B q4），跟随"运行位置"
-    'encoder': 465,   # 音频编码器（ONNX int4），仅在放到显卡时占显存
+    'decoder': 1530,  # Q6_K decoder + Q8_0 KV；沿用来源项目的估计值
+    'encoder': 510,   # mtmd Q8_0 mmproj；仅在放到显卡时占显存
 }
-# Hy-MT2 本地翻译模型（GGUF q4）的显存占用（MB，实测）。
-HYMT2_VRAM_MB = 1402
+# Hy-MT2 本地翻译模型（GGUF q4）的显存占用（MB，来源项目估计值）。
+HYMT2_VRAM_MB = 1200
 
 # 本地增量识别（中间结果）
 # 触发方式基于 VAD：说话中检测到短停顿（如逗号/分句位置）立即做一次全量本地识别，
@@ -216,7 +222,7 @@ LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 4.0
 LOCAL_QWEN_ASR_N_CTX = 2048
 # 传入 LLM system 区的背景/滚动文本：按模型分词后最多保留的 token 数（取尾部）。
 LOCAL_QWEN_CONTEXT_MAX_TOKENS = 1024
-# 是否在每条识别后打印 Qwen3-ASR 各阶段耗时（ONNX 编码 / LLM prefill / 生成），使用 INFO 级别。旧版 CLI 可在 .env 中用 LOCAL_QWEN_LOG_PIPELINE_TIMING=0 关闭。
+# 是否在每条识别后打印 Qwen3-ASR 各阶段耗时（mtmd 编码 / LLM prefill / 生成），使用 INFO 级别。旧版 CLI 可在 .env 中用 LOCAL_QWEN_LOG_PIPELINE_TIMING=0 关闭。
 # 需在 config.LOG_LEVEL 为 INFO/DEBUG 时才能在终端看到（默认 ERROR 时不会输出）。
 LOCAL_QWEN_LOG_PIPELINE_TIMING = True
 

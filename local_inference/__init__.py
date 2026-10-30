@@ -5,7 +5,7 @@ import os
 import sys
 from typing import Dict, List
 
-# Allow PyTorch and DirectML/ONNX stacks to coexist in one process.
+# Allow optional libraries carrying different OpenMP runtimes to coexist.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 LOCAL_INFERENCE_UI_ENV = "YAKUTAN_LOCAL_INFERENCE_UI"

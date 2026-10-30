@@ -39,105 +39,68 @@ LLAMA_SPLIT_MODE_LAYER = 1  # 按层切分到多张 GPU（llama.cpp 默认）
 LLAMA_SPLIT_MODE_ROW = 2
 
 
-# The desktop Vulkan bundle and the Linux CUDA build deployed on gpu4038 come
-# from different llama.cpp ABI revisions. Keep the bundled desktop ABI as the
-# default and opt in to the server build's current structs from the service.
-_ABI_PROFILE = os.getenv("YAKUTAN_LLAMA_ABI_PROFILE", "").strip().lower()
-_CUDA_2026_ABI = _ABI_PROFILE == "cuda-2026-08"
-
-
-_model_params_fields = [
-    ("devices", ctypes.POINTER(ctypes.c_void_p)),
-    ("tensor_buft_overrides", ctypes.POINTER(ctypes.c_void_p)),
-    ("n_gpu_layers", ctypes.c_int32),
-    ("split_mode", ctypes.c_int32),
-]
-if _CUDA_2026_ABI:
-    _model_params_fields.append(("load_mode", ctypes.c_int32))
-_model_params_fields.extend([
-    ("main_gpu", ctypes.c_int32),
-    ("tensor_split", ctypes.POINTER(ctypes.c_float)),
-    ("progress_callback", ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_float, ctypes.c_void_p)),
-    ("progress_callback_user_data", ctypes.c_void_p),
-    ("kv_overrides", ctypes.POINTER(ctypes.c_void_p)),
-])
-if _CUDA_2026_ABI:
-    _model_params_fields.extend([
+class llama_model_params(ctypes.Structure):
+    _fields_ = [
+        ("devices", ctypes.POINTER(ctypes.c_void_p)),
+        ("tensor_buft_overrides", ctypes.POINTER(ctypes.c_void_p)),
+        ("n_gpu_layers", ctypes.c_int32),
+        ("split_mode", ctypes.c_int32),
+        ("load_mode", ctypes.c_int32),
+        ("lazy_mode", ctypes.c_int32),
+        ("main_gpu", ctypes.c_int32),
+        ("tensor_split", ctypes.POINTER(ctypes.c_float)),
+        ("progress_callback", ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_float, ctypes.c_void_p)),
+        ("progress_callback_user_data", ctypes.c_void_p),
+        ("kv_overrides", ctypes.POINTER(ctypes.c_void_p)),
         ("vocab_only", ctypes.c_bool),
         ("check_tensors", ctypes.c_bool),
         ("use_extra_bufts", ctypes.c_bool),
         ("no_host", ctypes.c_bool),
         ("no_alloc", ctypes.c_bool),
         ("load_mtp", ctypes.c_bool),
-    ])
-else:
-    _model_params_fields.extend([
-        ("vocab_only", ctypes.c_bool),
-        ("use_mmap", ctypes.c_bool),
-        ("use_direct_io", ctypes.c_bool),
-        ("use_mlock", ctypes.c_bool),
-        ("check_tensors", ctypes.c_bool),
-        ("use_extra_bufts", ctypes.c_bool),
-        ("no_host", ctypes.c_bool),
-        ("no_alloc", ctypes.c_bool),
-    ])
+    ]
 
-
-class llama_model_params(ctypes.Structure):
-    _fields_ = _model_params_fields
-
-
-_context_params_fields = [
-    ("n_ctx", ctypes.c_uint32),
-    ("n_batch", ctypes.c_uint32),
-    ("n_ubatch", ctypes.c_uint32),
-    ("n_seq_max", ctypes.c_uint32),
-]
-if _CUDA_2026_ABI:
-    _context_params_fields.extend([
+class llama_context_params(ctypes.Structure):
+    _fields_ = [
+        ("n_ctx", ctypes.c_uint32),
+        ("n_batch", ctypes.c_uint32),
+        ("n_ubatch", ctypes.c_uint32),
+        ("n_seq_max", ctypes.c_uint32),
         ("n_rs_seq", ctypes.c_uint32),
         ("n_outputs_max", ctypes.c_uint32),
         ("n_outputs_max_per_seq", ctypes.c_uint32),
-    ])
-_context_params_fields.extend([
-    ("n_threads", ctypes.c_int32),
-    ("n_threads_batch", ctypes.c_int32),
-])
-if _CUDA_2026_ABI:
-    _context_params_fields.append(("ctx_type", ctypes.c_int32))
-_context_params_fields.extend([
-    ("rope_scaling_type", ctypes.c_int32),
-    ("pooling_type", ctypes.c_int32),
-    ("attention_type", ctypes.c_int32),
-    ("flash_attn_type", ctypes.c_int32),
-    ("rope_freq_base", ctypes.c_float),
-    ("rope_freq_scale", ctypes.c_float),
-    ("yarn_ext_factor", ctypes.c_float),
-    ("yarn_attn_factor", ctypes.c_float),
-    ("yarn_beta_fast", ctypes.c_float),
-    ("yarn_beta_slow", ctypes.c_float),
-    ("yarn_orig_ctx", ctypes.c_uint32),
-    ("defrag_thold", ctypes.c_float),
-    ("cb_eval", ctypes.c_void_p),
-    ("cb_eval_user_data", ctypes.c_void_p),
-    ("type_k", ctypes.c_int32),
-    ("type_v", ctypes.c_int32),
-    ("abort_callback", ctypes.c_void_p),
-    ("abort_callback_data", ctypes.c_void_p),
-    ("embeddings", ctypes.c_bool),
-    ("offload_kqv", ctypes.c_bool),
-    ("no_perf", ctypes.c_bool),
-    ("op_offload", ctypes.c_bool),
-    ("swa_full", ctypes.c_bool),
-    ("kv_unified", ctypes.c_bool),
-    ("samplers", ctypes.POINTER(ctypes.c_void_p)),
-    ("n_samplers", ctypes.c_size_t),
-])
-if _CUDA_2026_ABI:
-    _context_params_fields.append(("ctx_other", ctypes.c_void_p))
-
-class llama_context_params(ctypes.Structure):
-    _fields_ = _context_params_fields
+        ("n_threads", ctypes.c_int32),
+        ("n_threads_batch", ctypes.c_int32),
+        ("ctx_type", ctypes.c_int32),
+        ("rope_scaling_type", ctypes.c_int32),
+        ("pooling_type", ctypes.c_int32),
+        ("attention_type", ctypes.c_int32),
+        ("flash_attn_type", ctypes.c_int32),
+        ("rope_freq_base", ctypes.c_float),
+        ("rope_freq_scale", ctypes.c_float),
+        ("yarn_ext_factor", ctypes.c_float),
+        ("yarn_attn_factor", ctypes.c_float),
+        ("yarn_beta_fast", ctypes.c_float),
+        ("yarn_beta_slow", ctypes.c_float),
+        ("yarn_orig_ctx", ctypes.c_uint32),
+        ("defrag_thold", ctypes.c_float),
+        ("cb_eval", ctypes.c_void_p),
+        ("cb_eval_user_data", ctypes.c_void_p),
+        ("type_k", ctypes.c_int32),
+        ("type_v", ctypes.c_int32),
+        ("moe_cache_size", ctypes.c_size_t),
+        ("abort_callback", ctypes.c_void_p),
+        ("abort_callback_data", ctypes.c_void_p),
+        ("embeddings", ctypes.c_bool),
+        ("offload_kqv", ctypes.c_bool),
+        ("no_perf", ctypes.c_bool),
+        ("op_offload", ctypes.c_bool),
+        ("swa_full", ctypes.c_bool),
+        ("kv_unified", ctypes.c_bool),
+        ("samplers", ctypes.POINTER(ctypes.c_void_p)),
+        ("n_samplers", ctypes.c_size_t),
+        ("ctx_other", ctypes.c_void_p),
+    ]
 
 class llama_sampler_chain_params(ctypes.Structure):
     _fields_ = [
@@ -221,20 +184,8 @@ def _llama_primary_dll_basename() -> str:
 
 
 def _resolve_llama_lib_dir() -> str:
-    """优先 YAKUTAN_QWEN_LLAMA_BIN（如 local_asr_models/qwen_llama_vulkan_bin），否则为包内 inference/bin。"""
-    default = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin")
-    env = os.environ.get("YAKUTAN_QWEN_LLAMA_BIN", "").strip()
-
-    def usable(d: str) -> bool:
-        if not d or not os.path.isdir(d):
-            return False
-        return os.path.isfile(os.path.join(d, _llama_primary_dll_basename()))
-
-    if usable(env):
-        return env
-    if usable(default):
-        return default
-    return env if env else default
+    from local_inference.model_manager import _qwen3_llama_bin_dir
+    return str(_qwen3_llama_bin_dir().resolve())
 
 
 def init_llama_lib():
@@ -451,7 +402,7 @@ def init_llama_lib():
     llama_sampler_init_min_p.restype = ctypes.c_void_p
 
     llama_sampler_init_penalties = llama.llama_sampler_init_penalties
-    llama_sampler_init_penalties.argtypes = [ctypes.c_int32, ctypes.c_float, ctypes.c_float, ctypes.c_float]
+    llama_sampler_init_penalties.argtypes = [ctypes.c_int32, ctypes.c_int32, ctypes.c_float, ctypes.c_float, ctypes.c_float]
     llama_sampler_init_penalties.restype = ctypes.c_void_p
 
     llama_sampler_accept = llama.llama_sampler_accept
@@ -540,6 +491,7 @@ class LlamaModel:
             
         self.vocab = llama_model_get_vocab(self.ptr)
         self.n_embd = llama_model_n_embd(self.ptr)
+        self.n_vocab = llama_vocab_n_tokens(self.vocab)
         self.eos_token = llama_vocab_eos(self.vocab)
 
     def tokenize(self, text: str, add_special: bool = False, parse_special: bool = True) -> List[int]:
@@ -581,9 +533,16 @@ class LlamaContext:
     """上下文的面向对象封装"""
     def __init__(self, model, n_ctx=2048, n_batch=2048, n_ubatch=512, n_seq_max=1, 
                  embeddings=False, pooling_type=0, flash_attn=True, 
-                 offload_kqv=True, no_perf=True, n_threads=None, n_threads_batch=None):
+                 offload_kqv=True, no_perf=True, n_threads=None, n_threads_batch=None,
+                 type_kv=None, n_outputs_max=0):
         self.model = model # 保持模型引用防止被释放
         params = llama_context_default_params()
+        # Rows of logits one ubatch may return (0 = n_batch). The logits buffer on the
+        # GPU is sized for this, ~0.6 MB per row with a 150k vocab.
+        params.n_outputs_max = n_outputs_max
+        if type_kv is not None:  # ggml_type, e.g. 8 = Q8_0 (needs flash attention for V)
+            params.type_k = type_kv
+            params.type_v = type_kv
         params.n_ctx = n_ctx
         params.n_batch = n_batch
         params.n_ubatch = n_ubatch
@@ -776,10 +735,10 @@ class LlamaSampler:
 
         # 2. Penalties (重复/频率/存在惩罚)
         has_penalty = (repeat_penalty != 1.0 or frequency_penalty != 0.0 or presence_penalty != 0.0)
-        if has_penalty:
-            # llama.cpp 会自动管理历史 rings
+        if has_penalty and n_vocab > 0:
+            # llama.cpp 会自动管理历史 rings；新版接口要求传入词表大小
             llama_sampler_chain_add(self.ptr, llama_sampler_init_penalties(
-                penalty_last_n, repeat_penalty, frequency_penalty, presence_penalty
+                n_vocab, penalty_last_n, repeat_penalty, frequency_penalty, presence_penalty
             ))
 
         # 3. 采样过滤器 (顺序很重要)
