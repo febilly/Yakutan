@@ -118,6 +118,14 @@ class TestLoaderNeverSplits:
         assert os.environ["GGML_VK_ENABLE_MEMORY_PRIORITY"] == "1"
         assert "GGML_VK_ALLOW_SYSMEM_FALLBACK" not in os.environ
 
+    def test_runtime_env_disables_host_visible_vidmem(self, monkeypatch):
+        """ASR 与 Hy-MT2 同进程加载时，权重不能落进 host-visible（共享）显存。"""
+        monkeypatch.delenv("GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM", raising=False)
+
+        prepare_qwen_llama_runtime_env()
+
+        assert os.environ["GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM"] == "1"
+
     def test_load_model_forces_single_gpu(self):
         """核显+独显的机器上，llama.cpp 默认会把层切分到两张卡，必须显式关掉。"""
         import inspect

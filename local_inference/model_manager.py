@@ -119,6 +119,10 @@ def prepare_qwen_llama_runtime_env() -> None:
     # llama.cpp 以“变量是否存在”判断该低速回退（即使值是 "0" 也会启用）。Yakutan 的本地
     # 实时模型宁可明确加载失败，也不能把权重直接分配进系统内存后无提示地慢十倍。
     os.environ.pop("GGML_VK_ALLOW_SYSMEM_FALLBACK", None)
+    # ggml-vulkan 默认优先把权重放进 device-local + host-visible 的内存类型（ReBAR）。
+    # Windows 会把这类分配记在 shared GPU memory 里，Qwen3-ASR 与 Hy-MT2 同进程加载时
+    # 两个模型的权重都落在那里，前向一次比普通显存慢数倍。关掉后只用普通 device-local 内存。
+    os.environ["GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM"] = "1"
 
 
 def _default_models_dir() -> Path:
