@@ -193,11 +193,11 @@ LOCAL_SPECULATIVE_DECODE = True
 # 只重算发生变化的部分。GPU 上约省 5%，CPU 上 prefill 是大头、收益明显。
 LOCAL_MT_PROMPT_CACHE = True
 
-# Qwen3-ASR 由两个独立模型组成，各自的显存占用（MB，来源项目估计值，实际占用受设备与上下文影响）。
+# Qwen3-ASR 由两个独立模型组成，各自的显存占用（MiB，实际占用受设备与上下文影响）。
 # 网页面板据此分项显示，而不是笼统给一个总数——因为两部分可以分开放在 CPU/显卡上。
 QWEN3_ASR_VRAM_MB = {
-    'decoder': 1530,  # Q6_K decoder + Q8_0 KV；沿用来源项目的估计值
-    'encoder': 510,   # mtmd Q8_0 mmproj；仅在放到显卡时占显存
+    'decoder': 1530,  # Q6_K decoder + Q8_0 KV
+    'encoder': 505,   # mtmd Q8_0 mmproj；仅在放到显卡时占显存
 }
 # Hy-MT2 本地翻译模型（GGUF q4）的显存占用（MB，来源项目估计值）。
 HYMT2_VRAM_MB = 1200

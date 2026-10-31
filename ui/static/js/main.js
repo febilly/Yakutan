@@ -130,7 +130,7 @@ function getQwen3VramMb() {
 
 function formatVramMb(mb) {
     const value = Number(mb) || 0;
-    return value >= 1024 ? `${(value / 1024).toFixed(1)} GB` : `${Math.round(value)} MB`;
+    return `${Math.round(value)} MiB`;
 }
 
 function updateQwen3ModelPlacement() {
