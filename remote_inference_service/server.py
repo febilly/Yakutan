@@ -23,12 +23,32 @@ ASR_ENGINES = ("sensevoice", "qwen3-asr")
 CHAT_PREFIX = "<｜hy_begin▁of▁sentence｜><｜hy_User｜>"
 CHAT_SUFFIX = "<｜hy_Assistant｜>"
 
+# Hy-MT2 base target languages (https://huggingface.co/tencent/Hy-MT2-1.8B#supported-languages).
+# Kept in step with realtime-subtitle's shared/hymt_languages.py; clients of both apps send these codes.
 LANGUAGE_NAMES = {
-    "ar": "Arabic", "de": "German", "en": "English", "es": "Spanish",
-    "fr": "French", "it": "Italian", "ja": "Japanese", "ko": "Korean",
-    "pt": "Portuguese", "ru": "Russian", "vi": "Vietnamese",
-    "yue": "Cantonese", "zh": "Chinese",
+    "zh": "Chinese", "en": "English", "fr": "French", "pt": "Portuguese",
+    "es": "Spanish", "ja": "Japanese", "tr": "Turkish", "ru": "Russian",
+    "ar": "Arabic", "ko": "Korean", "th": "Thai", "it": "Italian",
+    "de": "German", "vi": "Vietnamese", "ms": "Malay", "id": "Indonesian",
+    "fil": "Filipino", "hi": "Hindi", "zh-hant": "Chinese (Traditional)", "pl": "Polish",
+    "cs": "Czech", "nl": "Dutch", "km": "Khmer", "my": "Burmese",
+    "fa": "Persian", "gu": "Gujarati", "ur": "Urdu", "te": "Telugu",
+    "mr": "Marathi", "he": "Hebrew", "bn": "Bengali", "ta": "Tamil",
+    "uk": "Ukrainian", "bo": "Tibetan", "kk": "Kazakh", "mn": "Mongolian",
+    "ug": "Uyghur", "yue": "Cantonese",
 }
+
+
+def _language_name(code: str) -> str:
+    """Full Hy-MT2 name; zh-TW/zh-HK/zh-Hant map to Traditional Chinese, tl to Filipino."""
+    raw = str(code or "").strip().lower().replace("_", "-").split(".", 1)[0]
+    parts = raw.split("-")
+    if parts[0] == "zh":
+        hant = "hans" not in parts and any(part in {"hant", "tw", "hk", "mo"} for part in parts)
+        normalized = "zh-hant" if hant else "zh"
+    else:
+        normalized = "fil" if parts[0] == "tl" else parts[0]
+    return LANGUAGE_NAMES.get(normalized, normalized)
 
 
 def parse_args() -> argparse.Namespace:
@@ -247,8 +267,8 @@ def _source_history(items: Any, limit: int) -> list[str]:
 def _translation_prompt(payload: dict[str, Any], source: str, history_limit: int) -> str:
     source_lang = str(payload.get("source_lang") or "en").lower()
     target_lang = str(payload.get("target_lang") or "zh").lower()
-    source_name = LANGUAGE_NAMES.get(source_lang, source_lang)
-    target_name = LANGUAGE_NAMES.get(target_lang, target_lang)
+    source_name = _language_name(source_lang)
+    target_name = _language_name(target_lang)
     previous_source = str(payload.get("previous_source") or "")
     previous_translation = str(payload.get("previous_translation") or "")
     history = _source_history(payload.get("history"), history_limit)
