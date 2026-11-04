@@ -21,7 +21,7 @@ import numpy as np
 
 import config
 from .asr_qwen3 import Qwen3ASREngine
-from .spec_decode import DraftTracker
+from .spec_decode import DraftTracker, choose_draft_token
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,9 @@ class _Sequence:
     passes: int = 0
     drafted: int = 0
     accepted: int = 0
+    draft_bias: float = 0.0
+    bias_tail: int = 0
+    biased: int = 0
 
     def __post_init__(self) -> None:
         self.emitted = []
@@ -88,6 +91,20 @@ class QwenMicroBatchEngine:
 
     def _remove_sequence(self, slot: int, p0: int = 0) -> None:
         self._seq_rm(self._memory, int(slot), int(p0), -1)
+
+    def _sample(self, state: _Sequence, idx: int, draft_index: int | None = None) -> int:
+        if state.draft_bias <= 0:
+            return int(state.sampler.sample(self.ctx, idx=idx))
+        expected = None
+        if draft_index is not None and draft_index < len(state.tracker) - state.bias_tail:
+            expected = state.tracker.token_at(draft_index)
+        logits = np.ctypeslib.as_array(
+            self.m.llama_get_logits_ith(self.ctx.ptr, idx),
+            shape=(int(self.core.model.n_vocab),),
+        )
+        token, biased = choose_draft_token(logits, expected, state.draft_bias)
+        state.biased += int(biased)
+        return token
 
     def _prompt_embeddings(
         self,
@@ -196,7 +213,10 @@ class QwenMicroBatchEngine:
                 accepted = 0
                 next_token: int | None = None
                 for index in range(len(tokens)):
-                    sampled = int(state.sampler.sample(self.ctx, idx=start + index))
+                    sampled = self._sample(
+                        state, start + index,
+                        state.tracker.chunk_start + index if draft else None,
+                    )
                     if index == len(draft) or sampled != draft[index]:
                         next_token = sampled
                         break
@@ -237,7 +257,9 @@ class QwenMicroBatchEngine:
                     corpus_text=request.corpus_text,
                     context=request.context,
                 )
-                sampler = self.m.LlamaSampler(temperature=0.4, seed=int(np.random.randint(0, 2**31 - 1)))
+                temperature = max(0.0, float(getattr(config, "LOCAL_QWEN_ASR_TEMPERATURE", 0.0)))
+                draft = request.draft_tokens if getattr(config, "LOCAL_SPECULATIVE_DECODE", True) else []
+                sampler = self.m.LlamaSampler(temperature=temperature, seed=int(np.random.randint(0, 2**31 - 1)))
                 states.append(_Sequence(
                     request=request,
                     slot=slot,
@@ -245,7 +267,10 @@ class QwenMicroBatchEngine:
                     encoder_ms=encoder_seconds * 1000 / len(requests),
                     position=int(full.shape[0]),
                     sampler=sampler,
-                    tracker=DraftTracker(request.draft_tokens if getattr(config, "LOCAL_SPECULATIVE_DECODE", True) else None),
+                    tracker=DraftTracker(draft),
+                    draft_bias=max(0.0, float(getattr(config, "LOCAL_QWEN_ASR_DRAFT_BIAS", 1.0)))
+                    if draft and temperature <= 0 else 0.0,
+                    bias_tail=max(0, int(getattr(config, "LOCAL_QWEN_ASR_DRAFT_BIAS_TAIL_TOKENS", 6))),
                 ))
             t_prefill = time.perf_counter()
             self._decode_prefill(states)
@@ -254,7 +279,7 @@ class QwenMicroBatchEngine:
             # ordinal among tokens whose logits flag is set.
             prefill_offsets = np.cumsum([0] + [int(state.full_embd.shape[0]) for state in states])
             for index, state in enumerate(states):
-                state.current = int(state.sampler.sample(self.ctx, idx=int(prefill_offsets[index + 1] - 1)))
+                state.current = self._sample(state, int(prefill_offsets[index + 1] - 1), 0)
             while any(not state.done for state in states):
                 self._decode_round(states)
 
@@ -263,9 +288,8 @@ class QwenMicroBatchEngine:
             for state in states:
                 text = self.core.model.detokenize(state.emitted).strip() if state.emitted else ""
                 context = state.request.context
-                if text and state.request.update_context:
-                    self.base.set_context(context)
-                    context = self.base._truncate_context_to_tokens(context + text)
+                if state.request.update_context:
+                    context = ""
                 draft = [] if state.request.update_context or not text else list(state.emitted)
                 result = None if not text else {
                     "text": text,
@@ -281,6 +305,7 @@ class QwenMicroBatchEngine:
                     "n_passes": state.passes,
                     "n_drafted": state.tracker.n_drafted,
                     "n_accepted": state.accepted,
+                    "n_biased": state.biased,
                 }
                 results.append((result, context, draft, metrics))
             return results

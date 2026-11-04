@@ -5,8 +5,9 @@ second, or the source sentence gained a few characters. The previous output is t
 prediction of the next one. Submitting it alongside the freshly sampled token lets a single forward pass
 commit every token the model agrees with, instead of one token per pass.
 
-Verification is exact — each drafted position is sampled normally and kept only if it matches — so
-*which* tokens come out never changes, only how many forward passes it takes to produce them.
+Verification is exact by default — each drafted position is sampled normally and kept only if it
+matches — so *which* tokens come out never changes, only how many forward passes it takes to produce
+them. The ASR path can opt into ``draft_bias``, which deliberately keeps near-tie draft tokens.
 
 Measured on this repo's models (RTX 3080, Vulkan): 2.3x on the Qwen3-ASR token loop across the partials
 of one utterance, and 1.1x-2.3x on Hy-MT2 depending on utterance length. The win grows with length,
@@ -44,6 +45,15 @@ DEFAULT_WINDOW = 8
 BATCH_CAPACITY = (MAX_DRAFT_CHUNK + 1) * 4
 
 
+def choose_draft_token(logits: np.ndarray, expected: int | None, bias: float) -> tuple[int, bool]:
+    """Keep a near-tie draft token; a clearly better token always wins."""
+    best = int(logits.argmax())
+    if (expected is not None and 0 <= expected < len(logits) and expected != best
+            and logits[best] - logits[expected] <= bias):
+        return int(expected), True
+    return best, False
+
+
 class DraftTracker:
     """Tracks where the model's output currently sits inside the draft.
 
@@ -54,7 +64,7 @@ class DraftTracker:
     """
 
     __slots__ = ("_draft", "_window", "_max_chunk", "_pos", "_gen_idx", "n_drafted", "n_realigned",
-                 "_missed")
+                 "_missed", "chunk_start")
 
     def __init__(self, draft: Optional[Sequence[int]], *, window: int = DEFAULT_WINDOW,
                  max_chunk: int = MAX_DRAFT_CHUNK) -> None:
@@ -66,9 +76,17 @@ class DraftTracker:
         self._missed = False
         self.n_drafted = 0
         self.n_realigned = 0
+        # Draft index of the first token of the chunk most recently returned.
+        self.chunk_start = 0
 
     def __bool__(self) -> bool:
         return bool(self._draft)
+
+    def __len__(self) -> int:
+        return len(self._draft)
+
+    def token_at(self, index: int) -> Optional[int]:
+        return self._draft[index] if 0 <= index < len(self._draft) else None
 
     def chunk_for(self, token: int, gen_idx: int) -> list[int]:
         draft = self._draft
@@ -101,6 +119,7 @@ class DraftTracker:
         self._pos = found
         self._gen_idx = gen_idx
 
+        self.chunk_start = found + 1
         chunk = draft[found + 1: found + 1 + self._max_chunk]
         self.n_drafted += len(chunk)
         return chunk
@@ -114,6 +133,8 @@ class GenerationResult:
     n_drafted: int = 0
     n_accepted: int = 0
     n_realigned: int = 0
+    # Positions where a draft-biased decode kept the draft token over the model's argmax.
+    n_biased: int = 0
     # Wall time split across the loop's costs, so a slow run can be attributed without guessing.
     # ``t_wait`` is the first sample after each forward pass - llama_get_logits_ith synchronizes there, so
     # that call is where the GPU round-trip actually lands. ``t_verify`` is the remaining sampler calls
@@ -262,11 +283,20 @@ class SpeculativeDecoder:
         planes: int = 1,
         window: int = DEFAULT_WINDOW,
         on_token: Optional[Callable[[list[int]], bool]] = None,
+        draft_bias: float = 0.0,
+        bias_tail: int = 0,
     ) -> GenerationResult:
         """Generate from an already-prefilled context.
 
         ``pos`` is the first free position. ``on_token`` is called with the emitted tokens after each one
         and may return True to abort (the ASR loop uses it for its repetition circuit breaker).
+
+        ``draft_bias > 0`` replaces ``sampler`` with greedy decoding that leans on the draft: where the
+        draft has a token, it is kept whenever its logit is within ``draft_bias`` of the argmax, i.e. the
+        model rates it at least ``exp(-draft_bias)`` times as likely as its own pick. A revising stream
+        then only changes what the model is clearly surer about, instead of flipping near-ties such as
+        ``,``/``.`` on every pass. The last ``bias_tail`` draft tokens stay unbiased: they were decoded
+        from audio that ended mid-word and are exactly what new audio should be free to correct.
         """
         res = GenerationResult()
         if max_tokens <= 0:
@@ -275,13 +305,28 @@ class SpeculativeDecoder:
         emitted = res.tokens
         pos0 = pos
         clock = time.perf_counter
+        n_vocab = int(self._m.llama_vocab_n_tokens(self._model.vocab)) if draft_bias > 0 else 0
+        protected = len(tracker) - max(0, int(bias_tail))
 
-        def sample(idx: int, *, waits: bool) -> int:
+        def expected_at(index: int) -> Optional[int]:
+            return tracker.token_at(index) if draft_bias > 0 and index < protected else None
+
+        def choose(idx: int, expected: Optional[int]) -> int:
+            if draft_bias <= 0:
+                return sampler.sample(self._ctx, idx=idx)
+            logits = np.ctypeslib.as_array(
+                self._m.llama_get_logits_ith(self._ctx.ptr, idx), shape=(n_vocab,)
+            )
+            tok, biased = choose_draft_token(logits, expected, draft_bias)
+            res.n_biased += int(biased)
+            return tok
+
+        def sample(idx: int, *, waits: bool, expected: Optional[int] = None) -> int:
             # ``waits`` marks the first sampler call after a forward pass: llama_decode is asynchronous,
             # so that call is the one that blocks on the GPU. The rest of a draft chunk reads logits that
             # are already there.
             t = clock()
-            tok = sampler.sample(self._ctx, idx=idx)
+            tok = choose(idx, expected)
             dt = clock() - t
             if waits:
                 res.t_wait += dt
@@ -291,7 +336,7 @@ class SpeculativeDecoder:
                 res.n_verifies += 1
             return tok
 
-        sampled = sample(-1, waits=True)
+        sampled = sample(-1, waits=True, expected=expected_at(0))
 
         while True:
             if sampled in stop_ids:
@@ -328,7 +373,7 @@ class SpeculativeDecoder:
             nxt = None
             finished = False
             for i in range(len(chunk) + 1):
-                tok = sample(i, waits=(i == 0))
+                tok = sample(i, waits=(i == 0), expected=expected_at(tracker.chunk_start + i))
                 if i == len(chunk) or tok != chunk[i]:
                     nxt = tok
                     break

@@ -165,7 +165,7 @@ class Qwen3ASREngine:
         self._corpus_text = (text or "").strip()
 
     def _prompt_context(self) -> str:
-        """热词语料 + 识别历史，总长度受 LOCAL_QWEN_CONTEXT_MAX_TOKENS 限制；语料前缀优先保留。"""
+        """热词语料 + 当前语音段显式提示；不累积已完成句子的识别原文。"""
         corpus = self._corpus_text
         tail = self._context or ""
         if not corpus:
@@ -196,9 +196,13 @@ class Qwen3ASREngine:
         return f"{corpus}\n{kept_tail}"
 
     def set_context(self, context: str) -> None:
-        """仅设置滚动识别上下文（不含热词语料）。"""
+        """设置当前语音段的显式提示（不含热词语料）。"""
         self._context = context
         self._context = self._truncate_context_to_tokens(self._context)
+
+    @property
+    def context(self) -> str:
+        return self._context
 
     def to_device(self, device: str) -> bool:
         return False
@@ -242,7 +246,9 @@ class Qwen3ASREngine:
         draft = self._draft_tokens if use_draft else None
 
         n_prefill = int(full_embd.shape[0])
-        temperature = 0.4
+        temperature = max(0.0, float(getattr(config, "LOCAL_QWEN_ASR_TEMPERATURE", 0.0)))
+        draft_bias = max(0.0, float(getattr(config, "LOCAL_QWEN_ASR_DRAFT_BIAS", 1.0)))
+        bias_tail = max(0, int(getattr(config, "LOCAL_QWEN_ASR_DRAFT_BIAS_TAIL_TOKENS", 6)))
         gen = None
         t_prefill = 0.0
         t_generate = 0.0
@@ -266,6 +272,8 @@ class Qwen3ASREngine:
                     draft=draft,
                     planes=4,
                     on_token=lambda toks: self._is_repeating(toks),
+                    draft_bias=draft_bias if (draft and temperature <= 0) else 0.0,
+                    bias_tail=bias_tail,
                 )
                 t_generate = time.perf_counter() - t0
             finally:
@@ -273,7 +281,7 @@ class Qwen3ASREngine:
 
             if not gen.aborted:
                 break
-            temperature += 0.3
+            temperature = max(0.4, temperature + 0.3)
             draft = None  # 草稿跟着跑飞了就别再用它
             logger.warning("Decode aborted, retry with temp=%.1f", temperature)
 
@@ -287,6 +295,7 @@ class Qwen3ASREngine:
             "n_passes": gen.n_passes if gen else 0,
             "n_drafted": gen.n_drafted if gen else 0,
             "n_accepted": gen.n_accepted if gen else 0,
+            "n_biased": gen.n_biased if gen else 0,
             "t_decode": gen.t_decode if gen else 0.0,
             "t_wait": gen.t_wait if gen else 0.0,
             "t_verify": gen.t_verify if gen else 0.0,
@@ -371,17 +380,22 @@ class Qwen3ASREngine:
             "n_passes": int(result["n_passes"]),
             "n_drafted": int(result["n_drafted"]),
             "n_accepted": int(result["n_accepted"]),
+            "n_biased": int(result["n_biased"]),
         }
         if not text:
             self._draft_tokens = []
+            if update_context:
+                self._context = ""
             return None
 
         # 本句下一次中间结果的草稿；整句结束后这一句就翻篇了，不该再影响下一句。
         self._draft_tokens = [] if update_context else list(result["tokens"])
 
         if update_context:
-            # 仅累积「识别原文」；热词在 _corpus_text 中单独维护
-            self._context = self._truncate_context_to_tokens(self._context + text)
+            # A final is a hard sentence boundary. Reusing old transcripts in
+            # the next system prompt can make Qwen repeat completed subtitles.
+            # Hotwords remain independently stored in _corpus_text.
+            self._context = ""
         detected_lang = self.language or self._guess_language(text)
         return {
             "text": text,

@@ -185,9 +185,14 @@ def sanitize_qwen_encoder_device(value) -> str:
 
 
 # 推测解码：把上一次的识别/翻译结果当作草稿，一次前向验证掉其中模型认同的部分。
-# 验证是精确比对，输出与逐 token 解码完全一致，只是前向次数变少。
+# 默认精确验证；Qwen 可启用草稿偏置以减少中间结果的近似词反复改写。
 # 实测（RTX 3080 / Vulkan）：ASR token 循环约 2.3x，Hy-MT2 按句长 1.1x–2.3x。
 LOCAL_SPECULATIVE_DECODE = True
+# Qwen uses greedy decoding for stable partials. Near-tie draft tokens are
+# retained except for the newest tail, which stays free to follow new audio.
+LOCAL_QWEN_ASR_TEMPERATURE = 0.0
+LOCAL_QWEN_ASR_DRAFT_BIAS = 1.0
+LOCAL_QWEN_ASR_DRAFT_BIAS_TAIL_TOKENS = 6
 
 # Hy-MT2 本地推理：复用上一次 prompt 的公共前缀（背景/历史那段每次都一样），
 # 只重算发生变化的部分。GPU 上约省 5%，CPU 上 prefill 是大头、收益明显。
@@ -220,7 +225,7 @@ LOCAL_INCREMENTAL_MAX_UPDATE_INTERVAL = 4.0
 
 # Qwen3-ASR：GGUF 解码器 KV 上下文长度（token）；增大占显存/内存。
 LOCAL_QWEN_ASR_N_CTX = 2048
-# 传入 LLM system 区的背景/滚动文本：按模型分词后最多保留的 token 数（取尾部）。
+# 当前语音段传入 LLM system 区的显式提示；句子结束后清空，热词独立保留。
 LOCAL_QWEN_CONTEXT_MAX_TOKENS = 1024
 # 是否在每条识别后打印 Qwen3-ASR 各阶段耗时（mtmd 编码 / LLM prefill / 生成），使用 INFO 级别。旧版 CLI 可在 .env 中用 LOCAL_QWEN_LOG_PIPELINE_TIMING=0 关闭。
 # 需在 config.LOG_LEVEL 为 INFO/DEBUG 时才能在终端看到（默认 ERROR 时不会输出）。

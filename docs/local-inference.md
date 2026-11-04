@@ -45,3 +45,12 @@ Windows 服务直接加载同一目录下的模型。Linux 服务也使用 b1198
 原生 mtmd 适配移植自 realtime-subtitle 的 `codex/qwen-local-asr-translation` 分支、提交 `2ca5f7b`。llama.cpp 与 Silero VAD 为 MIT；Qwen3-ASR 与 Hy-MT2 模型为 Apache-2.0；LLVM OpenMP 为 Apache-2.0 with LLVM Exceptions；SenseVoice 以对应仓库许可为准。模型文件与原生运行库不纳入本项目 Git 提交。
 
 增量修复同步至 `a1c3de0`，包含 `be5cb3d`、`21f2f16`、`d841f44`、`a1c3de0`；同时引入长输出上限所依赖的 `593b8cf` 复读检测部分，保持 Yakutan 原有字幕历史与分句流程。
+
+
+## 识别稳定性与翻译修订同步
+
+同步 realtime-subtitle 已提交的 `af18dcc` / `4a7451f` 解码策略、`d582ee8` 训练提示词与 `593b8cf` 原文缩短保护；不引入其尚未提交的自动语言检测和语言目录改动。
+
+Qwen 本地与远端微批均默认贪心解码，草稿偏置为 1.0，最后 6 个草稿 token 不加偏置，允许新音频纠正尾部。正温度采样不启用草稿偏置。本地与远端句子结束后均清空识别上下文和草稿，热词独立保留。
+
+Hy-MT2 本地、Windows 服务和 Linux 服务共用 `local_inference/hymt_prompt.py`，使用最多 5 对有译文的历史，按训练模板写为“原文 → 译文”。同句原文缩短到上一版的 80% 以下时清除旧原文、旧译文和推测草稿；远端也防止旧客户端提交的长版本译文成为空结果的回退值。

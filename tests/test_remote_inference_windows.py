@@ -63,7 +63,12 @@ def test_check_dependencies_returns_installed_and_missing_labels():
 
 
 def test_model_status_reports_missing_and_ready(tmp_dir: Path | None = None):
-    with tempfile.TemporaryDirectory() as td:
+    from types import ModuleType
+    # This case checks file readiness independently of optional packages on the
+    # test host. Dependency failures are a separate part of the health check.
+    deps = {name: ModuleType(name) for name in
+            ("onnxruntime", "sentencepiece", "kaldi_native_fbank", "gguf", "soundfile")}
+    with tempfile.TemporaryDirectory() as td, patch.dict(sys.modules, deps):
         models = Path(td)
         # 空目录：全部未就绪
         status = _model_status(models)

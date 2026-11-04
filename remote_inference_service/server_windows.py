@@ -362,7 +362,7 @@ class ASREngineManager:
                 result = await asyncio.to_thread(do_transcribe)
                 run_ms = round((asyncio.get_running_loop().time() - started_at) * 1000, 3)
                 queue_ms = round(max(0.0, (started_at - queued_at) * 1000), 3)
-                state.context = (getattr(engine, "context", "") or "") or state.context
+                state.context = getattr(engine, "context", "") or ""
                 return result, state.context, {
                     "queue_ms": queue_ms,
                     "run_ms": run_ms,
@@ -460,52 +460,23 @@ def _source_text(payload: dict[str, Any]) -> str:
     return "".join(str(row[0]) for row in rows if isinstance(row, list) and row).strip()
 
 
-def _source_history(items: Any, limit: int) -> list[str]:
-    if not isinstance(items, list):
-        return []
-    values: list[str] = []
-    for item in items:
-        raw = item if isinstance(item, str) else (
-            item[0] if isinstance(item, (list, tuple)) and item else
-            item.get("source", "") if isinstance(item, dict) else ""
-        )
-        text = str(raw or "").strip()
-        if text:
-            values.append(text)
-    return values[-max(0, limit):]
+def _source_history(items: Any, limit: int) -> list[list[str]]:
+    from local_inference.hymt_prompt import trained_history
+    return trained_history(items, limit)
 
 
 def _translation_prompt(payload: dict[str, Any], source: str, history_limit: int) -> str:
+    # Imported after configure_runtime() adds the deployed runtime to sys.path.
+    from local_inference.hymt_prompt import render_trained_prompt
     source_lang = str(payload.get("source_lang") or "en").lower()
     target_lang = str(payload.get("target_lang") or "zh").lower()
-    source_name = _language_name(source_lang)
-    target_name = _language_name(target_lang)
-    previous_source = str(payload.get("previous_source") or "")
-    previous_translation = str(payload.get("previous_translation") or "")
-    history = _source_history(payload.get("history"), history_limit)
-    if not history and not previous_source and not previous_translation:
-        return (
-            f"Translate the following text from {source_name} into {target_name}. Note that you "
-            "should only output the translated result without any additional explanation:\n\n"
-            + source
-        )
-    background: list[str] = []
-    if history:
-        background.append("Recent source utterances:\n" + "\n".join(history))
-    if previous_source:
-        background.append("Previous version of the current source:\n" + previous_source)
-    if previous_translation:
-        background.append("Previous translation of the current source:\n" + previous_translation)
-    background.append(
-        "When the source meaning has not changed, preserve the still-correct prefix of the "
-        "previous translation whenever possible. When content is added or corrected, accuracy "
-        "and completeness take priority."
-    )
-    return (
-        "[Background Information]\n" + "\n\n".join(background)
-        + f"\n\nPlease translate the following text from {source_name} into {target_name}, "
-        "taking the provided background information into consideration.\n\n[Source Text]\n"
-        + source
+    return render_trained_prompt(
+        source_name=_language_name(source_lang),
+        target_name=_language_name(target_lang),
+        history=_source_history(payload.get("history"), history_limit),
+        previous_source=str(payload.get("previous_source") or ""),
+        previous_translation=str(payload.get("previous_translation") or ""),
+        current_source=source,
     )
 
 
@@ -592,7 +563,10 @@ async def handle_hymt2(
             t0 = time.perf_counter()
             translation = await _translate(backend, _translation_prompt(payload, source, history_limit), source)
             cost_ms = round((time.perf_counter() - t0) * 1000, 1)
+            from local_inference.hymt_prompt import source_was_cut
             previous = str(payload.get("previous_translation") or "")
+            if source_was_cut(str(payload.get("previous_source") or ""), source):
+                previous = ""
             is_final = bool(payload.get("is_final"))
             log("Hy-MT2", f"[{source_lang}->{target_lang}] 翻译完成 -> 译文: \"{translation or previous}\" ({cost_ms}ms)")
 

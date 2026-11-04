@@ -28,6 +28,8 @@ import threading
 import time
 from typing import Dict, List, Optional
 
+from local_inference.hymt_prompt import render_trained_prompt, source_was_cut, trained_history
+
 from .base import BaseTranslationAPI
 from local_inference.repetition_guard import (
     RETRY_REPEAT_PENALTY, is_runaway, max_translation_tokens, source_is_repetitive,
@@ -774,47 +776,18 @@ class HyMT2API(BaseTranslationAPI):
                 self._prev_translation = None
                 self._prev_tokens = []
 
-            prev_src = self._prev_source
-            prev_trans = self._prev_translation
-            recent_history = [p[0] for p in (self._history + history)][-MAX_HISTORY:]
-
-            source_name = LANGUAGE_NAMES.get(source_lang, source_lang)
-            target_name = LANGUAGE_NAMES.get(target_lang, target_lang)
-
-            if not recent_history and not prev_src and not prev_trans:
-                direction = f"from {source_name} into {target_name}"
-                content = (
-                    f"Translate the following text {direction}. Note that you should "
-                    "only output the translated result without any additional explanation:\n\n"
-                    f"{text}"
-                )
-            else:
-                background = []
-                if recent_history:
-                    background.append(
-                        "Recent source utterances:\n" + "\n".join(recent_history)
-                    )
-                if prev_src:
-                    background.append(
-                        "Previous version of the current source:\n" + prev_src
-                    )
-                if prev_trans:
-                    background.append(
-                        "Previous translation of the current source:\n" + prev_trans
-                    )
-                background.append(
-                    "When the source meaning has not changed, preserve the still-correct prefix "
-                    "of the previous translation whenever possible. When content is added or "
-                    "corrected, accuracy and completeness take priority."
-                )
-                direction = f"from {source_name} into {target_name}"
-                content = (
-                    "[Background Information]\n"
-                    + "\n\n".join(background)
-                    + f"\n\nPlease translate the following text {direction}, taking the provided "
-                    "background information into consideration.\n\n[Source Text]\n"
-                    + text
-                )
+            if source_was_cut(self._prev_source, text):
+                self._prev_source = None
+                self._prev_translation = None
+                self._prev_tokens = []
+            content = render_trained_prompt(
+                source_name=LANGUAGE_NAMES.get(source_lang, source_lang),
+                target_name=LANGUAGE_NAMES.get(target_lang, target_lang),
+                history=trained_history(self._history + history),
+                previous_source=self._prev_source or "",
+                previous_translation=self._prev_translation or "",
+                current_source=text,
+            )
 
             prompt = f"<｜hy_begin▁of▁sentence｜><｜hy_User｜>{content}<｜hy_Assistant｜>"
             if self._local_engine is None:
@@ -871,6 +844,10 @@ class HyMT2API(BaseTranslationAPI):
                 )
             )
             new_utterance = (not self._sent_any) or self._last_final or direction_changed
+            if not new_utterance and source_was_cut(self._prev_source, text):
+                self._prev_source = None
+                self._prev_translation = None
+                self._prev_tokens = []
             if new_utterance:
                 self._utterance_id += 1
                 self._prev_source = None
