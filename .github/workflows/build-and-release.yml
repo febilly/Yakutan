@@ -41,7 +41,9 @@ jobs:
         if ("${{ matrix.install_local_inference }}" -eq "true") {
           pip install -r requirements-local-inference.txt
         }
-        pip install pyinstaller
+        pip install pyinstaller==6.22.2 pyinstaller-hooks-contrib==2026.7
+        pip check
+        python -c "from importlib.metadata import distributions; installed={d.metadata['Name'].lower().replace('_','-') for d in distributions()}; assert 'onnxruntime' in installed; assert not installed.intersection({'onnxruntime-directml', 'onnxruntime-gpu'}), installed"
     
     - name: Prefetch Silero VAD
       run: |
@@ -55,6 +57,16 @@ jobs:
     - name: Build executable with PyInstaller
       run: |
         pyinstaller --clean --noconfirm "${{ matrix.spec_file }}"
+
+    - name: Verify EXE dependencies and run offline smoke checks
+      run: |
+        python scripts/check_frozen_package.py "dist/${{ matrix.exe_base }}.exe" "${{ matrix.variant }}" --report "build/package-audit/${{ matrix.variant }}.json"
+
+    - name: Upload package audit
+      uses: actions/upload-artifact@v4
+      with:
+        name: package-audit-${{ matrix.variant }}
+        path: build/package-audit/${{ matrix.variant }}.json
     
     - name: Get commit info and package artifacts
       id: commit_info
@@ -64,7 +76,9 @@ jobs:
         $commitDate = git log -1 --date=format:%Y%m%d-%H%M%S --pretty=%cd
         $tag = "v$commitDate-$commitSha"
         echo "sha=$commitSha" >> $env:GITHUB_OUTPUT
-        echo "message=$commitMsg" >> $env:GITHUB_OUTPUT
+        "message<<YAKUTAN_COMMIT_MESSAGE" >> $env:GITHUB_OUTPUT
+        $commitMsg >> $env:GITHUB_OUTPUT
+        "YAKUTAN_COMMIT_MESSAGE" >> $env:GITHUB_OUTPUT
         echo "commit_date=$commitDate" >> $env:GITHUB_OUTPUT
         echo "tag=$tag" >> $env:GITHUB_OUTPUT
         $base = "${{ matrix.exe_base }}"

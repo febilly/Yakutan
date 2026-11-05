@@ -35,6 +35,8 @@ if _silero_vad.is_dir():
 
 # SoundCard loads WASAPI CFFI declarations from a package data header.
 datas += collect_data_files('soundcard')
+# fast-langdetect's lite detector loads this bundled model directly (no download fallback).
+datas += collect_data_files('fast_langdetect', includes=['resources/lid.176.ftz'])
 
 # 需要包含的隐藏导入
 hiddenimports = [
@@ -70,11 +72,14 @@ hiddenimports = [
 ]
 
 # pywebview 在 Windows 下会动态加载平台后端，PyInstaller 需显式收集。
-hiddenimports += collect_submodules('webview.platforms')
+hiddenimports += [
+    'webview.platforms.winforms', 'webview.platforms.win32',
+    'webview.platforms.edgechromium', 'webview.platforms.mshtml',
+]
 # streaming_translation 翻译库
 hiddenimports += collect_submodules('streaming_translation')
 # 本地 VAD 发送门控（Silero ONNX）& model_manager
-hiddenimports += collect_submodules('local_inference')
+hiddenimports += ['local_inference.vad_processor', 'local_inference.model_manager']
 
 a = Analysis(
     ['run_ui.py'],  # Web UI入口文件
@@ -85,7 +90,17 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['runtime_hook_std.py'],
-    excludes=[],
+    # Keep the standard EXE isolated even when built in a local-inference environment.
+    excludes=[
+        'kaldi_native_fbank', '_kaldi_native_fbank', 'sentencepiece', 'soundfile',
+        '_soundfile', '_soundfile_data', 'gguf',
+        'local_inference.vendor', 'local_inference.asr_sensevoice',
+        'local_inference.asr_qwen3', 'local_inference.mtmd_audio',
+        'local_inference.qwen3_asr_mtmd', 'local_inference.qwen_microbatch',
+        'local_inference.spec_decode',
+        'webview.platforms.android', 'webview.platforms.cocoa',
+        'webview.platforms.gtk', 'webview.platforms.qt', 'webview.platforms.cef',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

@@ -56,7 +56,6 @@ class SenseVoiceEngine:
             str(embedding),
             str(encoder),
             str(bpe),
-            device_id=-1,
             intra_op_num_threads=self._num_threads,
         )
 

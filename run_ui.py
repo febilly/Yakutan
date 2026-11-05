@@ -58,7 +58,10 @@ def _run_web_ui_mode():
     app.run(host='127.0.0.1', port=5001, debug=False)
 
 if __name__ == '__main__':
-    if len(sys.argv) >= 2 and sys.argv[1] == '--panel-app':
+    if len(sys.argv) >= 2 and sys.argv[1] == '--packaging-self-test':
+        from packaging_self_test import main as packaging_self_test
+        packaging_self_test(sys.argv[2:])
+    elif len(sys.argv) >= 2 and sys.argv[1] == '--panel-app':
         _run_panel_mode()
     elif len(sys.argv) >= 2 and sys.argv[1] == '--probe-gpu':
         _run_probe_gpu_mode()

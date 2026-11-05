@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import logging
 import os
 import shutil
@@ -225,6 +226,16 @@ HF_ENDPOINT_MIRRORS = ("https://hf-mirror.com",)
 
 
 def _qwen_vendor_files_complete(base_dir: Path) -> bool:
+    if getattr(sys, "frozen", False) and base_dir == _qwen_vendor_package_dir():
+        # Frozen Python bindings live in PYZ, not as loose source files in _MEIPASS.
+        try:
+            return all(importlib.util.find_spec(name) is not None for name in (
+                "local_inference.vendor.qwen_asr_gguf",
+                "local_inference.vendor.qwen_asr_gguf.inference",
+                "local_inference.vendor.qwen_asr_gguf.inference.llama",
+            ))
+        except (ImportError, ValueError):
+            return False
     return all((base_dir / name).is_file() for name in
                ("__init__.py", "inference/__init__.py", "inference/llama.py"))
 

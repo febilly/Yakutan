@@ -24,12 +24,11 @@ from pathlib import Path
 _silero_vad = Path('local_inference/models/silero_vad')
 if _silero_vad.is_dir():
     datas += [(str(_silero_vad), 'local_inference/models/silero_vad')]
-_qwen_gguf_vendor = Path('local_inference/vendor/qwen_asr_gguf')
-if _qwen_gguf_vendor.is_dir():
-    datas += [(str(_qwen_gguf_vendor), 'local_inference/vendor/qwen_asr_gguf')]
-_llama_dll_upx_exclude = []
+# Vendor Python modules are collected into PYZ below. Never copy their directory:
+# a developer checkout may contain obsolete DLLs, bytecode and model files.
 
 datas += collect_data_files('soundcard')
+datas += collect_data_files('fast_langdetect', includes=['resources/lid.176.ftz'])
 
 hiddenimports = [
     'dashscope',
@@ -63,10 +62,12 @@ hiddenimports = [
     'local_inference',
 ]
 
-hiddenimports += collect_submodules('webview.platforms')
+hiddenimports += [
+    'webview.platforms.winforms', 'webview.platforms.win32',
+    'webview.platforms.edgechromium', 'webview.platforms.mshtml',
+]
 hiddenimports += collect_submodules('streaming_translation')
 hiddenimports += collect_submodules('local_inference')
-hiddenimports += collect_submodules('gguf')
 
 a = Analysis(
     ['run_ui.py'],
@@ -77,7 +78,11 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['runtime_hook_local_inference.py'],
-    excludes=[],
+    excludes=[
+        'gguf.scripts',
+        'webview.platforms.android', 'webview.platforms.cocoa',
+        'webview.platforms.gtk', 'webview.platforms.qt', 'webview.platforms.cef',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -98,7 +103,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=_llama_dll_upx_exclude,
+    upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
     disable_windowed_traceback=False,

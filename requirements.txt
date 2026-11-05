@@ -5,12 +5,14 @@ aiohttp>=3.13.0
 dashscope>=1.27.5,<1.28.0
 
 # 音频处理库
+numpy>=1.24.0
 pyaudio>=0.2.13
 soundcard==0.4.6; sys_platform == 'win32'
 soxr>=1.0.0
 
 # OSC 通信库（用于 VRChat 通信）
 python-osc>=1.8.0
+zeroconf
 
 # 环境变量管理
 python-dotenv>=1.0.0
@@ -28,7 +30,7 @@ arabic-reshaper>=3.0.1
 python-bidi>=0.6.0
 
 # 语言检测库（用于自动检测源语言）
-fast-langdetect>=0.2.0
+fast-langdetect>=1.0.0,<2.0
 
 # WebSocket 客户端（用于部分 ASR/流式组件）
 websockets>=12.0

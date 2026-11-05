@@ -3,12 +3,9 @@
 #   pip install -r requirements.txt
 #   pip install -r requirements-local-inference.txt
 
-numpy>=1.24.0
 kaldi_native_fbank
-protobuf>=3.19.6
 sentencepiece>=0.2.0
 soundfile>=0.12.0
 gguf>=0.18.0
-# SenseVoice and Silero run on CPU; Qwen3-ASR uses llama.cpp mtmd.
-onnxruntime>=1.19.0
-pydub>=0.25.1
+# CPU ONNX Runtime and NumPy come from requirements.txt.
+# Qwen3-ASR / Hy-MT2 use the separately downloaded llama.cpp Vulkan runtime.

@@ -15,7 +15,7 @@ import signal
 import asyncio
 from typing import Callable, Optional
 
-# Allow PyTorch and DirectML/ONNX stacks to coexist in one process.
+# Allow optional libraries carrying different OpenMP runtimes to coexist.
 os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
 
 # 旧版纯命令行入口继续完全依靠 .env。WebUI 会以 ``import main`` 的方式
