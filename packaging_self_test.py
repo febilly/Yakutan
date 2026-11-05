@@ -22,7 +22,9 @@ def main(args: list[str]) -> None:
             "Expected build variant: standard or local-inference")
     require(bool(getattr(sys, "frozen", False)), "Self-test must run inside the EXE")
     local = args[0] == "local-inference"
-    root = Path(sys._MEIPASS)
+    # Windows runners can expose TEMP through a junction or an 8.3 path, while
+    # model_manager resolves __file__ to the canonical path.
+    root = Path(sys._MEIPASS).resolve()
 
     from local_inference import is_local_inference_build_enabled, get_engine_runtime_issues
     from local_inference.model_manager import silero_onnx_path, ensure_vendor_sources
@@ -31,7 +33,8 @@ def main(args: list[str]) -> None:
 
     require(is_local_inference_build_enabled() == local, "Wrong build feature flag")
     require((root / "YAKUTAN_LOCAL_INFERENCE_BUILD").is_file() == local, "Wrong build marker")
-    require(silero_onnx_path().is_relative_to(root), "Silero must be bundled in the EXE")
+    require(silero_onnx_path().resolve().is_relative_to(root),
+            f"Silero must be bundled in the EXE: {silero_onnx_path()} (root: {root})")
     vad = _SileroOnnxVAD(str(silero_onnx_path()))
     providers = vad._session.get_providers()
     require(providers == ["CPUExecutionProvider"], f"Unexpected ONNX providers: {providers}")
