@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib
-import importlib.util
 import io
 import json
 import sys
@@ -18,10 +17,8 @@ def require(condition: bool, message: str) -> None:
 
 
 def main(args: list[str]) -> None:
-    require(len(args) == 1 and args[0] in {"standard", "local-inference"},
-            "Expected build variant: standard or local-inference")
+    require(not args, "Self-test does not accept arguments")
     require(bool(getattr(sys, "frozen", False)), "Self-test must run inside the EXE")
-    local = args[0] == "local-inference"
     # Windows runners can expose TEMP through a junction or an 8.3 path, while
     # model_manager resolves __file__ to the canonical path.
     root = Path(sys._MEIPASS).resolve()
@@ -31,8 +28,8 @@ def main(args: list[str]) -> None:
     from local_inference.vad_processor import _SileroOnnxVAD
     import numpy as np
 
-    require(is_local_inference_build_enabled() == local, "Wrong build feature flag")
-    require((root / "YAKUTAN_LOCAL_INFERENCE_BUILD").is_file() == local, "Wrong build marker")
+    require(is_local_inference_build_enabled(), "Wrong build feature flag")
+    require((root / "YAKUTAN_LOCAL_INFERENCE_BUILD").is_file(), "Wrong build marker")
     require(silero_onnx_path().resolve().is_relative_to(root),
             f"Silero must be bundled in the EXE: {silero_onnx_path()} (root: {root})")
     vad = _SileroOnnxVAD(str(silero_onnx_path()))
@@ -63,30 +60,26 @@ def main(args: list[str]) -> None:
                    "webview.platforms.winforms", "webview.platforms.edgechromium"):
         importlib.import_module(module)
 
-    if local:
-        for module in LOCAL_MODULES:
-            importlib.import_module(module)
-        for engine in ("sensevoice", "qwen3-asr"):
-            require(not get_engine_runtime_issues(engine), f"Missing {engine} runtime dependencies")
-        ensure_vendor_sources("qwen3-asr")
-        importlib.import_module("local_inference.asr_sensevoice")
-        importlib.import_module("local_inference.qwen3_asr_mtmd")
-        from local_inference.vendor.sensevoice_onnx.sense_voice_ort_session import OrtInferRuntimeSession
-        sensevoice_session = OrtInferRuntimeSession(str(silero_onnx_path()))
-        require(sensevoice_session.session.get_providers() == ["CPUExecutionProvider"],
-                "SenseVoice ONNX wrapper must select CPU only")
-        import kaldi_native_fbank as knf
-        import soundfile as sf
-        fbank = knf.OnlineFbank(knf.FbankOptions())
-        fbank.accept_waveform(16000, [0.0] * 1600)
-        require(fbank.num_frames_ready > 0, "Kaldi native frontend failed")
-        buffer = io.BytesIO()
-        sf.write(buffer, np.zeros(160, dtype=np.float32), 16000, format="WAV")
-        buffer.seek(0)
-        require(sf.read(buffer)[1] == 16000, "libsndfile WAV roundtrip failed")
-    else:
-        for module in LOCAL_MODULES:
-            require(importlib.util.find_spec(module) is None, f"Standard EXE contains {module}")
+    for module in LOCAL_MODULES:
+        importlib.import_module(module)
+    for engine in ("sensevoice", "qwen3-asr"):
+        require(not get_engine_runtime_issues(engine), f"Missing {engine} runtime dependencies")
+    ensure_vendor_sources("qwen3-asr")
+    importlib.import_module("local_inference.asr_sensevoice")
+    importlib.import_module("local_inference.qwen3_asr_mtmd")
+    from local_inference.vendor.sensevoice_onnx.sense_voice_ort_session import OrtInferRuntimeSession
+    sensevoice_session = OrtInferRuntimeSession(str(silero_onnx_path()))
+    require(sensevoice_session.session.get_providers() == ["CPUExecutionProvider"],
+            "SenseVoice ONNX wrapper must select CPU only")
+    import kaldi_native_fbank as knf
+    import soundfile as sf
+    fbank = knf.OnlineFbank(knf.FbankOptions())
+    fbank.accept_waveform(16000, [0.0] * 1600)
+    require(fbank.num_frames_ready > 0, "Kaldi native frontend failed")
+    buffer = io.BytesIO()
+    sf.write(buffer, np.zeros(160, dtype=np.float32), 16000, format="WAV")
+    buffer.seek(0)
+    require(sf.read(buffer)[1] == 16000, "libsndfile WAV roundtrip failed")
 
     import main as app_main  # noqa: F401 - validate the application's import graph
     from ui.app import app
@@ -94,7 +87,7 @@ def main(args: list[str]) -> None:
         for route in ("/", "/api/config", "/api/features"):
             require(client.get(route).status_code == 200, f"Web UI route failed: {route}")
     print("PACKAGING_SELF_TEST=" + json.dumps({
-        "variant": args[0], "onnx_providers": providers,
+        "onnx_providers": providers,
         "silero_probability": probability, "fasttext_language": language,
-        "local_dependencies": local, "web_ui": "ok",
+        "local_dependencies": True, "web_ui": "ok",
     }, ensure_ascii=False))

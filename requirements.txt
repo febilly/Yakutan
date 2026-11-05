@@ -45,5 +45,4 @@ flask-cors>=4.0.0
 vrchat_oscquery @ git+https://github.com/theepicsnail/vrchat_oscquery@main
 pywebview>=6.2.1,<7.0
 
-# Local Inference is intentionally split into requirements-local-inference.txt
-# so the standard build does not pull in heavy on-device dependencies.
+# Install requirements-local-inference.txt as well for the desktop application.

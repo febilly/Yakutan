@@ -13,7 +13,7 @@ from pathlib import Path
 from PyInstaller.archive.readers import CArchiveReader
 
 
-def check(executable: Path, variant: str) -> dict:
+def check(executable: Path) -> dict:
     executable = executable.resolve()
     archive = CArchiveReader(str(executable))
     files = {name.replace("\\", "/") for name in archive.toc}
@@ -45,9 +45,6 @@ def check(executable: Path, variant: str) -> dict:
         basename = lower.rsplit("/", 1)[-1]
         require(not (basename in {"llama.dll", "mtmd.dll"} or basename.startswith("ggml")),
                 f"External llama.cpp runtime leaked into EXE: {name}")
-        if variant == "standard":
-            require(not any(token in lower for token in ("kaldi", "sentencepiece", "sndfile", "soundfile")),
-                    f"Local-only native dependency leaked into standard EXE: {name}")
     for name in modules:
         require(not name.startswith(("webview.platforms.android", "webview.platforms.cocoa",
                                      "webview.platforms.gtk", "webview.platforms.qt",
@@ -55,10 +52,10 @@ def check(executable: Path, variant: str) -> dict:
                 f"Unused platform or tooling module leaked: {name}")
     local_modules = ("kaldi_native_fbank", "sentencepiece", "soundfile", "gguf")
     for name in local_modules:
-        require((name in modules) == (variant == "local-inference"), f"Wrong variant dependency: {name}")
+        require(name in modules, f"Wrong variant dependency: {name}")
     binding = "local_inference.vendor.qwen_asr_gguf.inference.llama"
-    require((binding in modules) == (variant == "local-inference"), "Wrong Qwen binding isolation")
-    require(("YAKUTAN_LOCAL_INFERENCE_BUILD" in files) == (variant == "local-inference"),
+    require(binding in modules, "Wrong Qwen binding isolation")
+    require("YAKUTAN_LOCAL_INFERENCE_BUILD" in files,
             "Wrong variant marker")
 
     # Running outside the checkout catches accidental imports/resources from the source tree.
@@ -66,7 +63,7 @@ def check(executable: Path, variant: str) -> dict:
         copied = Path(folder) / executable.name
         shutil.copy2(executable, copied)
         result = subprocess.run(
-            [str(copied), "--packaging-self-test", variant], cwd=folder,
+            [str(copied), "--packaging-self-test"], cwd=folder,
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
         )
     print(result.stdout)
@@ -78,7 +75,7 @@ def check(executable: Path, variant: str) -> dict:
     with executable.open("rb") as stream:
         sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
     return {
-        "variant": variant, "exe": executable.name, "bytes": executable.stat().st_size,
+        "exe": executable.name, "bytes": executable.stat().st_size,
         "sha256": sha256,
         "resources": resources, "file_count": len(files), "module_count": len(modules),
         "self_test": json.loads(summaries[0]),
@@ -90,10 +87,9 @@ def check(executable: Path, variant: str) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("executable", type=Path)
-    parser.add_argument("variant", choices=("standard", "local-inference"))
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
-    report = check(args.executable, args.variant)
+    report = check(args.executable)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Verified {report['exe']}: {report['bytes']} bytes, SHA256 {report['sha256']}")

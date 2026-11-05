@@ -1,44 +1,35 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller配置文件 - Web UI版本
-用于将VRChat翻译器Web UI打包成单个可执行文件
-
-使用方法:
-    pyinstaller run_ui.spec
-
-打包后的可执行文件将包含所有必要的资源文件
+PyInstaller configuration for Yakutan with local inference support.
 """
 
 block_cipher = None
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import importlib.util
-from pathlib import Path
 
-# 需要包含的数据文件（资源文件）
 datas = [
-    ('hot_words', 'hot_words'),  # 公共热词目录
-    ('ui/templates', 'ui/templates'),  # UI模板文件
-    ('ui/static', 'ui/static'),  # UI静态文件（CSS、JS等）
+    ('hot_words', 'hot_words'),
+    ('ui/templates', 'ui/templates'),
+    ('ui/static', 'ui/static'),
+    ('YAKUTAN_LOCAL_INFERENCE_BUILD', '.'),
 ]
 
-# pykakasi 假名转换依赖包内词典/数据文件；未打包会导致假名功能无效
-# 某些环境里 pykakasi 可能以单文件 module 形式存在（不是 package），此时跳过数据收集以避免告警。
 _pykakasi_spec = importlib.util.find_spec('pykakasi')
 if _pykakasi_spec is not None and getattr(_pykakasi_spec, 'submodule_search_locations', None):
     datas += collect_data_files('pykakasi')
 
-# CI prefetch before PyInstaller: include Silero VAD ONNX in the standard single-file build.
+# Bundle Silero VAD; other model weights and Vulkan runtime are downloaded in the UI.
+from pathlib import Path
 _silero_vad = Path('local_inference/models/silero_vad')
 if _silero_vad.is_dir():
     datas += [(str(_silero_vad), 'local_inference/models/silero_vad')]
+# Vendor Python modules are collected into PYZ below. Never copy their directory:
+# a developer checkout may contain obsolete DLLs, bytecode and model files.
 
-# SoundCard loads WASAPI CFFI declarations from a package data header.
 datas += collect_data_files('soundcard')
-# fast-langdetect's lite detector loads this bundled model directly (no download fallback).
 datas += collect_data_files('fast_langdetect', includes=['resources/lid.176.ftz'])
 
-# 需要包含的隐藏导入
 hiddenimports = [
     'dashscope',
     'dashscope.audio.asr',
@@ -54,7 +45,7 @@ hiddenimports = [
     'aiohttp',
     'asyncio',
     'dotenv',
-    'main',  # 确保main模块被包含
+    'main',
     'openai',
     'pykakasi',
     'httpx',
@@ -67,37 +58,29 @@ hiddenimports = [
     'bidi.algorithm',
     'panel_app',
     'webview',
-    'onnxruntime',
-    'onnxruntime.capi',
+    'speech_recognizers.local_speech_recognizer',
+    'local_inference',
 ]
 
-# pywebview 在 Windows 下会动态加载平台后端，PyInstaller 需显式收集。
 hiddenimports += [
     'webview.platforms.winforms', 'webview.platforms.win32',
     'webview.platforms.edgechromium', 'webview.platforms.mshtml',
 ]
-# streaming_translation 翻译库
 hiddenimports += collect_submodules('streaming_translation')
-# 本地 VAD 发送门控（Silero ONNX）& model_manager
-hiddenimports += ['local_inference.vad_processor', 'local_inference.model_manager']
+hiddenimports += collect_submodules('local_inference')
 
 a = Analysis(
-    ['run_ui.py'],  # Web UI入口文件
+    ['run_ui.py'],
     pathex=[],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=['runtime_hook_std.py'],
-    # Keep the standard EXE isolated even when built in a local-inference environment.
+    runtime_hooks=['runtime_hook_local_inference.py'],
     excludes=[
-        'kaldi_native_fbank', '_kaldi_native_fbank', 'sentencepiece', 'soundfile',
-        '_soundfile', '_soundfile_data', 'gguf',
-        'local_inference.vendor', 'local_inference.asr_sensevoice',
-        'local_inference.asr_qwen3', 'local_inference.mtmd_audio',
-        'local_inference.qwen3_asr_mtmd', 'local_inference.qwen_microbatch',
-        'local_inference.spec_decode',
+        'pytest',
+        'gguf.scripts',
         'webview.platforms.android', 'webview.platforms.cocoa',
         'webview.platforms.gtk', 'webview.platforms.qt', 'webview.platforms.cef',
     ],
@@ -116,18 +99,18 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='Yakutan',  # 可执行文件名称
+    name='Yakutan',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,  # 显示控制台窗口
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # 可以指定图标文件路径
+    icon=None,
 )

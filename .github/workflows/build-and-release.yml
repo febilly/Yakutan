@@ -2,136 +2,75 @@ name: Build and Release
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:  # 允许手动触发
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write  # 允许创建 release 和推送 tag
+  contents: write
 
 jobs:
   build:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: standard
-            spec_file: run_ui.spec
-            exe_base: Yakutan
-            install_local_inference: false
-          - variant: local-inference
-            spec_file: run_ui_local_inference.spec
-            exe_base: Yakutan-LocalInference
-            install_local_inference: true
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        if ("${{ matrix.install_local_inference }}" -eq "true") {
-          pip install -r requirements-local-inference.txt
-        }
-        pip install pyinstaller==6.22.2 pyinstaller-hooks-contrib==2026.7
-        pip check
-        python -c "from importlib.metadata import distributions; installed={d.metadata['Name'].lower().replace('_','-') for d in distributions()}; assert 'onnxruntime' in installed; assert not installed.intersection({'onnxruntime-directml', 'onnxruntime-gpu'}), installed"
-    
-    - name: Prefetch Silero VAD
-      run: |
-        python -c "from local_inference.model_manager import apply_cache_env, download_silero; apply_cache_env(); download_silero()"
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Prefetch Qwen vendor glue (no SenseVoice / Qwen weights in app zip)
-      if: matrix.variant == 'local-inference'
-      run: |
-        python -c "from local_inference.model_manager import apply_cache_env, ensure_vendor_sources; apply_cache_env(); ensure_vendor_sources('qwen3-asr')"
-    
-    - name: Build executable with PyInstaller
-      run: |
-        pyinstaller --clean --noconfirm "${{ matrix.spec_file }}"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Verify EXE dependencies and run offline smoke checks
-      run: |
-        python scripts/check_frozen_package.py "dist/${{ matrix.exe_base }}.exe" "${{ matrix.variant }}" --report "build/package-audit/${{ matrix.variant }}.json"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-local-inference.txt
+          pip install pyinstaller==6.22.2 pyinstaller-hooks-contrib==2026.7 pytest
+          pip check
+          python -c "from importlib.metadata import distributions; installed={d.metadata['Name'].lower().replace('_','-') for d in distributions()}; assert 'onnxruntime' in installed; assert not installed.intersection({'onnxruntime-directml', 'onnxruntime-gpu'}), installed"
 
-    - name: Upload package audit
-      uses: actions/upload-artifact@v4
-      with:
-        name: package-audit-${{ matrix.variant }}
-        path: build/package-audit/${{ matrix.variant }}.json
-    
-    - name: Get commit info and package artifacts
-      id: commit_info
-      run: |
-        $commitSha = "${{ github.sha }}".Substring(0, 7)
-        $commitMsg = git log -1 --pretty=%B
-        $commitDate = git log -1 --date=format:%Y%m%d-%H%M%S --pretty=%cd
-        $tag = "v$commitDate-$commitSha"
-        echo "sha=$commitSha" >> $env:GITHUB_OUTPUT
-        "message<<YAKUTAN_COMMIT_MESSAGE" >> $env:GITHUB_OUTPUT
-        $commitMsg >> $env:GITHUB_OUTPUT
-        "YAKUTAN_COMMIT_MESSAGE" >> $env:GITHUB_OUTPUT
-        echo "commit_date=$commitDate" >> $env:GITHUB_OUTPUT
-        echo "tag=$tag" >> $env:GITHUB_OUTPUT
-        $base = "${{ matrix.exe_base }}"
-        $exeName = "$base-$commitDate.exe"
-        $src = Join-Path "./dist" "$base.exe"
-        if (-not (Test-Path $src)) { throw "PyInstaller 单文件输出不存在: $src" }
-        Rename-Item -Path $src -NewName $exeName
-        echo "exe_name=$exeName" >> $env:GITHUB_OUTPUT
-    
-    - name: Create Release (standard)
-      if: matrix.variant == 'standard'
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ steps.commit_info.outputs.tag }}
-        name: Yakutan ${{ steps.commit_info.outputs.tag }}
-        body: |
-          ## 自动构建版本
-          
-          **提交信息**: ${{ steps.commit_info.outputs.message }}
-          **提交日期**: ${{ steps.commit_info.outputs.commit_date }}
-          **提交 SHA**: ${{ steps.commit_info.outputs.sha }}
-          
-          **构建产物**（与本 tag 并行 job 合计）:
-          - `Yakutan-*.exe`: 标准版单文件；内置 Silero VAD ONNX 权重
-          - `Yakutan-LocalInference-*.exe`: 本地推理版单文件；内置本地推理运行胶水代码与 Silero VAD ONNX 权重。**SenseVoice / Qwen3 离线资源**：**Pack Local Inference model bundles** 工作流单独发布
-          
-          **离线语音识别资源**：可从 [https://github.com/febilly/Yakutan/releases/tag/yakutan-local-asr-models-20260416-061437-ba7820c](https://github.com/febilly/Yakutan/releases/tag/yakutan-local-asr-models-20260416-061437-ba7820c) 下载，也可以在 **WebUI** 中下载。
-        files: ./dist/${{ steps.commit_info.outputs.exe_name }}
-        draft: true
-        prerelease: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Create Release (local-inference)
-      if: matrix.variant == 'local-inference'
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ steps.commit_info.outputs.tag }}
-        name: Yakutan ${{ steps.commit_info.outputs.tag }}
-        body: |
-          ## 自动构建版本
-          
-          **提交信息**: ${{ steps.commit_info.outputs.message }}
-          **提交日期**: ${{ steps.commit_info.outputs.commit_date }}
-          **提交 SHA**: ${{ steps.commit_info.outputs.sha }}
-          
-          **构建产物**（与本 tag 并行 job 合计）:
-          - `Yakutan-*.exe`: 标准版单文件；内置 Silero VAD ONNX 权重
-          - `Yakutan-LocalInference-*.exe`: 本地推理版单文件；内置本地推理运行胶水代码与 Silero VAD ONNX 权重。**SenseVoice / Qwen3-ASR / Hy-MT2 权重与 llama.cpp Vulkan 运行时**：可在 **WebUI** 内一键下载，或运行 **Pack Local Inference model bundles** 工作流，将生成的 zip 内 **`local_asr_models`** 解压到与 **`Yakutan-LocalInference-*.exe` 同级**
-          
-          **离线语音识别资源**：可从 [https://github.com/febilly/Yakutan/releases/tag/untagged-1a0522a8c7f4c560a615](https://github.com/febilly/Yakutan/releases/tag/untagged-1a0522a8c7f4c560a615) 下载，也可以在 **WebUI** 中下载。
-        files: ./dist/${{ steps.commit_info.outputs.exe_name }}
-        draft: true
-        prerelease: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Test model downloads
+        run: python -m pytest tests/test_model_download.py tests/test_native_local_inference.py -q
+
+      - name: Prepare bundled resources
+        run: |
+          python -c "from local_inference.model_manager import apply_cache_env, download_silero, ensure_vendor_sources; apply_cache_env(); download_silero(); ensure_vendor_sources('qwen3-asr')"
+
+      - name: Build Yakutan
+        run: pyinstaller --clean --noconfirm run_ui.spec
+
+      - name: Verify EXE
+        run: python scripts/check_frozen_package.py dist/Yakutan.exe --report build/package-audit/Yakutan.json
+
+      - name: Upload package audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-audit
+          path: build/package-audit/Yakutan.json
+
+      - name: Prepare release
+        id: release
+        run: |
+          $sha = "${{ github.sha }}".Substring(0, 7)
+          $date = git log -1 --date=format:%Y%m%d-%H%M%S --pretty=%cd
+          $exe = "Yakutan-$date.exe"
+          Rename-Item -LiteralPath dist/Yakutan.exe -NewName $exe
+          "tag=v$date-$sha" >> $env:GITHUB_OUTPUT
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+          "exe=$exe" >> $env:GITHUB_OUTPUT
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: Yakutan ${{ steps.release.outputs.tag }}
+          body: |
+            下载 `Yakutan-*.exe`，双击启动。
+
+            本地识别已内置，模型可在程序内下载。
+
+            提交：`${{ steps.release.outputs.sha }}`
+          files: dist/${{ steps.release.outputs.exe }}
+          draft: true
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
