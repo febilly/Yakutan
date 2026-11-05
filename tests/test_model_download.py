@@ -478,7 +478,7 @@ ui_app.download_local_inference_model = boom
 ui_app._download_local_inference_worker("qwen3-asr")
 failed_state = client.get("/api/local-inference/download-progress").get_json()
 
-print(json.dumps({"seen": seen, "done": done_state, "failed": failed_state}, ensure_ascii=False))
+print(json.dumps({"seen": seen, "done": done_state, "failed": failed_state}, ensure_ascii=True))
 """
 
 
@@ -487,6 +487,7 @@ def test_panel_progress_reaches_the_http_endpoint():
     result = subprocess.run(
         [sys.executable, "-c", _PANEL_PROGRESS_SCRIPT % {"root": root}],
         cwd=root, check=True, capture_output=True, text=True, encoding="utf-8",
+        env=dict(os.environ, PYTHONIOENCODING="cp1252"),
     )
     payload = json.loads(result.stdout.strip().splitlines()[-1])
 
@@ -540,7 +541,7 @@ print(json.dumps({
     "right_after": right_after,
     "second_code": second.status_code,
     "final": final,
-}, ensure_ascii=False))
+}, ensure_ascii=True))
 """
 
 
@@ -549,6 +550,7 @@ def test_download_endpoint_marks_running_before_it_returns():
     result = subprocess.run(
         [sys.executable, "-c", _DOWNLOAD_ENDPOINT_SCRIPT % {"root": root}],
         cwd=root, check=True, capture_output=True, text=True, encoding="utf-8",
+        env=dict(os.environ, PYTHONIOENCODING="cp1252"),
     )
     payload = json.loads(result.stdout.strip().splitlines()[-1])
 
