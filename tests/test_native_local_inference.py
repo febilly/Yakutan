@@ -85,7 +85,7 @@ def test_multi_session_drafts_are_split_at_64_output_rows():
 
 def test_hf_hash_failure_falls_back_with_pinned_revision(tmp_path, monkeypatch):
     good = b"GGUFgood"
-    monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda *args: ["https://bad", "https://good"])
+    monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda *args, **kwargs: ["https://bad", "https://good"])
     urls = []
     def download(url, dest, *args):
         urls.append(url)
@@ -100,7 +100,7 @@ def test_hf_hash_failure_falls_back_with_pinned_revision(tmp_path, monkeypatch):
 
 def test_runtime_hf_archive_includes_mtmd_and_never_uses_old_dlls(tmp_path, monkeypatch):
     monkeypatch.setattr(mm, "MODELS_DIR", tmp_path)
-    monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda *args: ["https://hf-mirror.com"])
+    monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda *args, **kwargs: ["https://hf-mirror.com"])
     names = (*mm._runtime_names(), "libomp.dll")
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w") as z:

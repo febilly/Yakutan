@@ -6,6 +6,7 @@
 """
 
 import http.server
+import hashlib
 import json
 import os
 import socketserver
@@ -22,6 +23,15 @@ from local_inference import model_manager as mm  # noqa: E402
 
 PAYLOAD = b"GGUF" + b"\x5a" * 60_000
 BAD_PAYLOAD = b"<html>blocked by gateway</html>"
+
+
+@pytest.fixture(autouse=True)
+def download_environment(monkeypatch):
+    monkeypatch.setattr(mm, "_hf_endpoint_choice", None)
+    monkeypatch.setattr(mm, "HYMT2_SHA256", hashlib.sha256(PAYLOAD).hexdigest())
+    monkeypatch.setattr(mm, "SENSEVOICE_SHA256", {
+        name: hashlib.sha256(PAYLOAD).hexdigest() for name in mm.SENSEVOICE_ONNX_FILES
+    })
 
 
 class _RangeHandler(http.server.BaseHTTPRequestHandler):
@@ -197,11 +207,87 @@ class TestEndpointSelection:
 
         assert mm._ordered_hf_endpoints("r", "f")[0] == mm.HF_ENDPOINT_MIRRORS[0]
 
-    def test_all_unreachable_still_returns_candidates(self, monkeypatch):
+    def test_all_unreachable_fails_fast_and_reprobes_on_retry(self, monkeypatch):
         monkeypatch.setattr(mm, "_hf_endpoint_reachable", lambda url, **kw: False)
+        with pytest.raises(mm.HFUnreachable):
+            mm._ordered_hf_endpoints("r", "f")
+        assert mm._hf_endpoint_choice is None
+        monkeypatch.setattr(mm, "_hf_endpoint_reachable", lambda url, **kw: True)
+        assert mm._ordered_hf_endpoints("r", "f")[0] == mm.HF_ENDPOINT_OFFICIAL
 
-        # 探测本身也可能误判（代理、临时抖动），所以候选一个都不能丢
-        assert set(mm._ordered_hf_endpoints("r", "f")) == set(mm._hf_endpoints())
+    def test_probes_in_parallel_and_caches_the_choice(self, monkeypatch):
+        barrier = threading.Barrier(2)
+        requested = []
+
+        def probe(url, **kwargs):
+            requested.append(url)
+            barrier.wait(timeout=2)
+            return url.startswith(mm.HF_ENDPOINT_MIRRORS[0])
+
+        monkeypatch.setattr(mm, "_hf_endpoint_reachable", probe)
+        progress = []
+        first = mm._ordered_hf_endpoints("org/repo", "model.gguf", lambda *a: progress.append(a),
+                                         revision="pinned")
+        second = mm._ordered_hf_endpoints("other/repo", "another.gguf")
+        assert first == second == [mm.HF_ENDPOINT_MIRRORS[0], mm.HF_ENDPOINT_OFFICIAL]
+        assert len(requested) == 2
+        assert all("/resolve/pinned/" in url for url in requested)
+        assert progress == [("source-probe", 0, None)]
+
+    def test_official_wins_when_both_are_reachable(self, monkeypatch):
+        monkeypatch.setattr(mm, "_hf_endpoint_reachable", lambda *a, **kw: True)
+        assert mm._ordered_hf_endpoints("r", "f") == mm._hf_endpoints()
+
+    def test_manual_source_skips_probe_but_keeps_fallbacks(self, monkeypatch):
+        monkeypatch.setenv("YAKUTAN_HF_ENDPOINT", "https://custom.example/")
+        monkeypatch.setattr(mm, "_probe_hf_endpoints", lambda *a: pytest.fail("Unexpected probe"))
+        assert mm._ordered_hf_endpoints("r", "f") == [
+            "https://custom.example", mm.HF_ENDPOINT_OFFICIAL, *mm.HF_ENDPOINT_MIRRORS,
+        ]
+
+    def test_expired_choice_or_proxy_change_reprobes(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(mm, "_probe_hf_endpoints", lambda *a: calls.append(a) or mm._hf_endpoints())
+        mm._ordered_hf_endpoints("r", "f")
+        monkeypatch.setattr(mm, "_hf_endpoint_choice_at", -mm.HF_ENDPOINT_CACHE_SECONDS)
+        mm._ordered_hf_endpoints("r", "f")
+        monkeypatch.setenv("HTTPS_PROXY", "http://changed.example")
+        mm._ordered_hf_endpoints("r", "f")
+        assert len(calls) == 3
+
+    def test_probe_deadline_does_not_wait_for_stuck_official(self, monkeypatch):
+        release = threading.Event()
+        def probe(url, **kwargs):
+            if url.startswith(mm.HF_ENDPOINT_OFFICIAL):
+                release.wait(timeout=2)
+                return False
+            return True
+        monkeypatch.setattr(mm, "HF_PROBE_TIMEOUT_SECONDS", 0.1)
+        monkeypatch.setattr(mm, "_hf_endpoint_reachable", probe)
+        try:
+            assert mm._ordered_hf_endpoints("r", "f")[0] == mm.HF_ENDPOINT_MIRRORS[0]
+            assert not release.is_set()
+        finally:
+            release.set()
+
+    def test_probe_rejects_html_and_follows_file_redirect(self, server):
+        assert mm._hf_endpoint_reachable(f"{server.base_url}/model.gguf")
+        assert not mm._hf_endpoint_reachable(f"{server.base_url}/portal.onnx")
+
+    def test_download_failure_promotes_the_working_mirror(self, tmp_path, monkeypatch):
+        probes = []
+        monkeypatch.setattr(mm, "_hf_endpoint_reachable", lambda url, **kw: probes.append(url) or True)
+
+        def stream(url, dest, *args):
+            if url.startswith(mm.HF_ENDPOINT_OFFICIAL):
+                raise OSError("Connection reset after the successful probe")
+            dest.write_bytes(PAYLOAD)
+
+        monkeypatch.setattr(mm, "_stream_download", stream)
+        mm._download_hf_file("r", "f.gguf", tmp_path / "f.gguf", "test",
+                             sha256=hashlib.sha256(PAYLOAD).hexdigest())
+        assert mm._ordered_hf_endpoints("r", "next.gguf")[0] == mm.HF_ENDPOINT_MIRRORS[0]
+        assert len(probes) == 2
 
     def test_url_layout_matches_hf_resolve_scheme(self):
         assert mm._hf_file_url("https://x.dev", "org/repo", "a.gguf") == (
@@ -225,7 +311,7 @@ class TestDownloadHymt2:
         monkeypatch.setattr(mm, "apply_cache_env", lambda: None)
         monkeypatch.setattr(
             mm, "_ordered_hf_endpoints",
-            lambda repo, name: ["http://127.0.0.1:1", server.base_url],
+            lambda repo, name, *args, **kwargs: ["http://127.0.0.1:1", server.base_url],
         )
         monkeypatch.setattr(
             mm, "_hf_file_url",
@@ -241,18 +327,20 @@ class TestDownloadHymt2:
         monkeypatch.setattr(mm, "apply_cache_env", lambda: None)
         monkeypatch.setattr(
             mm, "_ordered_hf_endpoints",
-            lambda repo, name: ["https://a.invalid", "https://b.invalid"],
+            lambda repo, name, *args, **kwargs: ["https://a.invalid", "https://b.invalid"],
         )
 
         def _fail(url, *args, **kwargs):
             raise OSError(f"unreachable: {url}")
 
         monkeypatch.setattr(mm, "_stream_download", _fail)
+        monkeypatch.setattr(mm, "_hf_endpoint_choice", ["https://a.invalid", "https://b.invalid"])
 
         with pytest.raises(RuntimeError) as excinfo:
             mm.download_hymt2()
 
         assert "a.invalid" in str(excinfo.value) and "b.invalid" in str(excinfo.value)
+        assert mm._hf_endpoint_choice is None
 
     def test_existing_model_is_not_redownloaded(self, tmp_path, monkeypatch, _stub_runtime):
         monkeypatch.setattr(mm, "MODELS_DIR", tmp_path)
@@ -274,7 +362,7 @@ class TestDownloadHymt2:
                                                      _stub_runtime):
         monkeypatch.setattr(mm, "MODELS_DIR", tmp_path)
         monkeypatch.setattr(mm, "apply_cache_env", lambda: None)
-        monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda repo, name: [server.base_url])
+        monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda repo, name, *args, **kwargs: [server.base_url])
         monkeypatch.setattr(
             mm, "_hf_file_url",
             lambda endpoint, repo, name, revision="main": f"{endpoint}/model.gguf",
@@ -294,8 +382,8 @@ class TestOtherEnginesReportProgress:
         monkeypatch.setattr(mm, "is_silero_cached", lambda: False)
         monkeypatch.setattr(mm, "_silero_onnx_user_path", lambda: dest)
         import hashlib
-        monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda *args: [server.base_url])
-        monkeypatch.setattr(mm, "_hf_file_url", lambda *args: f"{server.base_url}/silero.onnx")
+        monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda *args, **kwargs: [server.base_url])
+        monkeypatch.setattr(mm, "_hf_file_url", lambda *args, **kwargs: f"{server.base_url}/silero.onnx")
         monkeypatch.setattr(mm, "SILERO_VAD_ONNX_SHA256", hashlib.sha256(PAYLOAD).hexdigest())
         seen = []
 
@@ -305,7 +393,7 @@ class TestOtherEnginesReportProgress:
         assert seen[-1] == ("silero", len(PAYLOAD), len(PAYLOAD))
 
     def test_sensevoice_downloads_every_file_with_a_counter(self, server, tmp_path, monkeypatch):
-        monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda repo, name: [server.base_url])
+        monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda repo, name, *args, **kwargs: [server.base_url])
         monkeypatch.setattr(
             mm, "_hf_file_url",
             lambda endpoint, repo, name, revision="main": f"{endpoint}/{name}",
@@ -321,7 +409,7 @@ class TestOtherEnginesReportProgress:
         assert all(f"/{len(mm.SENSEVOICE_ONNX_FILES)}" in stage for stage in stages)
 
     def test_sensevoice_skips_files_already_on_disk(self, server, tmp_path, monkeypatch):
-        monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda repo, name: [server.base_url])
+        monkeypatch.setattr(mm, "_ordered_hf_endpoints", lambda repo, name, *args, **kwargs: [server.base_url])
         monkeypatch.setattr(
             mm, "_hf_file_url",
             lambda endpoint, repo, name, revision="main": f"{endpoint}/{name}",
@@ -344,7 +432,7 @@ class TestOtherEnginesReportProgress:
             mm._report(progress, stage, len(PAYLOAD), len(PAYLOAD))
         monkeypatch.setattr(mm, "_download_hf_file", download)
         seen = []
-        mm.download_qwen3_asr(lambda *args: seen.append(args))
+        mm.download_qwen3_asr(lambda *args, **kwargs: seen.append(args))
         variant = mm.qwen3_asr_variant()
         assert len(calls) == 2
         for repo, filename, kwargs in calls:
@@ -364,6 +452,7 @@ sys.path.insert(0, %(root)r)
 from ui import app as ui_app
 
 steps = [
+    ("source-probe", 0, None),
     ("Silero VAD", 0, 1300000),
     ("Qwen3-ASR 模型", 100000000, 770000000),
     ("解压 Qwen3-ASR 模型", 0, None),
@@ -402,9 +491,10 @@ def test_panel_progress_reaches_the_http_endpoint():
     payload = json.loads(result.stdout.strip().splitlines()[-1])
 
     percents = [snap["percent"] for snap in payload["seen"]]
-    assert percents == [0, 12, None]  # 拿不到总长度的阶段报 None，前端据此画不确定态
-    assert payload["seen"][1]["stage"] == "Qwen3-ASR 模型"
-    assert "95/734 MB" in payload["seen"][1]["status"]
+    assert percents == [None, 0, 12, None]
+    assert payload["seen"][0]["status"] == "正在检测下载源"
+    assert payload["seen"][2]["stage"] == "Qwen3-ASR 模型"
+    assert "95/734 MB" in payload["seen"][2]["status"]
 
     assert payload["done"]["running"] is False
     assert payload["done"]["percent"] == 100

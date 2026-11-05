@@ -566,7 +566,9 @@ function renderDownloadProgress(box, state) {
 
     const line = document.createElement('div');
     line.className = 'local-download-line';
-    line.textContent = state.stage
+    line.textContent = state.stage === 'source-probe'
+        ? t('status.downloadSourceProbe')
+        : state.stage
         ? `${state.stage}${state.percent === null || state.percent === undefined ? '' : ` · ${state.percent}%`}`
         : (state.status || t('status.downloading'));
     box.appendChild(line);

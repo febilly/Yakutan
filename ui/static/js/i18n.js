@@ -379,6 +379,7 @@ const translations = {
         'hint.localInferenceStatus': '首次使用前请先下载对应引擎模型和运行时。',
         'hint.localInferenceNeedsDownload': '当前引擎尚未准备好，请先下载模型和运行时。',
         'status.downloading': '下载中',
+        'status.downloadSourceProbe': '正在检测下载源',
         'status.localInferenceReady': '{engine} 已准备就绪',
         'btn.downloadLocalInference': '下载本地识别模型',
 
@@ -837,6 +838,7 @@ const translations = {
         'hint.localInferenceStatus': 'Download the selected engine model and runtime before first use.',
         'hint.localInferenceNeedsDownload': 'The selected engine is not ready yet. Please download the model and runtime first.',
         'status.downloading': 'Downloading',
+        'status.downloadSourceProbe': 'Checking download sources',
         'status.localInferenceReady': '{engine} is ready',
         'btn.downloadLocalInference': 'Download Local ASR Model',
 
@@ -1287,6 +1289,7 @@ const translations = {
         'hint.localInferenceStatus': '初回利用前に、選択したエンジンのモデルとランタイムをダウンロードしてください。',
         'hint.localInferenceNeedsDownload': '選択中のエンジンはまだ準備できていません。先にモデルとランタイムをダウンロードしてください。',
         'status.downloading': 'ダウンロード中',
+        'status.downloadSourceProbe': 'ダウンロード元を確認中',
         'status.localInferenceReady': '{engine} の準備ができました',
         'btn.downloadLocalInference': 'ローカル認識モデルをダウンロード',
 
@@ -1733,6 +1736,7 @@ const translations = {
         'hint.localInferenceStatus': '처음 사용하기 전에 선택한 엔진의 모델과 런타임을 먼저 다운로드하세요.',
         'hint.localInferenceNeedsDownload': '선택한 엔진이 아직 준비되지 않았습니다. 모델과 런타임을 먼저 다운로드하세요.',
         'status.downloading': '다운로드 중',
+        'status.downloadSourceProbe': '다운로드 서버 확인 중',
         'status.localInferenceReady': '{engine} 준비 완료',
         'btn.downloadLocalInference': '로컬 인식 모델 다운로드',
 

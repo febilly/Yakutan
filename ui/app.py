@@ -497,7 +497,7 @@ def _report_local_inference_progress(stage: str, done_bytes: int,
         downloaded_bytes=done_bytes,
         total_bytes=total_bytes,
         percent=percent,
-        status=f'{stage} {detail}'.strip(),
+        status=('正在检测下载源' if stage == 'source-probe' else f'{stage} {detail}'.strip()),
     )
 
 

@@ -7,8 +7,10 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import HTTPError
@@ -137,6 +139,7 @@ MODELS_DIR = _default_models_dir()
 # 单文件运行时 VENDOR_DIR 在 _MEIPASS 下，仅用于读取随程序打包的 Python 绑定。
 SENSEVOICE_ONNX_DIR_NAME = "sensevoice-onnx"
 SENSEVOICE_ONNX_REPO = "lovemefan/SenseVoice-onnx"
+SENSEVOICE_REVISION = "8a5ee5b014950890a07246bc590a4f77b3ef67a4"
 SENSEVOICE_ENCODER_ONNX = "sense-voice-encoder-int8.onnx"
 SENSEVOICE_ONNX_FILES = (
     "embedding.npy",
@@ -144,6 +147,12 @@ SENSEVOICE_ONNX_FILES = (
     "am.mvn",
     "chn_jpn_yue_eng_ko_spectok.bpe.model",
 )
+SENSEVOICE_SHA256 = {
+    "embedding.npy": "83cf1fc5680fdf6d7edb411be5ce351cad4eca03b29a5bf5050aa19dfcc12267",
+    SENSEVOICE_ENCODER_ONNX: "b1a1e84077e03ba65c937d0c19c83796138461134c6e69dbe666dbf67d1696b6",
+    "am.mvn": "29b3c740a2c0cfc6b308126d31d7f265fa2be74f3bb095cd2f143ea970896ae5",
+    "chn_jpn_yue_eng_ko_spectok.bpe.model": "aa87f86064c3730d799ddf7af3c04659151102cba548bce325cf06ba4da4e6a8",
+}
 
 ASR_MODEL_IDS = {
     "sensevoice": SENSEVOICE_ONNX_REPO,
@@ -219,10 +228,18 @@ HYMT2_DIR_NAME = "hymt2"
 HYMT2_REPO_ID = "febilly/Hy-MT2-1.8B-StreamRevise-v4-GGUF"
 # 仓库里还有 .imatrix.gguf（量化用的校准数据），推理只需要这一个权重
 HYMT2_MODEL_FILE = "Hy-MT2-1.8B-StreamRevise-v4-Q4_K_M.gguf"
+HYMT2_REVISION = "e831109ad7153a2476d298f2cb14ab930b5e9b4f"
+HYMT2_SHA256 = "3bc3d83a15e9770338eee58183571f10b6af0adcef1bb65544feae4056266620"
 
 HF_ENDPOINT_OFFICIAL = "https://huggingface.co"
 # huggingface.co 不通时按顺序回退的镜像站（与官方站同构，resolve 路径一致）
 HF_ENDPOINT_MIRRORS = ("https://hf-mirror.com",)
+HF_PROBE_TIMEOUT_SECONDS = 5.0
+HF_ENDPOINT_CACHE_SECONDS = 300.0
+_hf_choice_lock = threading.Lock()
+_hf_endpoint_choice: list[str] | None = None
+_hf_endpoint_choice_at = 0.0
+_hf_endpoint_choice_proxy: tuple = ()
 
 
 def _qwen_vendor_files_complete(base_dir: Path) -> bool:
@@ -503,51 +520,106 @@ def _report(progress_callback, stage: str, done: int, total: int | None) -> None
         logger.debug("进度回调失败", exc_info=True)
 
 
-def _hf_endpoints() -> list[str]:
-    """HuggingFace 下载端点的尝试顺序：环境变量覆盖 > 官方站 > 镜像站。"""
+def _hf_override_endpoints() -> list[str]:
     endpoints: list[str] = []
-    for value in (
-        os.environ.get("YAKUTAN_HF_ENDPOINT"),
-        os.environ.get("HF_ENDPOINT"),
-        HF_ENDPOINT_OFFICIAL,
-        *HF_ENDPOINT_MIRRORS,
-    ):
+    for value in (os.environ.get("YAKUTAN_HF_ENDPOINT"), os.environ.get("HF_ENDPOINT")):
         endpoint = (value or "").strip().rstrip("/")
         if endpoint and endpoint not in endpoints:
             endpoints.append(endpoint)
     return endpoints
 
 
+def _hf_endpoints() -> list[str]:
+    return list(dict.fromkeys((*_hf_override_endpoints(), HF_ENDPOINT_OFFICIAL, *HF_ENDPOINT_MIRRORS)))
+
+
 def _hf_file_url(endpoint: str, repo_id: str, filename: str, revision: str = "main") -> str:
     return f"{endpoint}/{repo_id}/resolve/{revision}/{filename}"
 
 
-def _hf_endpoint_reachable(url: str, timeout: float = 8.0) -> bool:
-    """只取首字节探测端点：既验证站点本身，也验证它重定向到的 CDN（国内常见只有后者被墙）。"""
+class HFUnreachable(OSError):
+    """Neither the official source nor a mirror passed the download probe."""
+
+
+def _hf_endpoint_reachable(url: str, timeout: float = HF_PROBE_TIMEOUT_SECONDS) -> bool:
+    # Follow the file redirect and read data, so the probe covers the serving CDN.
+    started = time.monotonic()
     try:
         request = Request(url, headers={"User-Agent": "Yakutan", "Range": "bytes=0-0"})
         with urlopen(request, timeout=timeout) as response:
-            response.read(1)
+            if response.headers.get_content_type() == "text/html" or not response.read(1):
+                return False
+            final_host = urlparse(response.geturl()).netloc
+        logger.info("下载源探测 %s 可用（%.1fs，CDN %s）", urlparse(url).netloc,
+                    time.monotonic() - started, final_host)
         return True
     except Exception as exc:
-        logger.info("HuggingFace 端点探测失败 %s: %s", url, exc)
+        logger.info("下载源探测 %s 失败（%.1fs）：%s", urlparse(url).netloc,
+                    time.monotonic() - started, exc)
         return False
 
 
-def _ordered_hf_endpoints(repo_id: str, filename: str) -> list[str]:
-    """把首个探测可达的端点排到最前；探测失败的端点仍留在末尾兜底（探测本身也可能误判）。"""
-    endpoints = _hf_endpoints()
-    unreachable: list[str] = []
-    for index, endpoint in enumerate(endpoints):
-        remaining = endpoints[index + 1:]
-        if not remaining:
-            # 已经是最后一个候选，没必要再多花一次探测的超时
-            return [endpoint, *unreachable]
-        if _hf_endpoint_reachable(_hf_file_url(endpoint, repo_id, filename)):
-            return [endpoint, *remaining, *unreachable]
-        logger.warning("%s 不可达，改用后备端点", endpoint)
-        unreachable.append(endpoint)
-    return unreachable
+def _hf_proxy_key() -> tuple:
+    return tuple(os.environ.get(key) for key in (
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+        "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+    ))
+
+
+def _reset_hf_endpoint_choice() -> None:
+    global _hf_endpoint_choice
+    with _hf_choice_lock:
+        _hf_endpoint_choice = None
+
+
+def _remember_hf_endpoint(endpoint: str) -> None:
+    global _hf_endpoint_choice, _hf_endpoint_choice_at, _hf_endpoint_choice_proxy
+    defaults = [HF_ENDPOINT_OFFICIAL, *HF_ENDPOINT_MIRRORS]
+    if endpoint not in defaults:
+        return
+    with _hf_choice_lock:
+        _hf_endpoint_choice = [endpoint, *(item for item in defaults if item != endpoint)]
+        _hf_endpoint_choice_at = time.monotonic()
+        _hf_endpoint_choice_proxy = _hf_proxy_key()
+
+
+def _probe_hf_endpoints(repo_id: str, filename: str, revision: str) -> list[str] | None:
+    endpoints = [HF_ENDPOINT_OFFICIAL, *HF_ENDPOINT_MIRRORS]
+    pool = ThreadPoolExecutor(max_workers=len(endpoints), thread_name_prefix="hf-probe")
+    try:
+        probes = {
+            endpoint: pool.submit(_hf_endpoint_reachable,
+                                  _hf_file_url(endpoint, repo_id, filename, revision),
+                                  timeout=HF_PROBE_TIMEOUT_SECONDS)
+            for endpoint in endpoints
+        }
+        done, _ = wait(probes.values(), timeout=HF_PROBE_TIMEOUT_SECONDS)
+    finally:
+        pool.shutdown(wait=False)
+    available = [endpoint for endpoint, future in probes.items()
+                 if future in done and future.exception() is None and future.result()]
+    if not available:
+        return None
+    # Prefer the official source when both work; keep every source as a fallback.
+    first = available[0]
+    return [first, *(endpoint for endpoint in endpoints if endpoint != first)]
+
+
+def _ordered_hf_endpoints(repo_id: str, filename: str, progress_callback=None,
+                          *, revision: str = "main") -> list[str]:
+    global _hf_endpoint_choice, _hf_endpoint_choice_at, _hf_endpoint_choice_proxy
+    if _hf_override_endpoints():
+        return _hf_endpoints()
+    with _hf_choice_lock:
+        expired = time.monotonic() - _hf_endpoint_choice_at >= HF_ENDPOINT_CACHE_SECONDS
+        if _hf_endpoint_choice is None or expired or _hf_endpoint_choice_proxy != _hf_proxy_key():
+            _report(progress_callback, "source-probe", 0, None)
+            _hf_endpoint_choice = _probe_hf_endpoints(repo_id, filename, revision)
+            _hf_endpoint_choice_at = time.monotonic()
+            _hf_endpoint_choice_proxy = _hf_proxy_key()
+        if _hf_endpoint_choice is None:
+            raise HFUnreachable("无法连接模型下载源，请检查网络或代理后重试。")
+        return list(_hf_endpoint_choice)
 
 
 def _parse_content_range_total(headers) -> int | None:
@@ -657,24 +729,12 @@ def _download_sensevoice_onnx(dest: Path, progress_callback=None) -> None:
     """逐个文件下载 SenseVoice ONNX：和其他模型走同一套端点回退 / 续传 / 进度。"""
     dest.mkdir(parents=True, exist_ok=True)
     pending = [name for name in SENSEVOICE_ONNX_FILES if not (dest / name).is_file()]
-    endpoints = _ordered_hf_endpoints(SENSEVOICE_ONNX_REPO, SENSEVOICE_ENCODER_ONNX)
-
     for index, name in enumerate(pending, start=1):
         stage = f"SenseVoice {name}（{index}/{len(pending)}）"
-        failures: list[str] = []
-        for endpoint in endpoints:
-            host = urlparse(endpoint).netloc or endpoint
-            try:
-                _stream_download(
-                    _hf_file_url(endpoint, SENSEVOICE_ONNX_REPO, name),
-                    dest / name, stage, progress_callback,
-                )
-                break
-            except Exception as exc:
-                logger.warning("从 %s 下载 %s 失败: %s", host, name, exc)
-                failures.append(f"{host}: {exc}")
-        else:
-            raise RuntimeError(f"SenseVoice {name} 下载失败（" + "；".join(failures) + "）")
+        _download_hf_file(
+            SENSEVOICE_ONNX_REPO, name, dest / name, stage, progress_callback,
+            revision=SENSEVOICE_REVISION, sha256=SENSEVOICE_SHA256[name],
+        )
 
 
 def download_asr(engine: str, progress_callback=None) -> None:
@@ -734,21 +794,10 @@ def download_hymt2(progress_callback=None) -> None:
 
 
 def _download_hymt2_weights(dest: Path, progress_callback=None) -> None:
-    """按端点优先级依次尝试，全部失败才抛错（错误信息里带上每个端点的原因）。"""
-    failures: list[str] = []
-    for endpoint in _ordered_hf_endpoints(HYMT2_REPO_ID, HYMT2_MODEL_FILE):
-        host = urlparse(endpoint).netloc or endpoint
-        url = _hf_file_url(endpoint, HYMT2_REPO_ID, HYMT2_MODEL_FILE)
-        try:
-            logger.info("从 %s 下载 Hy-MT2 模型（%s）", host, HYMT2_MODEL_FILE)
-            _stream_download(url, dest, f"Hy-MT2 模型（{host}）", progress_callback)
-            logger.info("Hy-MT2 模型已下载到 %s", dest)
-            return
-        except Exception as exc:
-            logger.warning("从 %s 下载 Hy-MT2 模型失败: %s", host, exc)
-            failures.append(f"{host}: {exc}")
-
-    raise RuntimeError("Hy-MT2 模型下载失败（" + "；".join(failures) + "）")
+    _download_hf_file(
+        HYMT2_REPO_ID, HYMT2_MODEL_FILE, dest, "Hy-MT2 模型", progress_callback,
+        revision=HYMT2_REVISION, sha256=HYMT2_SHA256,
+    )
 
 
 def get_hymt2_status() -> dict:
@@ -848,7 +897,7 @@ def _sha256_file(path: Path) -> str:
 def _download_hf_file(repo_id: str, filename: str, dest: Path, stage: str, progress_callback=None,
                       *, revision: str = "main", sha256: str | None = None) -> None:
     failures: list[str] = []
-    for endpoint in _ordered_hf_endpoints(repo_id, filename):
+    for endpoint in _ordered_hf_endpoints(repo_id, filename, progress_callback, revision=revision):
         host = urlparse(endpoint).netloc or endpoint
         try:
             logger.info("Downloading %s from %s", filename, host)
@@ -856,10 +905,12 @@ def _download_hf_file(repo_id: str, filename: str, dest: Path, stage: str, progr
             if sha256 and _sha256_file(dest) != sha256:
                 dest.unlink(missing_ok=True)
                 raise OSError("sha256 mismatch")
+            _remember_hf_endpoint(endpoint)
             return
         except Exception as exc:
             logger.warning("%s download from %s failed: %s", filename, host, exc)
             failures.append(f"{host}: {exc}")
+    _reset_hf_endpoint_choice()
     raise RuntimeError(f"{filename} download failed (" + "; ".join(failures) + ")")
 
 
